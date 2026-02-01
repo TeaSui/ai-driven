@@ -1,0 +1,40 @@
+# Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# Java / Gradle
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+*.swo
+*~
+
+# Node.js
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# CDK
+cdk.out/
+
+# OS
+.DS_Store
+Thumbs.db

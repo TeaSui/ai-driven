@@ -1,0 +1,17 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // AWS SDK v2
+    api platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
+    api 'software.amazon.awssdk:dynamodb'
+    api 'software.amazon.awssdk:dynamodb-enhanced'
+    api 'software.amazon.awssdk:secretsmanager'
+    api 'software.amazon.awssdk:sqs'
+    api 'software.amazon.awssdk:s3'
+
+    // Jackson for JSON
+    api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+    api "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${project.property('jacksonVersion')}"
+}

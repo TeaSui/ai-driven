@@ -1,0 +1,162 @@
+name: Workflow Automation Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./tests
+        run: npm ci
+
+      - name: Run smoke tests
+        working-directory: ./tests
+        run: npm test -- --testPathPattern=smoke --no-coverage
+        env:
+          TEST_JIRA_URL: ${{ secrets.TEST_JIRA_URL }}
+          TEST_JIRA_EMAIL: ${{ secrets.TEST_JIRA_EMAIL }}
+          TEST_JIRA_TOKEN: ${{ secrets.TEST_JIRA_TOKEN }}
+          TEST_BB_WORKSPACE: ${{ secrets.TEST_BB_WORKSPACE }}
+          TEST_BB_REPO: ${{ secrets.TEST_BB_REPO }}
+          TEST_BB_USERNAME: ${{ secrets.TEST_BB_USERNAME }}
+          TEST_BB_PASSWORD: ${{ secrets.TEST_BB_PASSWORD }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          TEST_STATE_MACHINE_ARN: ${{ secrets.TEST_STATE_MACHINE_ARN }}
+          TEST_DYNAMODB_TABLE: ${{ secrets.TEST_DYNAMODB_TABLE }}
+          TEST_CLEANUP: false # Don't cleanup in CI
+
+      - name: Run integration tests
+        working-directory: ./tests
+        run: npm run test:integration
+        env:
+          TEST_JIRA_URL: ${{ secrets.TEST_JIRA_URL }}
+          TEST_JIRA_EMAIL: ${{ secrets.TEST_JIRA_EMAIL }}
+          TEST_JIRA_TOKEN: ${{ secrets.TEST_JIRA_TOKEN }}
+          TEST_BB_WORKSPACE: ${{ secrets.TEST_BB_WORKSPACE }}
+          TEST_BB_REPO: ${{ secrets.TEST_BB_REPO }}
+          TEST_BB_USERNAME: ${{ secrets.TEST_BB_USERNAME }}
+          TEST_BB_PASSWORD: ${{ secrets.TEST_BB_PASSWORD }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TEST_BEDROCK_MODEL: ${{ secrets.TEST_BEDROCK_MODEL }}
+          TEST_CLEANUP: false
+
+      - name: Run workflow integration tests
+        working-directory: ./tests
+        run: npm run test:workflow
+        env:
+          TEST_JIRA_URL: ${{ secrets.TEST_JIRA_URL }}
+          TEST_JIRA_EMAIL: ${{ secrets.TEST_JIRA_EMAIL }}
+          TEST_JIRA_TOKEN: ${{ secrets.TEST_JIRA_TOKEN }}
+          TEST_BB_WORKSPACE: ${{ secrets.TEST_BB_WORKSPACE }}
+          TEST_BB_REPO: ${{ secrets.TEST_BB_REPO }}
+          TEST_BB_USERNAME: ${{ secrets.TEST_BB_USERNAME }}
+          TEST_BB_PASSWORD: ${{ secrets.TEST_BB_PASSWORD }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TEST_STATE_MACHINE_ARN: ${{ secrets.TEST_STATE_MACHINE_ARN }}
+          TEST_DYNAMODB_TABLE: ${{ secrets.TEST_DYNAMODB_TABLE }}
+          TEST_CLEANUP: false
+
+      - name: Run E2E tests (main branch only)
+        if: github.ref == 'refs/heads/main'
+        working-directory: ./tests
+        run: npm run test:e2e
+        timeout-minutes: 15
+        env:
+          TEST_JIRA_URL: ${{ secrets.TEST_JIRA_URL }}
+          TEST_JIRA_EMAIL: ${{ secrets.TEST_JIRA_EMAIL }}
+          TEST_JIRA_TOKEN: ${{ secrets.TEST_JIRA_TOKEN }}
+          TEST_BB_WORKSPACE: ${{ secrets.TEST_BB_WORKSPACE }}
+          TEST_BB_REPO: ${{ secrets.TEST_BB_REPO }}
+          TEST_BB_USERNAME: ${{ secrets.TEST_BB_USERNAME }}
+          TEST_BB_PASSWORD: ${{ secrets.TEST_BB_PASSWORD }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TEST_STATE_MACHINE_ARN: ${{ secrets.TEST_STATE_MACHINE_ARN }}
+          TEST_DYNAMODB_TABLE: ${{ secrets.TEST_DYNAMODB_TABLE }}
+          TEST_BEDROCK_MODEL: ${{ secrets.TEST_BEDROCK_MODEL }}
+          TEST_CLEANUP: true # Cleanup after E2E tests
+
+      - name: Generate coverage report
+        working-directory: ./tests
+        run: npm run test:coverage
+        env:
+          TEST_JIRA_URL: ${{ secrets.TEST_JIRA_URL }}
+          TEST_JIRA_EMAIL: ${{ secrets.TEST_JIRA_EMAIL }}
+          TEST_JIRA_TOKEN: ${{ secrets.TEST_JIRA_TOKEN }}
+          TEST_BB_WORKSPACE: ${{ secrets.TEST_BB_WORKSPACE }}
+          TEST_BB_REPO: ${{ secrets.TEST_BB_REPO }}
+          TEST_BB_USERNAME: ${{ secrets.TEST_BB_USERNAME }}
+          TEST_BB_PASSWORD: ${{ secrets.TEST_BB_PASSWORD }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          TEST_CLEANUP: false
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./tests/coverage
+          flags: workflow-tests
+          name: workflow-automation-tests
+
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results-${{ matrix.node-version }}
+          path: |
+            tests/coverage/
+            tests/*.log
+
+      - name: Comment PR with test results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const coverage = JSON.parse(fs.readFileSync('./tests/coverage/coverage-summary.json', 'utf8'));
+            const total = coverage.total;
+            
+            const comment = `## 🧪 Test Results
+            
+            | Metric | Coverage |
+            |--------|----------|
+            | Statements | ${total.statements.pct}% |
+            | Branches | ${total.branches.pct}% |
+            | Functions | ${total.functions.pct}% |
+            | Lines | ${total.lines.pct}% |
+            
+            ${total.statements.pct >= 80 ? '✅' : '❌'} Coverage threshold: 80%
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

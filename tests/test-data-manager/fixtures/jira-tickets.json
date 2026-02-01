@@ -1,0 +1,42 @@
+{
+    "basic-ticket": {
+        "ticketKey": "TEST-001",
+        "summary": "Add new REST endpoint",
+        "description": "Create GET /api/users endpoint that returns a list of users",
+        "status": "To Do",
+        "labels": [],
+        "repoUrl": "https://bitbucket.org/test-workspace/test-repo.git",
+        "baseBranch": "main"
+    },
+    "with-repo-field": {
+        "ticketKey": "TEST-002",
+        "summary": "Update user service",
+        "description": "Add email validation to UserService",
+        "status": "To Do",
+        "labels": [
+            "ai-generate"
+        ],
+        "customfield_10100": "https://bitbucket.org/test-workspace/test-repo.git",
+        "baseBranch": "develop"
+    },
+    "complex-ticket": {
+        "ticketKey": "TEST-003",
+        "summary": "Implement JWT authentication",
+        "description": "Add JWT-based authentication to the API. Files to modify: AuthController.java, AuthService.java, SecurityConfig.java",
+        "status": "In Progress",
+        "labels": [
+            "ai-generate",
+            "security"
+        ],
+        "repoUrl": "https://bitbucket.org/test-workspace/test-repo.git",
+        "baseBranch": "main",
+        "assignee": "test-user"
+    },
+    "minimal-ticket": {
+        "ticketKey": "TEST-004",
+        "summary": "Fix bug",
+        "description": "",
+        "status": "To Do",
+        "labels": []
+    }
+}

@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'idea'
+}
+
+allprojects {
+    group = project.property('group')
+    version = project.property('version')
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'idea'
+
+    java {
+        sourceCompatibility = JavaVersion.toVersion(project.property('javaVersion'))
+        targetCompatibility = JavaVersion.toVersion(project.property('javaVersion'))
+    }
+
+    dependencies {
+        // Lombok
+        compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
+        annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
+
+        // Logging
+        implementation "org.slf4j:slf4j-api:${project.property('slf4jVersion')}"
+        runtimeOnly "org.slf4j:slf4j-simple:${project.property('slf4jVersion')}"
+
+        // Testing
+        testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"
+        testImplementation "org.mockito:mockito-core:${project.property('mockitoVersion')}"
+        testImplementation "org.mockito:mockito-junit-jupiter:${project.property('mockitoVersion')}"
+        testCompileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
+        testAnnotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.compilerArgs += ['-parameters']
+    }
+}
+
+// Convenience task to build everything
+task buildAll {
+    dependsOn subprojects.collect { it.tasks.build }
+}

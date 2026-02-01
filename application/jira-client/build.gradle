@@ -1,0 +1,8 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    implementation project(':core')
+    // java.net.http.HttpClient is built into Java 11+, no external dependency needed
+}

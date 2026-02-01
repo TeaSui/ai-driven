@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':core')
+    implementation project(':jira-client')
+    implementation project(':bitbucket-client')
+    implementation project(':claude-client')
+
+    // AWS Lambda
+    implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
+    implementation 'com.amazonaws:aws-lambda-java-events:3.11.4'
+
+    // AWS Step Functions SDK
+    implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
+    implementation 'software.amazon.awssdk:sfn'
+}
+
+// Create a fat JAR for Lambda deployment
+tasks.register('fatJar', Jar) {
+    archiveClassifier.set('all')
+    archiveFileName.set('lambda-handlers-all.jar')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    
+    // Explicit dependencies on subproject jars
+    dependsOn(':core:jar', ':jira-client:jar', ':bitbucket-client:jar', ':claude-client:jar')
+
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    with jar
+}
+
+tasks.named('build') {
+    dependsOn 'fatJar'
+}
