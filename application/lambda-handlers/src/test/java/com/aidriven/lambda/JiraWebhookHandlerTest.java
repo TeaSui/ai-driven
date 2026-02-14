@@ -2,7 +2,7 @@ package com.aidriven.lambda;
 
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.IdempotencyService;
-import com.aidriven.core.service.SecretsService;
+import com.aidriven.jira.JiraClient;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -34,7 +34,7 @@ class JiraWebhookHandlerTest {
     private IdempotencyService idempotencyService;
 
     @Mock
-    private SecretsService secretsService;
+    private JiraClient jiraClient;
 
     @Mock
     private SfnClient sfnClient;
@@ -48,12 +48,10 @@ class JiraWebhookHandlerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        String stateMachineArn = "arn:aws:states:us-east-1:123456789:stateMachine:test";
         handler = new JiraWebhookHandler(
                 objectMapper, ticketStateRepository, idempotencyService,
-                secretsService, sfnClient,
-                "arn:aws:states:us-east-1:123456789:stateMachine:test",
-                "arn:aws:secretsmanager:us-east-1:123456789:secret:jira"
-        );
+                jiraClient, sfnClient, stateMachineArn);
     }
 
     @Test
@@ -334,8 +332,7 @@ class JiraWebhookHandlerTest {
         input.put("issue", Map.of(
                 "key", "PROJ-300",
                 "id", "44444",
-                "fields", Map.of("labels", java.util.List.of("ai-generate"))
-        ));
+                "fields", Map.of("labels", java.util.List.of("ai-generate"))));
 
         when(idempotencyService.checkAndRecord("44444", "44444")).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))

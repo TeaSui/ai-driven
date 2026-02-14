@@ -2,16 +2,22 @@ package com.aidriven.bitbucket;
 
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.service.SecretsService;
+import com.aidriven.core.source.SourceControlClient;
+
 import com.aidriven.core.util.HttpResponseHandler;
 import com.aidriven.core.util.JsonPathExtractor;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AccessLevel;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
+
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -33,50 +39,63 @@ import java.util.zip.ZipInputStream;
  * Client for interacting with Bitbucket Cloud REST API.
  */
 @Slf4j
-public class BitbucketClient {
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
+public class BitbucketClient implements SourceControlClient {
 
     private static final String API_BASE = "https://api.bitbucket.org/2.0";
 
-    private final HttpClient httpClient;
-    private final ObjectMapper objectMapper;
-    private final String workspace;
-    private final String repoSlug;
-    private final String authHeader;
+    private final @NonNull String authHeader;
+    private final @NonNull HttpClient httpClient;
+    private final @NonNull ObjectMapper objectMapper;
+    private final @NonNull String workspace;
+    private final @NonNull String repoSlug;
 
-    public BitbucketClient(String workspace, String repoSlug, String username, String appPassword) {
-        this.workspace = Objects.requireNonNull(workspace, "workspace must not be null");
-        this.repoSlug = Objects.requireNonNull(repoSlug, "repoSlug must not be null");
-        Objects.requireNonNull(username, "username must not be null");
-        Objects.requireNonNull(appPassword, "appPassword must not be null");
-
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
-        this.objectMapper = new ObjectMapper();
-        this.authHeader = "Basic " + Base64.getEncoder()
-                .encodeToString((username + ":" + appPassword).getBytes(StandardCharsets.UTF_8));
-    }
-
-    /**
-     * Creates a BitbucketClient from secrets.
-     */
-    public static BitbucketClient fromSecrets(SecretsService secretsService, String secretArn) {
+    public static BitbucketClient fromSecrets(SecretsService secretsManager, String secretArn) {
         try {
-            JsonNode secrets = secretsService.getSecretJson(secretArn);
-            String workspace = secrets.get("workspace").asText();
-            String repoSlug = secrets.get("repoSlug").asText();
-            String username = secrets.get("username").asText();
-            String appPassword = secrets.get("appPassword").asText();
-            return new BitbucketClient(workspace, repoSlug, username, appPassword);
+            Map<String, Object> secrets = secretsManager.getSecretJson(secretArn);
+
+            String workspace = getRequiredSecret(secrets, "workspace");
+            String repoSlug = getRequiredSecret(secrets, "repoSlug");
+            String username = getRequiredSecret(secrets, "username");
+            String appPassword = getRequiredSecret(secrets, "appPassword");
+
+            String auth = username + ":" + appPassword;
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+            String authHeader = "Basic " + encodedAuth;
+
+            HttpClient httpClient = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(30))
+                    .followRedirects(HttpClient.Redirect.NORMAL)
+                    .build();
+            ObjectMapper objectMapper = new ObjectMapper();
+
+            return new BitbucketClient(authHeader, httpClient, objectMapper, workspace,
+                    repoSlug);
         } catch (Exception e) {
             throw new RuntimeException("Failed to create BitbucketClient from secrets", e);
         }
     }
 
     /**
+     * Returns a new BitbucketClient instance for a different repository using the
+     * same credentials.
+     */
+    public BitbucketClient withRepository(@NonNull String workspace, @NonNull String repoSlug) {
+        return new BitbucketClient(authHeader, httpClient, objectMapper, workspace, repoSlug);
+    }
+
+    private static String getRequiredSecret(Map<String, Object> secrets, String key) {
+        Object val = secrets.get(key);
+        if (val == null) {
+            throw new IllegalArgumentException("Missing required key '" + key + "' in Bitbucket secret");
+        }
+        return val.toString();
+    }
+
+    /**
      * Creates a new branch from the default branch.
      */
+    @Override
     public void createBranch(String branchName, String fromBranch) throws Exception {
         validateBranchName(branchName);
         validateBranchName(fromBranch);
@@ -132,9 +151,10 @@ public class BitbucketClient {
     /**
      * Commits files to a branch.
      */
+    @Override
     public String commitFiles(String branchName, List<AgentResult.GeneratedFile> files, String commitMessage)
             throws Exception {
-        String url = String.format("%s/repositories/%s/%s/src", API_BASE, workspace, repoSlug);
+        String url = String.format("%s/repositories/%s/%s/src", API_BASE, encode(workspace), encode(repoSlug));
 
         // Use UUID-based boundary to avoid collision with file content
         String boundary = "----FormBoundary" + java.util.UUID.randomUUID().toString().replace("-", "");
@@ -186,9 +206,10 @@ public class BitbucketClient {
     /**
      * Creates a pull request.
      */
-    public PullRequestResult createPullRequest(String title, String description, String sourceBranch,
-            String destinationBranch) throws Exception {
-        String url = String.format("%s/repositories/%s/%s/pullrequests", API_BASE, workspace, repoSlug);
+    @Override
+    public SourceControlClient.PullRequestResult createPullRequest(String title, String description,
+            String sourceBranch, String destinationBranch) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/pullrequests", API_BASE, encode(workspace), encode(repoSlug));
 
         var prMap = new java.util.HashMap<String, Object>();
         prMap.put("title", title);
@@ -220,12 +241,13 @@ public class BitbucketClient {
 
         log.info("Created pull request: {} -> {}", prUrl, prId);
 
-        return new PullRequestResult(prId, prUrl, sourceBranch);
+        return new SourceControlClient.PullRequestResult(prId, prUrl, sourceBranch);
     }
 
     /**
      * Gets the default branch of the repository.
      */
+    @Override
     public String getDefaultBranch() throws Exception {
         String url = String.format("%s/repositories/%s/%s", API_BASE, workspace, repoSlug);
 
@@ -262,6 +284,7 @@ public class BitbucketClient {
      * @param path   Optional path prefix to filter (e.g., "src/main/java")
      * @return List of file paths
      */
+    @Override
     public List<String> getFileTree(String branch, String path) throws Exception {
         List<String> allFiles = new ArrayList<>();
         java.util.Queue<String> directories = new java.util.LinkedList<>();
@@ -294,8 +317,13 @@ public class BitbucketClient {
 
                 if (values != null && values.isArray()) {
                     for (JsonNode node : values) {
-                        String type = node.get("type").asText();
-                        String nodePath = node.get("path").asText();
+                        JsonNode typeNode = node.get("type");
+                        JsonNode pathNode = node.get("path");
+                        if (typeNode == null || pathNode == null) {
+                            continue;
+                        }
+                        String type = typeNode.asText();
+                        String nodePath = pathNode.asText();
                         if ("commit_file".equals(type)) {
                             allFiles.add(nodePath);
                         } else if ("commit_directory".equals(type)) {
@@ -318,6 +346,7 @@ public class BitbucketClient {
      * @param filePath The path to the file
      * @return The file content as a string
      */
+    @Override
     public String getFileContent(String branch, String filePath) throws Exception {
         String url = String.format("%s/repositories/%s/%s/src/%s/%s",
                 API_BASE, encode(workspace), encode(repoSlug), encode(branch), encode(filePath));
@@ -346,6 +375,7 @@ public class BitbucketClient {
      * @param query The search query (e.g., "class UserService")
      * @return List of matching file paths
      */
+    @Override
     public List<String> searchFiles(String query) throws Exception {
         String url = String.format("%s/workspaces/%s/search/code?search_query=repo:%s+%s",
                 API_BASE, encode(workspace), encode(repoSlug), encode(query));
@@ -408,7 +438,10 @@ public class BitbucketClient {
     public record RepoFile(String path, String content) {
     }
 
-    public record PullRequestResult(String id, String url, String branchName) {
+    /** @deprecated Use {@link SourceControlClient.PullRequestResult} instead. */
+    @Deprecated
+    public static SourceControlClient.PullRequestResult pullRequestResult(String id, String url, String branchName) {
+        return new SourceControlClient.PullRequestResult(id, url, branchName);
     }
 
     /**
@@ -503,7 +536,19 @@ public class BitbucketClient {
      */
     public static BitbucketClient fromRepoUrl(String repoUrl, String username, String appPassword) {
         ParsedRepoUrl parsed = parseRepoUrl(repoUrl);
-        return new BitbucketClient(parsed.workspace(), parsed.repoSlug(), username, appPassword);
+        String auth = username + ":" + appPassword;
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+        String authHeader = "Basic " + encodedAuth;
+
+        String workspace = parsed.workspace();
+        String repoSlug = parsed.repoSlug();
+
+        return new BitbucketClient(
+                authHeader,
+                HttpClient.newHttpClient(),
+                new ObjectMapper(),
+                workspace,
+                repoSlug);
     }
 
     // ==================== FULL REPO DOWNLOAD ====================
@@ -516,6 +561,7 @@ public class BitbucketClient {
      * @param outputDir The parent directory for extraction (e.g., /tmp)
      * @return Path to the extracted repository root directory
      */
+    @Override
     public Path downloadArchive(String branch, Path outputDir) throws Exception {
         // Bitbucket archive download URL
         String url = String.format("https://bitbucket.org/%s/%s/get/%s.zip",
@@ -585,7 +631,8 @@ public class BitbucketClient {
      * Used for cleaning up extracted archives from /tmp.
      */
     public static void deleteDirectory(Path dir) {
-        if (dir == null || !Files.exists(dir)) return;
+        if (dir == null || !Files.exists(dir))
+            return;
 
         try {
             Files.walkFileTree(dir, new SimpleFileVisitor<>() {

@@ -1,5 +1,7 @@
 package com.aidriven.jira;
 
+import com.aidriven.core.service.SecretsService;
+import com.aidriven.core.tracker.IssueTrackerClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -7,8 +9,10 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class JiraClientTest {
 
@@ -89,11 +93,12 @@ class JiraClientTest {
 
     @ParameterizedTest
     @CsvSource({
-        "2026-01-15T10:30:00.000+0000, 2026, 1, 15, 10, 30",
-        "2026-12-31T23:59:59.999+0000, 2026, 12, 31, 23, 59",
-        "2026-06-15T00:00:00.000+0000, 2026, 6, 15, 0, 0"
+            "2026-01-15T10:30:00.000+0000, 2026, 1, 15, 10, 30",
+            "2026-12-31T23:59:59.999+0000, 2026, 12, 31, 23, 59",
+            "2026-06-15T00:00:00.000+0000, 2026, 6, 15, 0, 0"
     })
-    void should_parse_various_jira_dates(String dateStr, int year, int month, int day, int hour, int minute) throws Exception {
+    void should_parse_various_jira_dates(String dateStr, int year, int month, int day, int hour, int minute)
+            throws Exception {
         Instant result = invokeParseJiraDate(dateStr);
 
         var zdt = result.atZone(java.time.ZoneOffset.UTC);
@@ -104,6 +109,99 @@ class JiraClientTest {
         assertEquals(minute, zdt.getMinute());
     }
 
+    @Test
+    void should_initialize_from_secrets() {
+        SecretsService secretsService = mock(SecretsService.class);
+        String secretArn = "test-arn";
+        Map<String, Object> secretJson = Map.of(
+                "baseUrl", "https://test.atlassian.net",
+                "apiToken", "test-token",
+                "email", "test@email.com");
+
+        when(secretsService.getSecretJson(secretArn)).thenReturn(secretJson);
+
+        JiraClient client = JiraClient.fromSecrets(secretsService, secretArn);
+
+        assertNotNull(client);
+        // Verify internal state via reflection if needed, but the successful return is
+        // enough for initialization test
+    }
+
+    @Test
+    void should_throw_when_secrets_missing_required_key() {
+        SecretsService secretsService = mock(SecretsService.class);
+        String secretArn = "test-arn";
+        Map<String, Object> incompleteJson = Map.of(
+                "baseUrl", "https://test.atlassian.net",
+                "apiToken", "test-token"
+        // email missing
+        );
+
+        when(secretsService.getSecretJson(secretArn)).thenReturn(incompleteJson);
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> JiraClient.fromSecrets(secretsService, secretArn));
+
+        assertTrue(ex.getCause().getMessage().contains("Missing required key 'email'"));
+    }
+
+    @Test
+    void should_extract_project_key_from_valid_ticket_key() throws Exception {
+        // Given: A standard ticket key like "PROJ-123"
+        String ticketKey = "PROJ-123";
+
+        // When: extractProjectKey is invoked
+        String result = invokeExtractProjectKey(ticketKey);
+
+        // Then: Returns "PROJ"
+        assertEquals("PROJ", result);
+    }
+
+    @Test
+    void should_return_key_as_is_when_no_hyphen_present() throws Exception {
+        // Given: A malformed key without a hyphen
+        String ticketKey = "NOHYPHEN";
+
+        // When: extractProjectKey is invoked
+        String result = invokeExtractProjectKey(ticketKey);
+
+        // Then: Returns the key itself
+        assertEquals("NOHYPHEN", result);
+    }
+
+    @Test
+    void should_return_empty_string_when_ticket_key_is_null() throws Exception {
+        // When: extractProjectKey is invoked with null
+        String result = invokeExtractProjectKey(null);
+
+        // Then: Returns empty string
+        assertEquals("", result);
+    }
+
+    @Test
+    void should_handle_ticket_key_with_multiple_hyphens() throws Exception {
+        // Given: A key with multiple hyphens like "MY-PROJ-123"
+        String ticketKey = "MY-PROJ-123";
+
+        // When: extractProjectKey is invoked
+        String result = invokeExtractProjectKey(ticketKey);
+
+        // Then: Returns everything before the first hyphen
+        assertEquals("MY", result);
+    }
+
+    @Test
+    void should_handle_empty_ticket_key() throws Exception {
+        // Given: An empty string
+        String ticketKey = "";
+
+        // When: extractProjectKey is invoked
+        String result = invokeExtractProjectKey(ticketKey);
+
+        // Then: Returns empty string since no hyphen
+        assertEquals("", result);
+    }
+
     /**
      * Helper method to invoke the private parseJiraDate method via reflection.
      */
@@ -111,5 +209,20 @@ class JiraClientTest {
         Method method = JiraClient.class.getDeclaredMethod("parseJiraDate", String.class);
         method.setAccessible(true);
         return (Instant) method.invoke(client, dateStr);
+    }
+
+    /**
+     * Helper method to invoke the private extractProjectKey method via reflection.
+     */
+    private String invokeExtractProjectKey(String ticketKey) throws Exception {
+        Method method = JiraClient.class.getDeclaredMethod("extractProjectKey", String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(client, ticketKey);
+    }
+
+    @Test
+    void should_implement_issueTrackerClient() {
+        assertTrue(client instanceof IssueTrackerClient,
+                "JiraClient should implement IssueTrackerClient");
     }
 }

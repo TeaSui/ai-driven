@@ -1,7 +1,12 @@
 package com.aidriven.core.util;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * Shared utility for filtering source files from repository archives.
@@ -32,6 +37,12 @@ public final class SourceFileFilter {
             "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock",
             "Gemfile.lock", "Cargo.lock", "go.sum", "poetry.lock",
             "gradlew", "gradlew.bat", "mvnw", "mvnw.cmd");
+
+    /** Fraction of non-printable characters that marks content as binary. */
+    private static final double BINARY_CONTENT_THRESHOLD = 0.05;
+
+    /** Number of leading characters to inspect for binary detection. */
+    private static final int BINARY_CHECK_LENGTH = 1000;
 
     /** Common config files that start with '.' but should be included. */
     private static final Set<String> COMMON_CONFIG_FILES = Set.of(
@@ -84,7 +95,7 @@ public final class SourceFileFilter {
         if (content == null || content.isEmpty()) {
             return false;
         }
-        int checkLength = Math.min(content.length(), 1000);
+        int checkLength = Math.min(content.length(), BINARY_CHECK_LENGTH);
         int nonPrintable = 0;
         for (int i = 0; i < checkLength; i++) {
             char c = content.charAt(i);
@@ -92,7 +103,29 @@ public final class SourceFileFilter {
                 nonPrintable++;
             }
         }
-        return (double) nonPrintable / checkLength > 0.05;
+        return (double) nonPrintable / checkLength > BINARY_CONTENT_THRESHOLD;
+    }
+
+    /**
+     * Recursively deletes a directory and all its contents.
+     * Silently ignores null or non-existent paths.
+     */
+    public static void deleteDirectory(Path dir) {
+        if (dir == null || !Files.exists(dir)) {
+            return;
+        }
+        try (Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException e) {
+                            // Best-effort cleanup
+                        }
+                    });
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to delete directory: " + dir, e);
+        }
     }
 
     /**

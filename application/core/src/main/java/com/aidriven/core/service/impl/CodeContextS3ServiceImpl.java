@@ -1,5 +1,7 @@
-package com.aidriven.core.service;
+package com.aidriven.core.service.impl;
 
+import com.aidriven.core.service.ContextStorageService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -7,7 +9,6 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Objects;
 
 /**
  * Service for storing and retrieving code context from S3.
@@ -15,19 +16,11 @@ import java.util.Objects;
  * large code context to S3 and passing only the S3 key through the workflow.
  */
 @Slf4j
-public class CodeContextS3Service {
+@RequiredArgsConstructor
+public class CodeContextS3ServiceImpl implements ContextStorageService {
 
     private final S3Client s3Client;
     private final String bucketName;
-
-    public CodeContextS3Service(S3Client s3Client, String bucketName) {
-        this.s3Client = Objects.requireNonNull(s3Client, "s3Client must not be null");
-        this.bucketName = Objects.requireNonNull(bucketName, "bucketName must not be null");
-    }
-
-    public CodeContextS3Service(String bucketName) {
-        this(S3Client.create(), bucketName);
-    }
 
     /**
      * Stores code context in S3 and returns the S3 key.
@@ -36,7 +29,9 @@ public class CodeContextS3Service {
      * @param content   The full code context text
      * @return The S3 key where the context is stored
      */
+    @Override
     public String storeContext(String ticketKey, String content) {
+
         String key = String.format("context/%s/%d.txt", ticketKey, System.currentTimeMillis());
 
         s3Client.putObject(
@@ -57,7 +52,8 @@ public class CodeContextS3Service {
      * @param key The S3 key
      * @return The code context text
      */
-    public String retrieveContext(String key) {
+    @Override
+    public String getContext(String key) {
         var response = s3Client.getObjectAsBytes(
                 GetObjectRequest.builder()
                         .bucket(bucketName)
@@ -68,4 +64,5 @@ public class CodeContextS3Service {
         log.info("Retrieved code context from s3://{}/{} ({} chars)", bucketName, key, content.length());
         return content;
     }
+
 }

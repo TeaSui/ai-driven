@@ -6,7 +6,8 @@ import java.net.http.HttpResponse;
 import java.util.Objects;
 
 /**
- * Utility class for handling HTTP responses and converting error codes to appropriate exceptions.
+ * Utility class for handling HTTP responses and converting error codes to
+ * appropriate exceptions.
  */
 public final class HttpResponseHandler {
 
@@ -15,17 +16,18 @@ public final class HttpResponseHandler {
     }
 
     /**
-     * Checks HTTP response status and throws appropriate exception for error status codes.
+     * Checks HTTP response status and throws appropriate exception for error status
+     * codes.
      *
-     * @param response The HTTP response to check
+     * @param response    The HTTP response to check
      * @param serviceName The name of the service (for error messages)
-     * @param operation The operation being performed (for error messages)
-     * @throws UnauthorizedException if status is 401
-     * @throws ForbiddenException if status is 403
-     * @throws NotFoundException if status is 404
-     * @throws RateLimitException if status is 429
+     * @param operation   The operation being performed (for error messages)
+     * @throws UnauthorizedException       if status is 401
+     * @throws ForbiddenException          if status is 403
+     * @throws NotFoundException           if status is 404
+     * @throws RateLimitException          if status is 429
      * @throws ServiceUnavailableException if status is 503
-     * @throws HttpClientException for other 4xx/5xx errors
+     * @throws HttpClientException         for other 4xx/5xx errors
      */
     public static void checkResponse(HttpResponse<String> response, String serviceName, String operation) {
         Objects.requireNonNull(response, "response must not be null");
@@ -43,9 +45,9 @@ public final class HttpResponseHandler {
                 : serviceName;
 
         switch (statusCode) {
-            case 401 -> throw new UnauthorizedException(
+            case 401 -> throw new HttpClientException(statusCode,
                     String.format("Authentication failed for %s", context), body);
-            case 403 -> throw new ForbiddenException(
+            case 403 -> throw new HttpClientException(statusCode,
                     String.format("Access denied for %s", context), body);
             case 404 -> throw new NotFoundException(
                     String.format("Resource not found for %s", context), body);
@@ -56,7 +58,7 @@ public final class HttpResponseHandler {
                 throw new RateLimitException(
                         String.format("Rate limit exceeded for %s", context), body, retryAfter);
             }
-            case 503 -> throw new ServiceUnavailableException(
+            case 503 -> throw new HttpClientException(statusCode,
                     String.format("%s is temporarily unavailable", serviceName), body);
             default -> {
                 if (statusCode >= 400 && statusCode < 500) {
@@ -94,7 +96,8 @@ public final class HttpResponseHandler {
     /**
      * Attempts to parse the Retry-After header from the response.
      *
-     * @return The retry-after value in seconds, or null if not present or unparseable
+     * @return The retry-after value in seconds, or null if not present or
+     *         unparseable
      */
     private static Long parseRetryAfter(HttpResponse<String> response) {
         return response.headers()

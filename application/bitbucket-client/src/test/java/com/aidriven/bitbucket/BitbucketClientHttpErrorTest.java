@@ -17,7 +17,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Tests for BitbucketClient HTTP error code handling.
- * Validates that appropriate exceptions are thrown for different HTTP error responses.
+ * Validates that appropriate exceptions are thrown for different HTTP error
+ * responses.
  */
 class BitbucketClientHttpErrorTest {
 
@@ -32,14 +33,12 @@ class BitbucketClientHttpErrorTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        bitbucketClient = new BitbucketClient("workspace", "repo", "user", "pass");
-        try {
-            var field = BitbucketClient.class.getDeclaredField("httpClient");
-            field.setAccessible(true);
-            field.set(bitbucketClient, mockHttpClient);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to inject mock HttpClient", e);
-        }
+        bitbucketClient = new BitbucketClient(
+                "Basic auth",
+                mockHttpClient,
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                "workspace",
+                "repo");
     }
 
     @Test
@@ -50,8 +49,8 @@ class BitbucketClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify UnauthorizedException is thrown
-        UnauthorizedException exception = assertThrows(UnauthorizedException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             // This will call getBranchCommitHash internally which will fail
             bitbucketClient.createBranch("feature", "main");
         });
@@ -67,8 +66,8 @@ class BitbucketClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify ForbiddenException is thrown
-        ForbiddenException exception = assertThrows(ForbiddenException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             bitbucketClient.getDefaultBranch();
         });
 
@@ -94,14 +93,16 @@ class BitbucketClientHttpErrorTest {
     @Test
     void should_throw_conflict_exception_on_409() throws Exception {
         // Given: Mock responses for getBranchCommitHash (200) then createBranch (409)
-        // Note: checkResponse reads body() even for success path, plus the caller reads it too
-        // So getBranchCommitHash consumes 2 body() calls, then createBranch consumes 2 more
+        // Note: checkResponse reads body() even for success path, plus the caller reads
+        // it too
+        // So getBranchCommitHash consumes 2 body() calls, then createBranch consumes 2
+        // more
         when(mockResponse.statusCode()).thenReturn(200, 200, 409, 409);
         when(mockResponse.body()).thenReturn(
-                "{\"target\":{\"hash\":\"abc123\"}}",  // checkResponse in getBranchCommitHash (success, ignored)
-                "{\"target\":{\"hash\":\"abc123\"}}",  // objectMapper.readTree in getBranchCommitHash
-                "{\"error\":{\"message\":\"Branch already exists\"}}",  // statusCode check in createBranch
-                "{\"error\":{\"message\":\"Branch already exists\"}}"   // checkResponse body read
+                "{\"target\":{\"hash\":\"abc123\"}}", // checkResponse in getBranchCommitHash (success, ignored)
+                "{\"target\":{\"hash\":\"abc123\"}}", // objectMapper.readTree in getBranchCommitHash
+                "{\"error\":{\"message\":\"Branch already exists\"}}", // statusCode check in createBranch
+                "{\"error\":{\"message\":\"Branch already exists\"}}" // checkResponse body read
         );
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
@@ -122,8 +123,7 @@ class BitbucketClientHttpErrorTest {
         when(mockResponse.body()).thenReturn("{\"error\":{\"message\":\"Rate limit exceeded\"}}");
         when(mockResponse.headers()).thenReturn(java.net.http.HttpHeaders.of(
                 java.util.Map.of("Retry-After", java.util.List.of("120")),
-                (name, value) -> true
-        ));
+                (name, value) -> true));
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
@@ -144,8 +144,8 @@ class BitbucketClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify ServiceUnavailableException is thrown
-        ServiceUnavailableException exception = assertThrows(ServiceUnavailableException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             bitbucketClient.getDefaultBranch();
         });
 

@@ -13,11 +13,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.Map;
+import com.aidriven.core.service.SecretsService;
+import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * Tests for BitbucketClient input validation.
@@ -36,21 +39,19 @@ class BitbucketClientValidationTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        bitbucketClient = new BitbucketClient("workspace", "repo", "user", "pass");
-        try {
-            var field = BitbucketClient.class.getDeclaredField("httpClient");
-            field.setAccessible(true);
-            field.set(bitbucketClient, mockHttpClient);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to inject mock HttpClient", e);
-        }
+        bitbucketClient = new BitbucketClient(
+                "Basic auth",
+                mockHttpClient,
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                "workspace",
+                "repo");
     }
 
     @Test
     void should_throw_null_pointer_exception_for_null_workspace() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient(null, "repo", "user", "pass");
+            new BitbucketClient("auth", mockHttpClient, null, null, "repo");
         });
     }
 
@@ -58,7 +59,7 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_repo_slug() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("workspace", null, "user", "pass");
+            new BitbucketClient("auth", mockHttpClient, null, "workspace", null);
         });
     }
 
@@ -66,7 +67,7 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_username() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("workspace", "repo", null, "pass");
+            new BitbucketClient(null, mockHttpClient, null, "workspace", "repo");
         });
     }
 
@@ -74,13 +75,14 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_password() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("workspace", "repo", "user", null);
+            new BitbucketClient("Basic auth", mockHttpClient, null, "workspace",
+                    "repo");
         });
     }
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {" ", "  ", "\t", "\n"})
+    @ValueSource(strings = { " ", "  ", "\t", "\n" })
     void should_throw_exception_for_invalid_branch_name_in_create_branch(String invalidBranch) {
         // When/Then: Verify IllegalArgumentException is thrown
         assertThrows(IllegalArgumentException.class, () -> {
@@ -90,7 +92,7 @@ class BitbucketClientValidationTest {
 
     @ParameterizedTest
     @NullAndEmptySource
-    @ValueSource(strings = {" ", "  "})
+    @ValueSource(strings = { " ", "  " })
     void should_throw_exception_for_invalid_from_branch_in_create_branch(String invalidBranch) {
         // When/Then: Verify IllegalArgumentException is thrown
         assertThrows(IllegalArgumentException.class, () -> {
@@ -102,7 +104,8 @@ class BitbucketClientValidationTest {
     void should_accept_valid_branch_names() throws Exception {
         // Given: Mock successful responses
         // createBranch calls getBranchCommitHash first, then POST to create branch
-        // getBranchCommitHash: checkResponse reads statusCode()+body(), then readTree reads body() again
+        // getBranchCommitHash: checkResponse reads statusCode()+body(), then readTree
+        // reads body() again
         // createBranch POST: reads statusCode() twice (line 104), no body() if 201
         String branchResponse = """
                 {
@@ -114,13 +117,14 @@ class BitbucketClientValidationTest {
         // First createBranch: getBranchCommitHash(200) + createBranch POST(201)
         // Second createBranch: getBranchCommitHash(200) + createBranch POST(201)
         when(mockResponse.statusCode()).thenReturn(
-                200, 201, 201,   // getBranchCommitHash check + createBranch two checks (1st call)
-                200, 201, 201    // getBranchCommitHash check + createBranch two checks (2nd call)
+                200, 201, 201, // getBranchCommitHash check + createBranch two checks (1st call)
+                200, 201, 201 // getBranchCommitHash check + createBranch two checks (2nd call)
         );
-        // body() calls: checkResponse in getBranchCommitHash + readTree in getBranchCommitHash (per call)
+        // body() calls: checkResponse in getBranchCommitHash + readTree in
+        // getBranchCommitHash (per call)
         when(mockResponse.body()).thenReturn(
-                branchResponse, branchResponse,  // 1st createBranch
-                branchResponse, branchResponse   // 2nd createBranch
+                branchResponse, branchResponse, // 1st createBranch
+                branchResponse, branchResponse // 2nd createBranch
         );
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
@@ -186,7 +190,8 @@ class BitbucketClientValidationTest {
     @Test
     void should_allow_null_description_in_create_pull_request() throws Exception {
         // Given: Mock successful response
-        // createPullRequest: reads statusCode() twice (line 205 if-check), then readTree reads body()
+        // createPullRequest: reads statusCode() twice (line 205 if-check), then
+        // readTree reads body()
         String prResponse = """
                 {
                     "id": "1",
@@ -203,11 +208,157 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: Create PR with null description
-        BitbucketClient.PullRequestResult result = bitbucketClient.createPullRequest(
+        com.aidriven.core.source.SourceControlClient.PullRequestResult result = bitbucketClient.createPullRequest(
                 "title", null, "source", "dest");
 
         // Then: Should succeed
         assertNotNull(result);
         assertEquals("1", result.id());
+    }
+
+    @Test
+    void should_initialize_from_secrets() {
+        SecretsService secretsService = mock(SecretsService.class);
+        String secretArn = "test-arn";
+        Map<String, Object> secretJson = Map.of(
+                "workspace", "test-ws",
+                "repoSlug", "test-repo",
+                "username", "test-user",
+                "appPassword", "test-pass");
+
+        when(secretsService.getSecretJson(secretArn)).thenReturn(secretJson);
+
+        BitbucketClient client = BitbucketClient.fromSecrets(secretsService, secretArn);
+
+        assertNotNull(client);
+    }
+
+    @Test
+    void should_throw_when_secrets_missing_required_key() {
+        SecretsService secretsService = mock(SecretsService.class);
+        String secretArn = "test-arn";
+        Map<String, Object> incompleteJson = Map.of(
+                "workspace", "test-ws",
+                "repoSlug", "test-repo"
+        // username missing
+        );
+
+        when(secretsService.getSecretJson(secretArn)).thenReturn(incompleteJson);
+
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> BitbucketClient.fromSecrets(secretsService, secretArn));
+
+        assertTrue(ex.getCause().getMessage().contains("Missing required key 'username'"));
+    }
+
+    @Test
+    void should_url_encode_workspace_and_repo_in_commit_files() throws Exception {
+        // Given: A client with workspace/repo that contain special characters
+        BitbucketClient specialClient = new BitbucketClient(
+                "Basic auth",
+                mockHttpClient,
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                "my workspace",
+                "my repo");
+
+        List<AgentResult.GeneratedFile> files = List.of();
+        when(mockResponse.statusCode()).thenReturn(201);
+        when(mockResponse.body()).thenReturn("{}");
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        // When: commitFiles is called
+        specialClient.commitFiles("branch", files, "test commit");
+
+        // Then: The URL should contain encoded workspace and repo
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(mockHttpClient).send(captor.capture(), eq(HttpResponse.BodyHandlers.ofString()));
+        String uri = captor.getValue().uri().toString();
+        assertTrue(uri.contains("my+workspace"), "workspace should be URL-encoded, got: " + uri);
+        assertTrue(uri.contains("my+repo"), "repoSlug should be URL-encoded, got: " + uri);
+    }
+
+    @Test
+    void should_url_encode_workspace_and_repo_in_create_pull_request() throws Exception {
+        // Given: A client with workspace/repo that contain special characters
+        BitbucketClient specialClient = new BitbucketClient(
+                "Basic auth",
+                mockHttpClient,
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                "my workspace",
+                "my repo");
+
+        String prResponse = """
+                {
+                    "id": "1",
+                    "links": {
+                        "html": {
+                            "href": "https://bitbucket.org/ws/repo/pull-requests/1"
+                        }
+                    }
+                }
+                """;
+        when(mockResponse.statusCode()).thenReturn(201, 201);
+        when(mockResponse.body()).thenReturn(prResponse);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        // When: createPullRequest is called
+        specialClient.createPullRequest("title", "desc", "source", "dest");
+
+        // Then: The URL should contain encoded workspace and repo
+        ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
+        verify(mockHttpClient).send(captor.capture(), eq(HttpResponse.BodyHandlers.ofString()));
+        String uri = captor.getValue().uri().toString();
+        assertTrue(uri.contains("my+workspace"), "workspace should be URL-encoded, got: " + uri);
+        assertTrue(uri.contains("my+repo"), "repoSlug should be URL-encoded, got: " + uri);
+    }
+
+    @Test
+    void should_skip_nodes_with_missing_type_in_get_file_tree() throws Exception {
+        // Given: Response with a node missing the "type" field (no directories to avoid recursion)
+        String responseJson = """
+                {
+                    "values": [
+                        {"path": "src/Main.java"},
+                        {"type": "commit_file", "path": "src/App.java"}
+                    ]
+                }
+                """;
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(responseJson);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        // When: getFileTree is called
+        List<String> files = bitbucketClient.getFileTree("main", null);
+
+        // Then: Only the valid commit_file node should be included; the node without type is skipped
+        assertEquals(1, files.size());
+        assertEquals("src/App.java", files.get(0));
+    }
+
+    @Test
+    void should_skip_nodes_with_missing_path_in_get_file_tree() throws Exception {
+        // Given: Response with a node missing the "path" field
+        String responseJson = """
+                {
+                    "values": [
+                        {"type": "commit_file"},
+                        {"type": "commit_file", "path": "src/Valid.java"}
+                    ]
+                }
+                """;
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(responseJson);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        // When: getFileTree is called
+        List<String> files = bitbucketClient.getFileTree("main", null);
+
+        // Then: Only the valid node should be included
+        assertEquals(1, files.size());
+        assertEquals("src/Valid.java", files.get(0));
     }
 }

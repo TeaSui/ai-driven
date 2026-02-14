@@ -17,7 +17,7 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TicketInfo {
-    
+
     private String ticketId;
     private String ticketKey;
     private String projectKey;
@@ -31,8 +31,10 @@ public class TicketInfo {
     private Instant createdAt;
     private Instant updatedAt;
     private Map<String, Object> customFields;
-    
+
     private static final List<String> DRY_RUN_LABELS = List.of("ai-test", "dry-run", "test-mode");
+    private static final List<String> FULL_REPO_LABELS = List.of("full-repo", "full-context", "whole-repo");
+    private static final List<String> SMART_CONTEXT_LABELS = List.of("smart-context", "incremental", "ai-smart");
 
     /**
      * Checks if this ticket should be processed in dry-run mode.
@@ -48,6 +50,30 @@ public class TicketInfo {
     }
 
     /**
+     * Checks if the user explicitly requested a full repository context.
+     */
+    public boolean isFullRepo() {
+        if (labels == null || labels.isEmpty()) {
+            return false;
+        }
+        return labels.stream()
+                .map(String::toLowerCase)
+                .anyMatch(label -> FULL_REPO_LABELS.stream().anyMatch(label::contains));
+    }
+
+    /**
+     * Checks if the user explicitly requested a smart/incremental context.
+     */
+    public boolean isSmartContext() {
+        if (labels == null || labels.isEmpty()) {
+            return false;
+        }
+        return labels.stream()
+                .map(String::toLowerCase)
+                .anyMatch(label -> SMART_CONTEXT_LABELS.stream().anyMatch(label::contains));
+    }
+
+    /**
      * Determines the agent type based on ticket labels and description.
      */
     public AgentType determineAgentType() {
@@ -55,12 +81,15 @@ public class TicketInfo {
         if (labels != null && !labels.isEmpty()) {
             for (String label : labels) {
                 String lowerLabel = label.toLowerCase();
-                if (lowerLabel.contains("frontend")) return AgentType.FRONTEND;
-                if (lowerLabel.contains("security")) return AgentType.SECURITY;
-                if (lowerLabel.contains("backend")) return AgentType.BACKEND;
+                if (lowerLabel.contains("frontend"))
+                    return AgentType.FRONTEND;
+                if (lowerLabel.contains("security"))
+                    return AgentType.SECURITY;
+                if (lowerLabel.contains("backend"))
+                    return AgentType.BACKEND;
             }
         }
-        
+
         // 2. Check description/summary as fallback
         String content = (summary + " " + description).toLowerCase();
         if (content.contains("frontend") || content.contains("react") || content.contains("css")) {
@@ -69,7 +98,7 @@ public class TicketInfo {
         if (content.contains("security") || content.contains("vulnerability") || content.contains("cve")) {
             return AgentType.SECURITY;
         }
-        
+
         return AgentType.BACKEND; // Default
     }
 }

@@ -3,387 +3,243 @@ package com.aidriven.lambda;
 import com.aidriven.claude.ClaudeClient;
 import com.aidriven.claude.PromptBuilder;
 import com.aidriven.core.model.AgentResult;
+import com.aidriven.core.model.GenerationMetrics;
 import com.aidriven.core.model.ProcessingStatus;
 import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.model.TicketState;
+import com.aidriven.core.repository.GenerationMetricsRepository;
 import com.aidriven.core.repository.TicketStateRepository;
-import com.aidriven.core.service.CodeContextS3Service;
-import com.aidriven.core.service.SecretsService;
+import com.aidriven.core.service.ContextStorageService;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
-import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import software.amazon.lambda.powertools.logging.Logging;
+import software.amazon.lambda.powertools.logging.LoggingUtils;
+import software.amazon.lambda.powertools.tracing.Tracing;
+import com.aidriven.core.util.JsonRepairService;
+import com.aidriven.lambda.factory.ServiceFactory;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 
-import com.aidriven.core.util.LambdaInputValidator;
-
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.Objects;
+import java.util.Base64;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Lambda handler for direct Claude API invocation in the linear workflow.
- * Reads code context from S3 (written by BitbucketFetchHandler) and builds
- * a comprehensive prompt for Claude.
  */
 @Slf4j
+@RequiredArgsConstructor
 public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, Map<String, Object>> {
-
-    /**
-     * Max chars of code context to send to Claude.
-     * Claude Opus 4.6 has ~200K token context window. At ~4 chars/token,
-     * 700K chars ≈ 175K tokens, leaving room for system prompt + response.
-     * The full repo is always stored in S3; this only limits what gets sent to Claude.
-     */
-    private static final int MAX_CONTEXT_FOR_CLAUDE = 700_000;
 
     private final ObjectMapper objectMapper;
     private final TicketStateRepository ticketStateRepository;
-    private final SecretsService secretsService;
-    private final String claudeSecretArn;
-    private final CodeContextS3Service codeContextS3Service;
+    private final GenerationMetricsRepository metricsRepository;
+    private final ContextStorageService contextStorageService;
+    private final ClaudeClient claudeClient;
+    private final JsonRepairService jsonRepairService;
+    private final int maxContext;
+    private final String promptVersion;
 
+    /** No-arg constructor required by AWS Lambda runtime. */
     public ClaudeInvokeHandler() {
-        this.objectMapper = new ObjectMapper();
-        this.ticketStateRepository = new TicketStateRepository(
-                DynamoDbClient.create(),
-                System.getenv("DYNAMODB_TABLE_NAME"));
-
-        this.secretsService = new SecretsService(SecretsManagerClient.create());
-        this.claudeSecretArn = System.getenv("CLAUDE_SECRET_ARN");
-
-        String bucketName = System.getenv("CODE_CONTEXT_BUCKET");
-        this.codeContextS3Service = new CodeContextS3Service(bucketName);
-    }
-
-    // Constructor for testing
-    ClaudeInvokeHandler(ObjectMapper objectMapper, TicketStateRepository ticketStateRepository,
-            SecretsService secretsService, String claudeSecretArn,
-            CodeContextS3Service codeContextS3Service) {
-        this.objectMapper = objectMapper;
-        this.ticketStateRepository = ticketStateRepository;
-        this.secretsService = secretsService;
-        this.claudeSecretArn = claudeSecretArn;
-        this.codeContextS3Service = codeContextS3Service;
+        ServiceFactory factory = ServiceFactory.getInstance();
+        this.objectMapper = factory.getObjectMapper();
+        this.ticketStateRepository = factory.getTicketStateRepository();
+        this.metricsRepository = factory.getGenerationMetricsRepository();
+        this.contextStorageService = factory.getContextStorageService();
+        this.claudeClient = factory.getClaudeClient();
+        this.jsonRepairService = new JsonRepairService(factory.getObjectMapper());
+        this.maxContext = factory.getAppConfig().getMaxContextForClaude();
+        this.promptVersion = factory.getAppConfig().getPromptVersion();
     }
 
     @Override
     @SuppressWarnings("unchecked")
+    @Logging(logEvent = true)
+    @Tracing
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
-        LambdaInputValidator.requireNonEmptyInput(input, "ClaudeInvokeHandler");
 
-        String ticketId = LambdaInputValidator.requireString(input, "ticketId");
-        String ticketKey = LambdaInputValidator.requireString(input, "ticketKey");
+        String ticketId = (String) input.get("ticketId");
+        String ticketKey = (String) input.get("ticketKey");
         boolean dryRun = Boolean.TRUE.equals(input.get("dryRun"));
+
+        LoggingUtils.appendKey("ticketKey", ticketKey);
+        LoggingUtils.appendKey("correlationId", context.getAwsRequestId());
 
         log.info("ClaudeInvokeHandler processing ticket: {} (dryRun={})", ticketKey, dryRun);
 
         try {
-            TicketInfo ticket = TicketInfo.builder()
-                    .ticketId(ticketId)
-                    .ticketKey(ticketKey)
-                    .summary((String) input.get("summary"))
-                    .description((String) input.get("description"))
-                    .labels((List<String>) input.get("labels"))
-                    .priority((String) input.get("priority"))
-                    .build();
+            TicketInfo ticket = parseTicketInfo(ticketId, ticketKey, input);
+            updateStatus(ticketId, ticketKey, ProcessingStatus.GENERATING);
 
-            updateState(ticketId, ticketKey, ProcessingStatus.GENERATING);
-
-            // Read code context from S3 (stored by BitbucketFetchHandler)
-            String codeContext = "";
-            String s3Key = (String) input.get("codeContextS3Key");
-            if (s3Key != null && !s3Key.isEmpty()) {
-                try {
-                    codeContext = codeContextS3Service.retrieveContext(s3Key);
-                    log.info("Loaded code context from S3: {} ({} chars)", s3Key, codeContext.length());
-
-                    // Truncate if context exceeds Claude's effective window
-                    if (codeContext.length() > MAX_CONTEXT_FOR_CLAUDE) {
-                        log.warn("Code context ({} chars) exceeds Claude limit ({} chars), truncating",
-                                codeContext.length(), MAX_CONTEXT_FOR_CLAUDE);
-                        codeContext = codeContext.substring(0, MAX_CONTEXT_FOR_CLAUDE)
-                                + "\n\n... [context truncated - full repo available in S3]";
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to read code context from S3 key {}: {}", s3Key, e.getMessage());
-                }
-            } else {
-                log.warn("No codeContextS3Key in input, proceeding without code context");
-            }
-
-            // Build prompts
+            String codeContext = loadContextFromS3((String) input.get("codeContextS3Key"));
             String systemPrompt = PromptBuilder.backendAgentSystemPrompt();
             String userMessage = buildUserMessage(ticket, codeContext);
 
-            log.info("Invoking Claude with prompt length: {} chars", userMessage.length());
+            ClaudeClient activeClient = resolveActiveClient((String) input.get("resolvedModel"));
+            log.info("Invoking Claude ({}) with prompt length: {} chars", activeClient.getModel(),
+                    userMessage.length());
 
-            // Call Claude API
-            String claudeApiKey = secretsService.getSecretString(claudeSecretArn);
-            if (claudeApiKey == null || claudeApiKey.isBlank() || !claudeApiKey.startsWith("sk-")) {
-                throw new RuntimeException("Invalid Claude API key - check secret: " + claudeSecretArn);
-            }
-
-            ClaudeClient claudeClient = new ClaudeClient(claudeApiKey, "claude-opus-4-6");
-            String response = claudeClient.chat(systemPrompt, userMessage);
-
+            String response = activeClient.chat(systemPrompt, userMessage);
             AgentResult result = parseClaudeResponse(response, ticketId);
 
-            log.info("Claude generated {} files for ticket: {}",
-                    result.getGeneratedFiles() != null ? result.getGeneratedFiles().size() : 0, ticketKey);
+            recordMetrics(ticketKey, activeClient.getModel(), userMessage.length(), response.length(), result,
+                    (List<String>) input.get("labels"));
 
-            return Map.of(
-                    "ticketId", ticketId,
-                    "ticketKey", ticketKey,
-                    "success", result.isSuccess(),
-                    "dryRun", dryRun,
-                    "files",
-                    result.getGeneratedFiles() != null ? objectMapper.writeValueAsString(result.getGeneratedFiles())
-                            : "[]",
-                    "commitMessage", Objects.toString(result.getCommitMessage(), "feat: auto-generated changes"),
-                    "prTitle", Objects.toString(result.getPrTitle(), "Auto-generated PR"),
-                    "prDescription", Objects.toString(result.getPrDescription(), "Auto-generated by AI-Driven system"),
-                    "agentType", "claude-opus");
+            return buildOutput(ticketId, ticketKey, dryRun, activeClient.getModel(), result, input);
 
         } catch (Exception e) {
             log.error("ClaudeInvokeHandler failed for ticket: {}", ticketKey, e);
-            updateState(ticketId, ticketKey, ProcessingStatus.FAILED);
+            updateStatus(ticketId, ticketKey, ProcessingStatus.FAILED);
             throw new RuntimeException("Claude invocation failed", e);
+        } finally {
+            // Context cleared by Powertools
         }
     }
 
-    /**
-     * Builds the user message with code context from S3 prepended.
-     */
+    @SuppressWarnings("unchecked")
+    private TicketInfo parseTicketInfo(String id, String key, Map<String, Object> input) {
+        return TicketInfo.builder()
+                .ticketId(id)
+                .ticketKey(key)
+                .summary((String) input.get("summary"))
+                .description((String) input.get("description"))
+                .labels((List<String>) input.get("labels"))
+                .priority((String) input.get("priority"))
+                .build();
+    }
+
+    private String loadContextFromS3(String s3Key) {
+        if (s3Key == null || s3Key.isEmpty()) {
+            log.warn("No codeContextS3Key provided, proceeding without code context");
+            return "";
+        }
+        try {
+            String context = contextStorageService.getContext(s3Key);
+            log.info("Loaded context from S3: {} ({} chars)", s3Key, context.length());
+            if (context.length() > maxContext) {
+                log.warn("Truncating context ({} chars) to limit ({} chars)", context.length(), maxContext);
+                return context.substring(0, maxContext) + "\n\n... [context truncated]";
+            }
+            return context;
+        } catch (Exception e) {
+            log.warn("Failed to load context from S3 key {}: {}", s3Key, e.getMessage());
+            return "";
+        }
+    }
+
     private String buildUserMessage(TicketInfo ticket, String codeContext) {
         StringBuilder msg = new StringBuilder();
-
         if (!codeContext.isEmpty()) {
-            msg.append(codeContext);
-            msg.append("\n\n---\n\n");
+            msg.append(codeContext).append("\n\n---\n\n");
         }
-
         msg.append(PromptBuilder.buildUserMessage(ticket));
         return msg.toString();
     }
 
+    private ClaudeClient resolveActiveClient(String resolvedModel) {
+        return resolvedModel != null ? claudeClient.withModel(resolvedModel) : claudeClient;
+    }
+
+    private void recordMetrics(String ticketKey, String model, int inputLen, int outputLen, AgentResult result,
+            List<String> labels) {
+        if (metricsRepository == null)
+            return;
+        try {
+            int fileCount = result.getGeneratedFiles() != null ? result.getGeneratedFiles().size() : 0;
+            GenerationMetrics metrics = GenerationMetrics.forGeneration(ticketKey, model, promptVersion, inputLen,
+                    outputLen, fileCount, labels);
+            metricsRepository.save(metrics);
+        } catch (Exception me) {
+            log.warn("Failed to save generation metrics for ticket {}: {}", ticketKey, me.getMessage());
+        }
+    }
+
+    private Map<String, Object> buildOutput(String id, String key, boolean dryRun, String model, AgentResult result,
+            Map<String, Object> input) throws Exception {
+        Map<String, Object> out = new HashMap<>();
+        out.put("ticketId", id);
+        out.put("ticketKey", key);
+        out.put("success", result.isSuccess());
+        out.put("dryRun", dryRun);
+        out.put("platform", input.getOrDefault("platform", "BITBUCKET"));
+        out.put("repoOwner", input.getOrDefault("repoOwner", ""));
+        out.put("repoSlug", input.getOrDefault("repoSlug", ""));
+        out.put("files",
+                result.getGeneratedFiles() != null ? objectMapper.writeValueAsString(result.getGeneratedFiles())
+                        : "[]");
+        out.put("commitMessage", Objects.toString(result.getCommitMessage(), "feat: auto-generated changes"));
+        out.put("prTitle", Objects.toString(result.getPrTitle(), "Auto-generated PR"));
+        out.put("prDescription", Objects.toString(result.getPrDescription(), "Auto-generated by AI-Driven system"));
+        out.put("agentType", model);
+        return out;
+    }
+
     private AgentResult parseClaudeResponse(String response, String ticketId) {
         try {
-            int jsonStart = response.indexOf("{");
-            if (jsonStart < 0) {
-                log.error("No JSON found in Claude response (length={})", response.length());
+            int start = response.indexOf("{");
+            int end = response.lastIndexOf("}");
+            if (start < 0)
                 return AgentResult.builder().success(false).errorMessage("No JSON in response").build();
+
+            String jsonStr = (end > start) ? response.substring(start, end + 1) : response.substring(start);
+            JsonNode json = jsonRepairService.parseJsonWithRepair(jsonStr);
+
+            if (json == null)
+                return AgentResult.builder().success(false).errorMessage("Failed to parse JSON").build();
+
+            List<AgentResult.GeneratedFile> files = new ArrayList<>();
+            if (json.has("files")) {
+                for (JsonNode f : json.get("files")) {
+                    AgentResult.GeneratedFile gf = parseFileNode(f);
+                    if (gf != null)
+                        files.add(gf);
+                }
             }
 
-            int jsonEnd = response.lastIndexOf("}");
-            String jsonStr = (jsonEnd > jsonStart)
-                    ? response.substring(jsonStart, jsonEnd + 1)
-                    : response.substring(jsonStart); // truncated, no closing brace
-            JsonNode json = parseJsonWithRepair(jsonStr);
-
-            if (json == null) {
-                log.error("All JSON repair strategies failed for response (length={})", response.length());
-                return AgentResult.builder().success(false)
-                        .errorMessage("Failed to parse JSON from Claude response").build();
-            }
-
-            return buildResultFromJson(json, ticketId);
-
+            return AgentResult.builder()
+                    .ticketId(ticketId)
+                    .success(!files.isEmpty() || json.has("commitMessage"))
+                    .generatedFiles(files)
+                    .commitMessage(json.path("commitMessage").asText(null))
+                    .prTitle(json.path("prTitle").asText(null))
+                    .prDescription(json.path("prDescription").asText(null))
+                    .build();
         } catch (Exception e) {
-            log.error("Failed to parse Claude response", e);
-            return AgentResult.builder().success(false)
-                    .errorMessage("Parse error: " + e.getMessage()).build();
+            return AgentResult.builder().success(false).errorMessage("Parse error: " + e.getMessage()).build();
         }
     }
 
-    /**
-     * Attempts to parse JSON with multiple repair strategies for handling
-     * malformed JSON from auto-continuation stitching.
-     */
-    JsonNode parseJsonWithRepair(String jsonStr) {
-        // Strategy 1: Direct parse
-        try {
-            return objectMapper.readTree(jsonStr);
-        } catch (Exception e) {
-            log.warn("Direct JSON parse failed: {}", e.getMessage());
+    private AgentResult.GeneratedFile parseFileNode(JsonNode node) {
+        String path = node.path("path").asText(null);
+        if (path == null)
+            return null;
+
+        String content;
+        if (node.has("contentBase64")) {
+            content = new String(Base64.getDecoder().decode(node.get("contentBase64").asText()),
+                    StandardCharsets.UTF_8);
+        } else {
+            content = node.path("content").asText(null);
         }
+        if (content == null)
+            return null;
 
-        // Strategy 2: Close any open JSON constructs (handles truncation)
-        try {
-            String closed = closeJsonString(jsonStr);
-            JsonNode node = objectMapper.readTree(closed);
-            if (node.has("files")) {
-                log.info("JSON repair succeeded: closure strategy");
-                return node;
-            }
-        } catch (Exception e) {
-            log.warn("Closure repair failed: {}", e.getMessage());
-        }
-
-        // Strategy 3: Find error position, truncate before it, close
-        int errorPos = findJsonErrorPosition(jsonStr);
-        if (errorPos > 100) {
-            log.info("JSON error at char offset {}, attempting truncation repair", errorPos);
-            for (int i = errorPos - 1; i > Math.max(50, errorPos - 2000); i--) {
-                char c = jsonStr.charAt(i);
-                if (c == '}' || c == ']' || c == '"' || c == ',') {
-                    String prefix = jsonStr.substring(0, i + 1);
-                    String closed = closeJsonString(prefix);
-                    try {
-                        JsonNode node = objectMapper.readTree(closed);
-                        if (node.has("files")) {
-                            log.info("JSON repair succeeded: truncation at {} (error at {}), preserved {}/{} chars",
-                                    i, errorPos, i, jsonStr.length());
-                            return node;
-                        }
-                    } catch (Exception ignored) {
-                        // Try next position
-                    }
-                }
-            }
-        }
-
-        log.error("All JSON repair strategies exhausted");
-        return null;
-    }
-
-    private AgentResult buildResultFromJson(JsonNode json, String ticketId) {
-        List<AgentResult.GeneratedFile> files = new ArrayList<>();
-        if (json.has("files")) {
-            for (JsonNode fileNode : json.get("files")) {
-                try {
-                    String path = fileNode.has("path") ? fileNode.get("path").asText() : null;
-                    if (path == null) continue;
-
-                    String content;
-                    if (fileNode.has("contentBase64")) {
-                        String base64Content = fileNode.get("contentBase64").asText();
-                        content = new String(java.util.Base64.getDecoder().decode(base64Content),
-                                java.nio.charset.StandardCharsets.UTF_8);
-                    } else if (fileNode.has("content")) {
-                        content = fileNode.get("content").asText();
-                    } else {
-                        log.warn("No content for file: {}", path);
-                        continue;
-                    }
-
-                    String operation = fileNode.has("operation")
-                            ? fileNode.get("operation").asText().toUpperCase()
-                            : "CREATE";
-
-                    files.add(AgentResult.GeneratedFile.builder()
-                            .path(path)
-                            .content(content)
-                            .operation(AgentResult.FileOperation.valueOf(operation))
-                            .build());
-                } catch (Exception fileEx) {
-                    log.warn("Failed to parse file node: {}", fileEx.getMessage());
-                }
-            }
-        }
-
-        return AgentResult.builder()
-                .ticketId(ticketId)
-                .success(!files.isEmpty() || json.has("commitMessage"))
-                .generatedFiles(files)
-                .commitMessage(json.has("commitMessage") ? json.get("commitMessage").asText() : null)
-                .prTitle(json.has("prTitle") ? json.get("prTitle").asText() : null)
-                .prDescription(json.has("prDescription") ? json.get("prDescription").asText() : null)
+        String op = node.path("operation").asText("CREATE").toUpperCase();
+        return AgentResult.GeneratedFile.builder()
+                .path(path)
+                .content(content)
+                .operation(AgentResult.FileOperation.valueOf(op))
                 .build();
     }
 
-    /**
-     * Finds the character offset where JSON parsing fails.
-     * Returns -1 if no error is found.
-     */
-    private int findJsonErrorPosition(String jsonStr) {
-        try (com.fasterxml.jackson.core.JsonParser parser =
-                     objectMapper.getFactory().createParser(jsonStr)) {
-            while (parser.nextToken() != null) {
-                // consume all tokens
-            }
-        } catch (JsonParseException e) {
-            return (int) e.getLocation().getCharOffset();
-        } catch (Exception e) {
-            // other error
-        }
-        return -1;
-    }
-
-    /**
-     * Closes any open JSON constructs (strings, arrays, objects) to make
-     * truncated JSON parseable. Uses a stack-based approach to track nesting.
-     */
-    String closeJsonString(String partial) {
-        Deque<Character> stack = new ArrayDeque<>();
-        boolean inString = false;
-        boolean escaped = false;
-
-        for (int i = 0; i < partial.length(); i++) {
-            char c = partial.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (inString) {
-                if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    inString = false;
-                    stack.pop();
-                }
-                continue;
-            }
-            switch (c) {
-                case '"': inString = true; stack.push('"'); break;
-                case '{': stack.push('{'); break;
-                case '[': stack.push('['); break;
-                case '}':
-                    if (!stack.isEmpty() && stack.peek() == '{') stack.pop();
-                    break;
-                case ']':
-                    if (!stack.isEmpty() && stack.peek() == '[') stack.pop();
-                    break;
-                default: break;
-            }
-        }
-
-        // Trim trailing commas/whitespace if not inside a string
-        String base = partial;
-        if (!inString) {
-            int end = base.length() - 1;
-            while (end >= 0) {
-                char c = base.charAt(end);
-                if (c == ',' || c == ' ' || c == '\n' || c == '\r' || c == '\t') {
-                    end--;
-                } else {
-                    break;
-                }
-            }
-            base = base.substring(0, end + 1);
-        }
-
-        StringBuilder sb = new StringBuilder(base);
-        while (!stack.isEmpty()) {
-            char open = stack.pop();
-            switch (open) {
-                case '"': sb.append('"'); break;
-                case '{': sb.append('}'); break;
-                case '[': sb.append(']'); break;
-                default: break;
-            }
-        }
-        return sb.toString();
-    }
-
-    private void updateState(String ticketId, String ticketKey, ProcessingStatus status) {
-        ticketStateRepository.save(TicketState.forTicket(ticketId, ticketKey, status)
-                .withAgentType("claude-opus"));
+    private void updateStatus(String id, String key, ProcessingStatus status) {
+        ticketStateRepository.save(TicketState.forTicket(id, key, status).withAgentType("claude-opus"));
     }
 }

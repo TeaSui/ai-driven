@@ -16,7 +16,8 @@ import java.util.Map;
 
 /**
  * Client for interacting with Claude API.
- * Supports auto-continuation: if Claude's response is truncated (stop_reason=max_tokens),
+ * Supports auto-continuation: if Claude's response is truncated
+ * (stop_reason=max_tokens),
  * it automatically sends follow-up requests to get the complete response.
  */
 @Slf4j
@@ -27,23 +28,48 @@ public class ClaudeClient {
     private static final String API_VERSION = "2023-06-01";
     private static final int DEFAULT_MAX_TOKENS = 32768;
     private static final int MAX_CONTINUATIONS = 5;
+    private static final double DEFAULT_TEMPERATURE = 0.2;
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String apiKey;
     private final String model;
+    private final int maxTokens;
+    private final double temperature;
 
     public ClaudeClient(String apiKey) {
         this(apiKey, DEFAULT_MODEL);
     }
 
     public ClaudeClient(String apiKey, String model) {
+        this(apiKey, model, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE);
+    }
+
+    public ClaudeClient(String apiKey, String model, int maxTokens, double temperature) {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(60))
                 .build();
         this.objectMapper = new ObjectMapper();
         this.apiKey = apiKey;
         this.model = model;
+        this.maxTokens = maxTokens;
+        this.temperature = temperature;
+    }
+
+    public String getModel() {
+        return model;
+    }
+
+    public ClaudeClient withModel(String model) {
+        return new ClaudeClient(this.apiKey, model, this.maxTokens, this.temperature);
+    }
+
+    public ClaudeClient withMaxTokens(int maxTokens) {
+        return new ClaudeClient(this.apiKey, this.model, maxTokens, this.temperature);
+    }
+
+    public ClaudeClient withTemperature(double temperature) {
+        return new ClaudeClient(this.apiKey, this.model, this.maxTokens, temperature);
     }
 
     /**
@@ -51,7 +77,10 @@ public class ClaudeClient {
      */
     public static ClaudeClient fromSecrets(SecretsService secretsService, String secretArn) {
         try {
-            String apiKey = secretsService.getSecretString(secretArn);
+            String apiKey = secretsService.getSecret(secretArn);
+            if (apiKey == null || apiKey.trim().isEmpty()) {
+                throw new IllegalArgumentException("Claude API key secret is empty or missing");
+            }
             return new ClaudeClient(apiKey);
         } catch (Exception e) {
             throw new RuntimeException("Failed to create ClaudeClient from secrets", e);
@@ -63,7 +92,7 @@ public class ClaudeClient {
      * Automatically continues if the response is truncated.
      */
     public String chat(String systemPrompt, String userMessage) throws Exception {
-        return chat(systemPrompt, userMessage, DEFAULT_MAX_TOKENS);
+        return chat(systemPrompt, userMessage, this.maxTokens);
     }
 
     /**
@@ -102,11 +131,11 @@ public class ClaudeClient {
             boolean isJsonResponse = fullResponse.toString().trim().startsWith("{");
             String continuationPrompt = isJsonResponse
                     ? "Your JSON response was truncated. Continue the JSON output from EXACTLY "
-                    + "where it stopped. Output ONLY the remaining JSON characters. "
-                    + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
-                    + "The output will be concatenated directly to your previous response to form valid JSON."
+                            + "where it stopped. Output ONLY the remaining JSON characters. "
+                            + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
+                            + "The output will be concatenated directly to your previous response to form valid JSON."
                     : "Your response was truncated. Continue EXACTLY from where you left off. "
-                    + "Do not repeat any content. Do not add any preamble.";
+                            + "Do not repeat any content. Do not add any preamble.";
             messages.add(Map.of("role", "user", "content", continuationPrompt));
         }
 
@@ -127,7 +156,7 @@ public class ClaudeClient {
         int continuation = 0;
 
         while (continuation <= MAX_CONTINUATIONS) {
-            ApiResponse apiResponse = sendRequest(systemPrompt, messages, DEFAULT_MAX_TOKENS);
+            ApiResponse apiResponse = sendRequest(systemPrompt, messages, this.maxTokens);
             fullResponse.append(apiResponse.text);
 
             if (!"max_tokens".equals(apiResponse.stopReason)) {
@@ -146,11 +175,11 @@ public class ClaudeClient {
             boolean isJsonResponse = fullResponse.toString().trim().startsWith("{");
             String continuationPrompt = isJsonResponse
                     ? "Your JSON response was truncated. Continue the JSON output from EXACTLY "
-                    + "where it stopped. Output ONLY the remaining JSON characters. "
-                    + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
-                    + "The output will be concatenated directly to your previous response to form valid JSON."
+                            + "where it stopped. Output ONLY the remaining JSON characters. "
+                            + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
+                            + "The output will be concatenated directly to your previous response to form valid JSON."
                     : "Your response was truncated. Continue EXACTLY from where you left off. "
-                    + "Do not repeat any content. Do not add any preamble.";
+                            + "Do not repeat any content. Do not add any preamble.";
             messages.add(Map.of("role", "user", "content", continuationPrompt));
         }
 
@@ -162,6 +191,7 @@ public class ClaudeClient {
         Map<String, Object> requestBody = Map.of(
                 "model", model,
                 "max_tokens", maxTokens,
+                "temperature", temperature,
                 "system", systemPrompt,
                 "messages", messages);
 
@@ -209,14 +239,16 @@ public class ClaudeClient {
 
         StringBuilder result = new StringBuilder();
         for (JsonNode block : content) {
-            if ("text".equals(block.get("type").asText())) {
+            JsonNode typeNode = block.get("type");
+            if (typeNode != null && "text".equals(typeNode.asText())) {
                 result.append(block.get("text").asText());
             }
         }
         return result.toString();
     }
 
-    private record ApiResponse(String text, String stopReason) {}
+    private record ApiResponse(String text, String stopReason) {
+    }
 
     public record Message(String role, String content) {
         public static Message user(String content) {

@@ -27,8 +27,12 @@ subprojects {
         annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
 
         // Logging
+        // Logging (Log4j2 via SLF4J)
         implementation "org.slf4j:slf4j-api:${project.property('slf4jVersion')}"
-        runtimeOnly "org.slf4j:slf4j-simple:${project.property('slf4jVersion')}"
+        runtimeOnly "org.apache.logging.log4j:log4j-api:${project.property('log4jVersion')}"
+        runtimeOnly "org.apache.logging.log4j:log4j-core:${project.property('log4jVersion')}"
+        runtimeOnly "org.apache.logging.log4j:log4j-slf4j2-impl:${project.property('log4jVersion')}"
+        runtimeOnly "com.amazonaws:aws-lambda-java-log4j2:${project.property('awsLambdaLog4jVersion')}"
 
         // Testing
         testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"

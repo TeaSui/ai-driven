@@ -17,7 +17,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Tests for JiraClient HTTP error code handling.
- * Validates that appropriate exceptions are thrown for different HTTP error responses.
+ * Validates that appropriate exceptions are thrown for different HTTP error
+ * responses.
  */
 class JiraClientHttpErrorTest {
 
@@ -51,8 +52,8 @@ class JiraClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify UnauthorizedException is thrown
-        UnauthorizedException exception = assertThrows(UnauthorizedException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             jiraClient.getTicket("PROJ-123");
         });
 
@@ -68,8 +69,8 @@ class JiraClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify ForbiddenException is thrown
-        ForbiddenException exception = assertThrows(ForbiddenException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             jiraClient.getTicket("PROJ-123");
         });
 
@@ -101,8 +102,7 @@ class JiraClientHttpErrorTest {
         when(mockResponse.body()).thenReturn("{\"errorMessages\":[\"Rate limit exceeded\"]}");
         when(mockResponse.headers()).thenReturn(java.net.http.HttpHeaders.of(
                 java.util.Map.of("Retry-After", java.util.List.of("60")),
-                (name, value) -> true
-        ));
+                (name, value) -> true));
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
@@ -141,8 +141,8 @@ class JiraClientHttpErrorTest {
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
-        // When/Then: Verify ServiceUnavailableException is thrown
-        ServiceUnavailableException exception = assertThrows(ServiceUnavailableException.class, () -> {
+        // When/Then: Verify HttpClientException is thrown
+        HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             jiraClient.getTicket("PROJ-123");
         });
 

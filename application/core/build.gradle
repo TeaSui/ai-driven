@@ -14,4 +14,7 @@ dependencies {
     // Jackson for JSON
     api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
     api "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${project.property('jacksonVersion')}"
+
+    // Jayway JsonPath
+    api "com.jayway.jsonpath:json-path:${project.property('jsonPathVersion')}"
 }

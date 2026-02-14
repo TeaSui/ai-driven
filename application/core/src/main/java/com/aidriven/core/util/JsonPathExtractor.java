@@ -1,13 +1,15 @@
 package com.aidriven.core.util;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.PathNotFoundException;
 
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Utility for safe extraction of values from nested JSON structures.
- * Provides meaningful error messages when required fields are missing.
+ * Utility for safe extraction of values from nested JSON structures using
+ * Jayway JsonPath.
  */
 public final class JsonPathExtractor {
 
@@ -18,9 +20,9 @@ public final class JsonPathExtractor {
     /**
      * Extracts a required string value from a nested JSON path.
      *
-     * @param root The root JSON node
+     * @param root    The root JSON node
      * @param context Description of what is being parsed (for error messages)
-     * @param path The path segments to navigate (e.g., "target", "hash")
+     * @param path    The path segments to navigate (e.g., "target", "hash")
      * @return The string value at the path
      * @throws JsonPathException if any node in the path is missing or null
      */
@@ -32,34 +34,40 @@ public final class JsonPathExtractor {
             throw new IllegalArgumentException("path must not be empty");
         }
 
-        JsonNode current = root;
-        StringBuilder traversedPath = new StringBuilder();
-
-        for (int i = 0; i < path.length; i++) {
-            String segment = path[i];
-            if (i > 0) {
-                traversedPath.append(".");
-            }
-            traversedPath.append(segment);
-
-            JsonNode next = current.get(segment);
-            if (next == null || next.isNull()) {
+        String expression = "$." + String.join(".", path);
+        try {
+            Object result = JsonPath.read(root.toString(), expression);
+            if (result == null) {
                 throw new JsonPathException(
                         String.format("Missing required field '%s' in %s response. Full path: %s",
-                                segment, context, traversedPath),
+                                path[path.length - 1], context, String.join(".", path)),
                         root.toString());
             }
-            current = next;
-        }
-
-        if (!current.isTextual() && !current.isNumber()) {
+            return String.valueOf(result);
+        } catch (PathNotFoundException e) {
+            // Find which part of the path is missing for accurate error message
+            String currentPath = "$";
+            for (String segment : path) {
+                try {
+                    Object val = JsonPath.read(root.toString(), currentPath + "." + segment);
+                    if (val == null) {
+                        throw new JsonPathException(
+                                String.format("Missing required field '%s' in %s response. Full path: %s",
+                                        segment, context, String.join(".", path)),
+                                root.toString());
+                    }
+                    currentPath += "." + segment;
+                } catch (PathNotFoundException ex) {
+                    throw new JsonPathException(
+                            String.format("Missing required field '%s' in %s response. Full path: %s",
+                                    segment, context, String.join(".", path)),
+                            root.toString());
+                }
+            }
             throw new JsonPathException(
-                    String.format("Expected string or number at path '%s' in %s response, but got: %s",
-                            traversedPath, context, current.getNodeType()),
+                    String.format("Missing required field in %s response at path: %s", context, expression),
                     root.toString());
         }
-
-        return current.asText();
     }
 
     /**
@@ -74,27 +82,21 @@ public final class JsonPathExtractor {
             return Optional.empty();
         }
 
-        JsonNode current = root;
-        for (String segment : path) {
-            JsonNode next = current.get(segment);
-            if (next == null || next.isNull()) {
-                return Optional.empty();
-            }
-            current = next;
+        String expression = "$." + String.join(".", path);
+        try {
+            Object result = JsonPath.read(root.toString(), expression);
+            return Optional.ofNullable(result).map(String::valueOf);
+        } catch (PathNotFoundException e) {
+            return Optional.empty();
         }
-
-        if (current.isTextual() || current.isNumber()) {
-            return Optional.of(current.asText());
-        }
-        return Optional.empty();
     }
 
     /**
      * Extracts a required integer value from a nested JSON path.
      *
-     * @param root The root JSON node
+     * @param root    The root JSON node
      * @param context Description of what is being parsed (for error messages)
-     * @param path The path segments to navigate
+     * @param path    The path segments to navigate
      * @return The integer value at the path
      * @throws JsonPathException if any node in the path is missing or not a number
      */

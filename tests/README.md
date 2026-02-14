@@ -11,6 +11,11 @@ tests/
 ├── workflow-integration/  # Component-to-component integration tests
 ├── utils/                 # Test utilities and helpers
 └── test-data-manager/     # Test data fixtures and management
+
+## Documentation
+
+- [Test Cases](test-cases.md) — Comprehensive test case definitions
+- [Test Coverage Analysis](test-coverage-gap-analysis.md) — Analysis of missing test coverage
 ```
 
 ## Setup

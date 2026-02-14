@@ -1,5 +1,9 @@
 # AI-Driven Development System
 
+> **🚀 Current Status:**  
+> **Active Phase:** Priority 2 (AI Quality) — Implementing incremental context and multi-model support.  
+> **Detailed Roadmap:** [See `docs/next-phase-roadmap.md`](docs/next-phase-roadmap.md) for full task list.
+
 An intelligent automation platform that transforms Jira tickets into production-ready code through AI-powered agents. When a developer adds the `ai-generate` label to a Jira ticket, the system automatically fetches the ticket details, downloads the target repository for context, generates code using Claude AI, and creates a pull request in Bitbucket for human review.
 
 ## Architecture
@@ -32,7 +36,7 @@ Jira Webhook → API Gateway → JiraWebhookHandler (Lambda)
 |-------------------|--------------------------------|
 | Issue Tracking    | Jira Cloud (label-based trigger) |
 | Source Control    | Bitbucket Cloud (REST API)     |
-| AI Engine         | Claude AI (direct API, `claude-sonnet-4-20250514`) |
+| AI Engine         | Claude AI (direct API, `claude-opus-4-6`) |
 | Orchestration     | AWS Step Functions (Standard)  |
 | Code Context      | AWS S3 (14-day lifecycle)      |
 | State Management  | AWS DynamoDB (single-table)    |
@@ -40,6 +44,7 @@ Jira Webhook → API Gateway → JiraWebhookHandler (Lambda)
 | API Gateway       | AWS API Gateway                |
 | Secrets           | AWS Secrets Manager            |
 | Infrastructure    | AWS CDK (TypeScript)           |
+| Observability     | CloudWatch Dashboards + AWS X-Ray |
 
 ## Project Structure
 
@@ -53,8 +58,10 @@ ai-driven/
     lambda-handlers/              # Lambda handler implementations + fat JAR
   infrastructure/                 # AWS CDK (TypeScript)
     lib/ai-driven-stack.ts        # Full stack definition
+  docs/                           # Documentation + implementation specs
+    impl/                         # Numbered implementation documents (impl-01 to impl-14)
+    next-phase-roadmap.md         # Progress tracker with checkboxes
   tests/                          # E2E / integration tests (TypeScript)
-  docs/                           # Documentation
 ```
 
 ## Quick Start
@@ -88,13 +95,28 @@ cd tests && npm install && npm test
 
 ## Configuration
 
-All secrets are managed through AWS Secrets Manager:
+### Secrets (AWS Secrets Manager)
 
 | Secret | Purpose |
 |--------|---------|
 | `ai-driven/claude-api-key` | Claude API authentication |
 | `ai-driven/bitbucket-credentials` | Bitbucket app password |
 | `ai-driven/jira-credentials` | Jira API token |
+
+### Environment Variables
+
+All Lambda handlers share these configurable values (with sensible defaults):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `MAX_FILE_SIZE_CHARS` | `100000` | Max chars per source file |
+| `MAX_TOTAL_CONTEXT_CHARS` | `3000000` | Total context cap (~3MB) |
+| `MAX_FILE_SIZE_BYTES` | `500000` | Skip files > 500KB |
+| `MAX_CONTEXT_FOR_CLAUDE` | `700000` | Max chars sent to Claude |
+| `CLAUDE_MODEL` | `claude-opus-4-6` | Claude model identifier |
+| `CLAUDE_MAX_TOKENS` | `32768` | Max output tokens per request |
+| `CLAUDE_TEMPERATURE` | `0.2` | Model temperature |
+| `MERGE_WAIT_TIMEOUT_DAYS` | `7` | PR merge wait timeout |
 
 ## Jira Labels
 
@@ -107,9 +129,13 @@ All secrets are managed through AWS Secrets Manager:
 
 ## Documentation
 
-- [Detailed Workflow Design](docs/ai-code-gen-workflow-detailed.md)
-- [Test Coverage Analysis](docs/test-coverage-gap-analysis.md)
+- [Detailed Workflow Design](docs/README.md)
 - [Next Phase Roadmap](docs/next-phase-roadmap.md)
+- [Implementation Documents](docs/impl/) (impl-01 to impl-14)
+- [Test Cases](tests/test-cases.md)
+- [Test Coverage Analysis](tests/test-coverage-gap-analysis.md)
+- [Application README](application/README.md)
+- [Infrastructure README](infrastructure/README.md)
 
 ## License
 

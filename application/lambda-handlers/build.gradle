@@ -1,11 +1,13 @@
 plugins {
     id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 dependencies {
     implementation project(':core')
     implementation project(':jira-client')
     implementation project(':bitbucket-client')
+    implementation project(':github-client')
     implementation project(':claude-client')
 
     // AWS Lambda
@@ -15,23 +17,19 @@ dependencies {
     // AWS Step Functions SDK
     implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     implementation 'software.amazon.awssdk:sfn'
+
+    // AWS Lambda Powertools
+    implementation "software.amazon.lambda:powertools-logging:${project.property('powertoolsVersion')}"
+    implementation "software.amazon.lambda:powertools-tracing:${project.property('powertoolsVersion')}"
 }
 
-// Create a fat JAR for Lambda deployment
-tasks.register('fatJar', Jar) {
+shadowJar {
     archiveClassifier.set('all')
     archiveFileName.set('lambda-handlers-all.jar')
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    
-    // Explicit dependencies on subproject jars
-    dependsOn(':core:jar', ':jira-client:jar', ':bitbucket-client:jar', ':claude-client:jar')
-
-    from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
-    }
-    with jar
+    mergeServiceFiles()
+    transform(com.github.jengelman.gradle.plugins.shadow.transformers.Log4j2PluginsCacheFileTransformer)
 }
 
 tasks.named('build') {
-    dependsOn 'fatJar'
+    dependsOn 'shadowJar'
 }

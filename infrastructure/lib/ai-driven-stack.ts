@@ -8,6 +8,7 @@ import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -29,6 +30,11 @@ export class AiDrivenStack extends cdk.Stack {
         const jiraSecret = new secretsmanager.Secret(this, 'JiraCredentials', {
             secretName: 'ai-driven/jira-credentials',
             description: 'Jira Cloud API token',
+        });
+
+        const githubSecret = new secretsmanager.Secret(this, 'GitHubCredentials', {
+            secretName: 'ai-driven/github-token',
+            description: 'GitHub Personal Access Token',
         });
 
         // ==================== DYNAMODB ====================
@@ -70,7 +76,23 @@ export class AiDrivenStack extends cdk.Stack {
             CLAUDE_SECRET_ARN: claudeApiKeySecret.secretArn,
             BITBUCKET_SECRET_ARN: bitbucketSecret.secretArn,
             JIRA_SECRET_ARN: jiraSecret.secretArn,
+            GITHUB_SECRET_ARN: githubSecret.secretArn,
             CODE_CONTEXT_BUCKET: codeContextBucket.bucketName,
+            // Configurable limits (defaults match handler fallbacks)
+            MAX_FILE_SIZE_CHARS: '100000',
+            MAX_TOTAL_CONTEXT_CHARS: '3000000',
+            MAX_FILE_SIZE_BYTES: '500000',
+            MAX_CONTEXT_FOR_CLAUDE: '700000',
+            CLAUDE_MODEL: 'claude-opus-4-6',
+            CLAUDE_MAX_TOKENS: '32768',
+            CLAUDE_TEMPERATURE: '0.2',
+            MERGE_WAIT_TIMEOUT_DAYS: '7',
+            CONTEXT_MODE: 'INCREMENTAL',
+            PROMPT_VERSION: 'v1',
+            BRANCH_PREFIX: 'ai/',
+            DEFAULT_PLATFORM: 'GITHUB',
+            DEFAULT_WORKSPACE: 'TeaSui',
+            DEFAULT_REPO: 'claude-automation',
         };
 
         const javaRuntime = lambda.Runtime.JAVA_21;
@@ -91,6 +113,7 @@ export class AiDrivenStack extends cdk.Stack {
         claudeApiKeySecret.grantRead(processingRole);
         bitbucketSecret.grantRead(processingRole);
         jiraSecret.grantRead(processingRole);
+        githubSecret.grantRead(processingRole);
         codeContextBucket.grantReadWrite(processingRole);
 
         // Role for Jira Webhook Handler (DynamoDB, Secrets, StepFunctions)
@@ -127,6 +150,7 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.minutes(1),
             environment: lambdaEnvironment,
             role: jiraWebhookRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
         // Fetch ticket details from Jira
@@ -139,19 +163,21 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.minutes(5),
             environment: lambdaEnvironment,
             role: processingRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
-        // Download full repo archive from Bitbucket
-        const bitbucketFetchHandler = new lambda.Function(this, 'BitbucketFetchHandler', {
-            functionName: 'ai-driven-bitbucket-fetch',
+        // Download full repo archive from Source Control (Bitbucket/GitHub)
+        const codeFetchHandler = new lambda.Function(this, 'CodeFetchHandler', {
+            functionName: 'ai-driven-code-fetch',
             runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.BitbucketFetchHandler::handleRequest',
+            handler: 'com.aidriven.lambda.CodeFetchHandler::handleRequest',
             code: lambdaCode,
             memorySize: 2048,
             timeout: cdk.Duration.minutes(10),
             ephemeralStorageSize: cdk.Size.gibibytes(2),
             environment: lambdaEnvironment,
             role: processingRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
         // Generate code using Claude AI
@@ -164,6 +190,7 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.minutes(15),
             environment: lambdaEnvironment,
             role: processingRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
         // Create PR in Bitbucket
@@ -176,6 +203,7 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.minutes(5),
             environment: lambdaEnvironment,
             role: processingRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
         // Merge wait handler (task token callback)
@@ -188,6 +216,7 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.minutes(1),
             environment: lambdaEnvironment,
             role: mergeWaitRole,
+            tracing: lambda.Tracing.ACTIVE,
         });
 
         // ==================== STEP FUNCTIONS ====================
@@ -213,9 +242,9 @@ export class AiDrivenStack extends cdk.Stack {
         fetchTicketTask.addRetry(lambdaRetryProps);
         fetchTicketTask.addCatch(workflowFailed, { resultPath: '$.error' });
 
-        // Step 2: Fetch code context from Bitbucket
+        // Step 2: Fetch code context from Source Control
         const fetchCodeTask = new tasks.LambdaInvoke(this, 'FetchCodeTask', {
-            lambdaFunction: bitbucketFetchHandler,
+            lambdaFunction: codeFetchHandler,
             outputPath: '$.Payload',
             comment: 'Download full repo and store code context in S3',
         });
@@ -253,7 +282,9 @@ export class AiDrivenStack extends cdk.Stack {
                 ticketKey: stepfunctions.JsonPath.stringAt('$.ticketKey'),
                 prUrl: stepfunctions.JsonPath.stringAt('$.prUrl'),
             }),
-            taskTimeout: stepfunctions.Timeout.duration(cdk.Duration.days(7)),
+            taskTimeout: stepfunctions.Timeout.duration(
+                cdk.Duration.days(parseInt(lambdaEnvironment.MERGE_WAIT_TIMEOUT_DAYS))
+            ),
             comment: 'Wait for PR to be merged (callback from webhook)',
         });
 
@@ -283,10 +314,10 @@ export class AiDrivenStack extends cdk.Stack {
         const stateMachine = new stepfunctions.StateMachine(this, 'LinearStateMachine', {
             stateMachineName: 'ai-driven-linear-workflow',
             definitionBody: stepfunctions.DefinitionBody.fromChainable(workflowDefinition),
-            timeout: cdk.Duration.days(7),
+            timeout: cdk.Duration.days(parseInt(lambdaEnvironment.MERGE_WAIT_TIMEOUT_DAYS)),
             tracingEnabled: true,
             logs: {
-                destination: new logs.LogGroup(this, 'LinearStateMachineLogGroup', {
+                destination: new logs.LogGroup(this, 'WorkflowLogGroup', {
                     retention: logs.RetentionDays.ONE_WEEK,
                 }),
                 level: stepfunctions.LogLevel.ALL,
@@ -329,6 +360,92 @@ export class AiDrivenStack extends cdk.Stack {
         api.root.addResource('merge-webhook').addMethod(
             'POST',
             new apigateway.LambdaIntegration(mergeWaitHandler, { proxy: true })
+        );
+
+        // ==================== CLOUDWATCH DASHBOARD ====================
+        const allHandlers = [
+            { fn: jiraWebhookHandler, label: 'JiraWebhook' },
+            { fn: fetchTicketHandler, label: 'FetchTicket' },
+            { fn: codeFetchHandler, label: 'CodeFetch' },
+            { fn: claudeInvokeHandler, label: 'ClaudeInvoke' },
+            { fn: prCreatorHandler, label: 'PrCreator' },
+            { fn: mergeWaitHandler, label: 'MergeWait' },
+        ];
+
+        const dashboard = new cloudwatch.Dashboard(this, 'OperationalDashboard', {
+            dashboardName: 'ai-driven-operations',
+        });
+
+        // Row 1: Lambda invocations & errors
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'Lambda Invocations',
+                width: 12,
+                left: allHandlers.map(h => h.fn.metricInvocations({ label: h.label })),
+            }),
+            new cloudwatch.GraphWidget({
+                title: 'Lambda Errors',
+                width: 12,
+                left: allHandlers.map(h => h.fn.metricErrors({ label: h.label })),
+            }),
+        );
+
+        // Row 2: Lambda duration & throttles
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'Lambda Duration (P95)',
+                width: 12,
+                left: allHandlers.map(h => h.fn.metricDuration({
+                    label: h.label,
+                    statistic: 'p95',
+                })),
+            }),
+            new cloudwatch.GraphWidget({
+                title: 'Lambda Throttles',
+                width: 12,
+                left: allHandlers.map(h => h.fn.metricThrottles({ label: h.label })),
+            }),
+        );
+
+        // Row 3: Step Functions workflow metrics
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'Workflow Executions',
+                width: 12,
+                left: [
+                    stateMachine.metricStarted({ label: 'Started' }),
+                    stateMachine.metricSucceeded({ label: 'Succeeded' }),
+                    stateMachine.metricFailed({ label: 'Failed' }),
+                    stateMachine.metricTimedOut({ label: 'Timed Out' }),
+                ],
+            }),
+            new cloudwatch.GraphWidget({
+                title: 'Workflow Duration',
+                width: 12,
+                left: [
+                    stateMachine.metricTime({ label: 'Avg Duration', statistic: 'avg' }),
+                    stateMachine.metricTime({ label: 'P95 Duration', statistic: 'p95' }),
+                ],
+            }),
+        );
+
+        // Row 4: DynamoDB & Alarm summary
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'DynamoDB Read/Write Capacity',
+                width: 12,
+                left: [
+                    stateTable.metricConsumedReadCapacityUnits({ label: 'Read CU' }),
+                    stateTable.metricConsumedWriteCapacityUnits({ label: 'Write CU' }),
+                ],
+            }),
+            new cloudwatch.SingleValueWidget({
+                title: 'Total Workflow Failures (24h)',
+                width: 12,
+                metrics: [
+                    stateMachine.metricFailed({ period: cdk.Duration.days(1), label: 'Failures' }),
+                ],
+            }),
         );
 
         // ==================== OUTPUTS ====================
