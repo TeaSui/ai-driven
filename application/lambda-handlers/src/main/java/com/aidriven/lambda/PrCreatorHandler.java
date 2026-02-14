@@ -39,15 +39,32 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
     private final JiraClient jiraClient;
     private final SourceControlClient testSourceControlClient;
     private final String branchPrefix;
+    private final ServiceFactory serviceFactory;
 
     /** No-arg constructor required by AWS Lambda runtime. */
     public PrCreatorHandler() {
-        ServiceFactory factory = ServiceFactory.getInstance();
+        this(ServiceFactory.getInstance());
+    }
+
+    private PrCreatorHandler(ServiceFactory factory) {
+        this.serviceFactory = factory;
         this.objectMapper = factory.getObjectMapper();
         this.ticketStateRepository = factory.getTicketStateRepository();
         this.jiraClient = factory.getJiraClient();
         this.branchPrefix = factory.getAppConfig().getBranchPrefix();
         this.testSourceControlClient = null;
+    }
+
+    /** Constructor for testing. */
+    public PrCreatorHandler(ObjectMapper objectMapper, TicketStateRepository ticketStateRepository,
+            JiraClient jiraClient, ServiceFactory factory, SourceControlClient testSourceControlClient,
+            String branchPrefix) {
+        this.objectMapper = objectMapper;
+        this.ticketStateRepository = ticketStateRepository;
+        this.jiraClient = jiraClient;
+        this.serviceFactory = factory;
+        this.testSourceControlClient = testSourceControlClient;
+        this.branchPrefix = branchPrefix;
     }
 
     @Override
@@ -120,14 +137,17 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
         if (this.testSourceControlClient != null) {
             return this.testSourceControlClient;
         }
-        ServiceFactory factory = ServiceFactory.getInstance();
+
         String platformStr = (String) input.get("platform");
+        String repoOwner = (String) input.get("repoOwner");
+        String repoSlug = (String) input.get("repoSlug");
+
         if ("GITHUB".equalsIgnoreCase(platformStr)) {
-            log.info("Using GitHub client for ticket {}", ticketKey);
-            return factory.getGitHubClient();
+            log.info("Using GitHub client for ticket {} (resolved repo={}/{})", ticketKey, repoOwner, repoSlug);
+            return serviceFactory.getGitHubClient(repoOwner, repoSlug);
         } else {
-            log.info("Using Bitbucket client for ticket {}", ticketKey);
-            return factory.getBitbucketClient();
+            log.info("Using Bitbucket client for ticket {} (repo={}/{})", ticketKey, repoOwner, repoSlug);
+            return serviceFactory.getBitbucketClient(repoOwner, repoSlug);
         }
     }
 

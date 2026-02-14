@@ -1,15 +1,23 @@
 package com.aidriven.lambda;
 
+import com.aidriven.bitbucket.BitbucketClient;
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.source.SourceControlClient;
+import com.aidriven.github.GitHubClient;
 import com.aidriven.jira.JiraClient;
+import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+
+import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Optional;
 
 import java.util.HashMap;
 import java.util.List;
@@ -35,6 +43,15 @@ class PrCreatorHandlerTest {
         @Mock
         private JiraClient jiraClient;
 
+        @Mock
+        private ServiceFactory serviceFactory;
+
+        @Mock
+        private GitHubClient gitHubClient;
+
+        @Mock
+        private BitbucketClient bitbucketClient;
+
         private PrCreatorHandler handler;
         private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -43,7 +60,7 @@ class PrCreatorHandlerTest {
                 MockitoAnnotations.openMocks(this);
                 handler = new PrCreatorHandler(
                                 objectMapper, ticketStateRepository,
-                                jiraClient, sourceControlClient, "ai/");
+                                jiraClient, serviceFactory, sourceControlClient, "ai/");
         }
 
         // ======== Input Validation ========
@@ -96,6 +113,20 @@ class PrCreatorHandlerTest {
                                                 new SourceControlClient.PullRequestResult("1",
                                                                 "https://bitbucket.org/repo/pr/1", "ai/proj-1"));
                 when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+
+                // Mock factory behavior
+                when(serviceFactory.getGitHubClient(any(), any())).thenReturn(gitHubClient);
+                when(serviceFactory.getBitbucketClient(any(), any())).thenReturn(bitbucketClient);
+
+                // Ensure the base client mocks behave correctly
+                when(gitHubClient.getDefaultBranch()).thenReturn("main");
+                when(bitbucketClient.getDefaultBranch()).thenReturn("main");
+                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
+                                .thenReturn(new SourceControlClient.PullRequestResult("1",
+                                                "https://github.com/repo/pr/1", "ai/proj-1"));
+                when(bitbucketClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
+                                .thenReturn(new SourceControlClient.PullRequestResult("1",
+                                                "https://bitbucket.org/repo/pr/1", "ai/proj-1"));
 
                 List<AgentResult.GeneratedFile> files = List.of(
                                 AgentResult.GeneratedFile.builder()
@@ -267,5 +298,59 @@ class PrCreatorHandlerTest {
                 // Verify title starts with [AI] CRM-85:
                 verify(sourceControlClient).createPullRequest(
                                 eq("[AI] CRM-85: Fix duplicate title"), anyString(), anyString(), anyString());
+        }
+
+        @Test
+        void should_fail_if_repo_metadata_missing() throws Exception {
+                // Re-initialize handler WITHOUT a testSourceControlClient
+                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, serviceFactory, null,
+                                "ai/");
+
+                // Prepare input MISSING repoOwner/repoSlug
+                Map<String, Object> input = new HashMap<>();
+                input.put("ticketId", "12345");
+                input.put("ticketKey", "CRM-85");
+                input.put("success", true);
+                input.put("platform", "GITHUB");
+                input.put("files", "[{\"path\":\"test.txt\",\"content\":\"v\",\"operation\":\"CREATE\"}]");
+
+                // Mock factory behavior - return default client when arguments are null/empty
+                when(serviceFactory.getGitHubClient(null, null)).thenReturn(gitHubClient);
+                when(gitHubClient.getDefaultBranch()).thenReturn("main");
+                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
+                                .thenReturn(new SourceControlClient.PullRequestResult("1",
+                                                "https://github.com/TeaSui/claude-automation/pull/1", "main"));
+                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+
+                handler.handleRequest(input, lambdaContext);
+
+                // Verify the factory was called with NULLS (falling back to default)
+                verify(serviceFactory).getGitHubClient(null, null);
+        }
+
+        @Test
+        void should_use_correct_platform_from_input() throws Exception {
+                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, serviceFactory, null,
+                                "ai/");
+
+                Map<String, Object> input = new HashMap<>();
+                input.put("ticketId", "12345");
+                input.put("ticketKey", "CRM-85");
+                input.put("success", true);
+                input.put("platform", "GITHUB");
+                input.put("repoOwner", "TeaSui");
+                input.put("repoSlug", "emergency-location-service");
+                input.put("files", "[{\"path\":\"test.txt\",\"content\":\"v\",\"operation\":\"CREATE\"}]");
+
+                when(serviceFactory.getGitHubClient("TeaSui", "emergency-location-service")).thenReturn(gitHubClient);
+                when(gitHubClient.getDefaultBranch()).thenReturn("main");
+                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
+                                .thenReturn(new SourceControlClient.PullRequestResult("1",
+                                                "https://github.com/TeaSui/emergency-location-service/pull/1", "main"));
+                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+
+                handler.handleRequest(input, lambdaContext);
+
+                verify(serviceFactory).getGitHubClient("TeaSui", "emergency-location-service");
         }
 }

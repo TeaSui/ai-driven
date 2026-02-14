@@ -85,6 +85,10 @@ public class FetchTicketHandler implements RequestHandler<Map<String, Object>, M
                 ticket.getLabels(), null, appConfig.getDefaultWorkspace(), appConfig.getDefaultRepo(),
                 appConfig.getDefaultPlatform());
 
+        log.info("Resolved repository for ticket {}: owner={}, repo={}, platform={} (defaultPlatform={})",
+                key, repo != null ? repo.owner() : "null", repo != null ? repo.repo() : "null",
+                platform.name(), appConfig.getDefaultPlatform());
+
         log.info("Resolved platform: {}, repo: {}", platform,
                 repo != null ? repo.owner() + "/" + repo.repo() : "default");
 

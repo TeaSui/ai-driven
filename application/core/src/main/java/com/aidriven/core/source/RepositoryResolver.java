@@ -27,11 +27,11 @@ public final class RepositoryResolver {
     /**
      * Resolves repository from available context.
      *
-     * @param labels           Jira ticket labels (may be null)
-     * @param repoUrl          Repository URL from ticket/config (may be null)
-     * @param defaultOwner     Default workspace/owner from env (may be null)
-     * @param defaultRepo      Default repo slug from env (may be null)
-     * @param defaultPlatform  Default platform string from env (may be null)
+     * @param labels          Jira ticket labels (may be null)
+     * @param repoUrl         Repository URL from ticket/config (may be null)
+     * @param defaultOwner    Default workspace/owner from env (may be null)
+     * @param defaultRepo     Default repo slug from env (may be null)
+     * @param defaultPlatform Default platform string from env (may be null)
      * @return Resolved repository, or null if insufficient information
      */
     public static ResolvedRepository resolve(List<String> labels, String repoUrl,
@@ -69,11 +69,11 @@ public final class RepositoryResolver {
             return null;
         }
         for (String label : labels) {
-            String lower = label.toLowerCase().trim();
-            if (lower.startsWith(LABEL_PREFIX)) {
-                String repoPath = lower.substring(LABEL_PREFIX.length());
+            String trimmed = label.trim();
+            if (trimmed.toLowerCase().startsWith(LABEL_PREFIX)) {
+                String repoPath = trimmed.substring(LABEL_PREFIX.length()).trim();
                 String[] parts = repoPath.split("/");
-                if (parts.length >= 2 && !parts[0].isEmpty() && !parts[1].isEmpty()) {
+                if (parts.length >= 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
                     Platform platform = PlatformResolver.resolve(labels, null, defaultPlatform);
                     return new ResolvedRepository(parts[0], parts[1], platform);
                 }
@@ -83,7 +83,8 @@ public final class RepositoryResolver {
     }
 
     /**
-     * Resolves repository from a URL by detecting the platform and parsing owner/repo.
+     * Resolves repository from a URL by detecting the platform and parsing
+     * owner/repo.
      */
     static ResolvedRepository resolveFromUrl(String repoUrl, String defaultPlatform) {
         Platform platform = Platform.fromUrl(repoUrl);

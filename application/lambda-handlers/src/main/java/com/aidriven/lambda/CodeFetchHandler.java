@@ -93,6 +93,8 @@ public class CodeFetchHandler implements RequestHandler<Map<String, Object>, Map
             TicketInfo ticket = parseTicketInfo(ticketId, ticketKey, input);
             ticketStateRepository.save(TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.ANALYZING));
 
+            log.info("CodeFetchHandler for ticket {}: platform={}, repo={}/{}",
+                    ticketKey, platform, repoOwner, repoSlug);
             SourceControlClient client = resolveSourceControlClient(platform, repoOwner, repoSlug);
             ContextService dynamicContextService = serviceFactory.createContextService(client);
 
