@@ -1,0 +1,14 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // Core project dependency (ToolProvider, ToolCall, ToolResult, Tool)
+    api project(':core')
+
+    // MCP Java SDK — provides McpSyncClient, transports, and protocol types
+    implementation 'io.modelcontextprotocol.sdk:mcp:0.10.0'
+
+    // Jackson for JSON schema conversion
+    implementation "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+}

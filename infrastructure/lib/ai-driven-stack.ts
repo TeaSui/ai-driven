@@ -123,6 +123,13 @@ export class AiDrivenStack extends cdk.Stack {
             AGENT_MAX_TOOL_TURNS: '10',
             AGENT_MAX_WALL_CLOCK_SECONDS: '720',
             AGENT_QUEUE_URL: agentQueue.queueUrl,
+            // Phase 3: Guardrails + cost tracking
+            AGENT_GUARDRAILS_ENABLED: 'true',
+            AGENT_COST_BUDGET_PER_TICKET: '200000',
+            AGENT_CLASSIFIER_USE_LLM: 'false',
+            // Phase 4: MCP server configurations (JSON array)
+            // Example: '[{"namespace":"monitoring","transport":"stdio","command":"npx","args":["@datadog/mcp-server"],"secretArn":"...","enabled":true}]'
+            MCP_SERVERS_CONFIG: '[]',
         };
 
         const javaRuntime = lambda.Runtime.JAVA_21;

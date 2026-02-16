@@ -1,19 +1,24 @@
 package com.aidriven.lambda;
 
 import com.aidriven.core.agent.AgentOrchestrator;
+import com.aidriven.core.agent.CommentIntentClassifier;
 import com.aidriven.core.agent.ConversationWindowManager;
+import com.aidriven.core.agent.CostTracker;
 import com.aidriven.core.agent.JiraCommentFormatter;
 import com.aidriven.core.agent.ProgressTracker;
+import com.aidriven.core.agent.guardrail.ApprovalStore;
+import com.aidriven.core.agent.guardrail.GuardedToolRegistry;
 import com.aidriven.core.agent.model.AgentRequest;
 import com.aidriven.core.agent.model.AgentResponse;
+import com.aidriven.core.agent.model.CommentIntent;
 import com.aidriven.core.agent.tool.ToolRegistry;
 import com.aidriven.core.agent.tool.ToolResult;
-import com.aidriven.core.agent.tool.ToolProvider;
+import com.aidriven.core.config.AgentConfig;
+import com.aidriven.mcp.McpBridgeToolProvider;
 import com.aidriven.tool.tracker.IssueTrackerToolProvider;
 import com.aidriven.tool.source.SourceControlToolProvider;
 import com.aidriven.tool.context.CodeContextToolProvider;
 import com.aidriven.tool.context.ContextService;
-import java.util.Map;
 import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.service.IdempotencyService;
 import com.aidriven.core.source.Platform;
@@ -34,7 +39,14 @@ import java.util.List;
 
 /**
  * Consumes agent tasks from SQS FIFO queue and executes the agent orchestrator.
- * Handles idempotency and updates Jira with progress and final results.
+ *
+ * <p>
+ * Phase 3: Added intent classification, guardrails, approval handling, and cost
+ * tracking.
+ * </p>
+ * <p>
+ * Phase 4: Added MCP bridge tool providers for external integrations.
+ * </p>
  */
 @Slf4j
 public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
@@ -44,6 +56,7 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
     private final JiraClient jiraClient;
     private final IdempotencyService idempotencyService;
     private final JiraCommentFormatter formatter;
+    private final CommentIntentClassifier intentClassifier;
 
     public AgentProcessorHandler() {
         this.serviceFactory = ServiceFactory.getInstance();
@@ -51,6 +64,11 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
         this.jiraClient = serviceFactory.getJiraClient();
         this.idempotencyService = serviceFactory.getIdempotencyService();
         this.formatter = new JiraCommentFormatter();
+
+        AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();
+        this.intentClassifier = agentConfig.classifierUseLlm()
+                ? new CommentIntentClassifier(serviceFactory.getClaudeClient(), true)
+                : new CommentIntentClassifier();
     }
 
     // For testing
@@ -63,6 +81,7 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
         this.jiraClient = jiraClient;
         this.idempotencyService = idempotencyService;
         this.formatter = new JiraCommentFormatter();
+        this.intentClassifier = new CommentIntentClassifier();
     }
 
     @Override
@@ -72,11 +91,6 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
                 processMessage(message);
             } catch (Exception e) {
                 log.error("Failed to process SQS message {}: {}", message.getMessageId(), e.getMessage(), e);
-                // We let the exception propagate to trigger DLQ if retries fail
-                // But for batch processing, we might want to handle individual failures to
-                // avoid reprocessing successful ones.
-                // Since this is a FIFO queue with batch size usually 1 or 10, typically 1 for
-                // complex tasks.
                 throw new RuntimeException("Failed to process message", e);
             }
         }
@@ -99,6 +113,16 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
         }
 
         try {
+            // Classify intent
+            CommentIntent intent = intentClassifier.classify(commentBody, false);
+            log.info("Classified intent for ticket={}: {}", ticketKey, intent);
+
+            // Handle APPROVAL intent specially — execute pending gated action
+            if (intent == CommentIntent.APPROVAL) {
+                handleApproval(ticketKey, ackCommentId, commentBody, commentAuthor);
+                return;
+            }
+
             // Fresh fetch of ticket info
             TicketInfo ticket = jiraClient.getTicket(ticketKey);
             SourceControlClient scClient = resolveSourceControlClient(ticket);
@@ -111,69 +135,145 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
             ContextService contextService = serviceFactory.createContextService(scClient);
             toolRegistry.register(new CodeContextToolProvider(contextService));
 
+            // Register MCP tool providers (Phase 4)
+            for (McpBridgeToolProvider mcpProvider : serviceFactory.getMcpToolProviders()) {
+                toolRegistry.register(mcpProvider);
+            }
+
+            // Wrap with guardrails (Phase 3)
+            GuardedToolRegistry guardedToolRegistry = serviceFactory.createGuardedToolRegistry(toolRegistry);
+
             // Progress tracker implementation via Jira comments
-            ProgressTracker progressTracker = new ProgressTracker() {
-                @Override
-                public void updateProgress(String commentId, List<ToolResult> results) {
-                    try {
-                        // For now, we don't update intermediate progress to keep noise low,
-                        // or we could append "." to the comment.
-                        // Ideally, we'd edit the comment with "Step X: Executed Tool Y..."
-                        // But Jira edits trigger webhooks, beware loops (though we filter bot authors).
-                        log.info("Progress update for {}: {} tools executed", commentId, results.size());
-                    } catch (Exception e) {
-                        log.warn("Failed to update progress: {}", e.getMessage());
-                    }
-                }
+            ProgressTracker progressTracker = createProgressTracker(ticketKey);
 
-                @Override
-                public void complete(String commentId, String finalResponse) {
-                    // Handled by orchestrator return value normally, but good for cleanup
-                }
-
-                @Override
-                public void fail(String commentId, String errorMessage) {
-                    try {
-                        jiraClient.addComment(ticketKey, "Agent failed: " + errorMessage);
-                    } catch (Exception e) {
-                        log.error("Failed to post failure comment", e);
-                    }
-                }
-            };
-
+            // Build orchestrator with Phase 3+ features
             ClaudeClient claudeClient = serviceFactory.getClaudeClient();
             ConversationWindowManager windowManager = serviceFactory.getConversationWindowManager();
-            AgentOrchestrator orchestrator = new AgentOrchestrator(claudeClient, toolRegistry, progressTracker,
-                    windowManager);
+            CostTracker costTracker = serviceFactory.getCostTracker();
+            AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();
+
+            AgentOrchestrator orchestrator = new AgentOrchestrator(
+                    claudeClient, toolRegistry, guardedToolRegistry,
+                    progressTracker, windowManager, costTracker,
+                    agentConfig.maxTurns());
 
             AgentRequest request = new AgentRequest(ticketKey, commentBody, commentAuthor, ticket, ackCommentId);
-            AgentResponse response = orchestrator.process(request);
+            AgentResponse response = orchestrator.process(request, intent);
 
             // Update the ack comment in-place with the final response
             String formattedResponse = formatter.format(
                     response.text(), response.toolsUsed(), response.tokenCount());
 
-            try {
-                jiraClient.editComment(ticketKey, ackCommentId, formattedResponse);
-                log.info("Updated ack comment {} with final response for ticket={}", ackCommentId, ticketKey);
-            } catch (UnsupportedOperationException e) {
-                // Fallback: post a new comment if editComment not supported
-                log.warn("editComment not supported, posting new comment for ticket={}", ticketKey);
-                jiraClient.addComment(ticketKey, formattedResponse);
-            }
-
-            log.info("Agent task completed for ticket={} with {} turns", ticketKey, response.turnCount());
+            postResponse(ticketKey, ackCommentId, formattedResponse);
+            log.info("Agent task completed for ticket={} with {} turns, intent={}", ticketKey, response.turnCount(),
+                    intent);
 
         } catch (Exception e) {
             log.error("Error during agent execution for ticket={}", ticketKey, e);
             String errorComment = formatter.formatError(e.getMessage());
-            try {
-                jiraClient.editComment(ticketKey, ackCommentId, errorComment);
-            } catch (Exception editEx) {
-                log.warn("Failed to edit ack comment with error, posting new comment", editEx);
-                jiraClient.addComment(ticketKey, errorComment);
+            postResponse(ticketKey, ackCommentId, errorComment);
+            throw e;
+        }
+    }
+
+    /**
+     * Handles APPROVAL intent: finds pending approval and executes the gated
+     * action.
+     */
+    private void handleApproval(String ticketKey, String ackCommentId, String commentBody,
+            String commentAuthor) throws Exception {
+        ApprovalStore approvalStore = serviceFactory.getApprovalStore();
+        var pendingOpt = approvalStore.getLatestPending(ticketKey);
+
+        if (pendingOpt.isEmpty()) {
+            String msg = "No pending approval found for this ticket. " +
+                    "There may be no action awaiting approval, or it may have expired.";
+            postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(), 0));
+            return;
+        }
+
+        var pending = pendingOpt.get();
+
+        // Check if this is an approval or rejection
+        String lower = commentBody.toLowerCase().trim();
+        if (lower.contains("reject") || lower.contains("cancel") || lower.contains("deny")) {
+            approvalStore.consumeApproval(ticketKey, pending.sk());
+            String msg = "Rejected: " + pending.approvalPrompt() + "\nThe action has been cancelled.";
+            postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(), 0));
+            log.info("Approval rejected for ticket={} tool={}", ticketKey, pending.toolName());
+            return;
+        }
+
+        // Execute the approved action
+        log.info("Executing approved action for ticket={}: tool={}", ticketKey, pending.toolName());
+        TicketInfo ticket = jiraClient.getTicket(ticketKey);
+        SourceControlClient scClient = resolveSourceControlClient(ticket);
+
+        ToolRegistry toolRegistry = new ToolRegistry();
+        toolRegistry.register(new SourceControlToolProvider(scClient));
+        toolRegistry.register(new IssueTrackerToolProvider(jiraClient));
+
+        ContextService contextService = serviceFactory.createContextService(scClient);
+        toolRegistry.register(new CodeContextToolProvider(contextService));
+
+        // Register MCP providers
+        for (McpBridgeToolProvider mcpProvider : serviceFactory.getMcpToolProviders()) {
+            toolRegistry.register(mcpProvider);
+        }
+
+        GuardedToolRegistry guardedToolRegistry = serviceFactory.createGuardedToolRegistry(toolRegistry);
+        ToolResult result = guardedToolRegistry.executeApproved(ticketKey, pending);
+
+        String msg = result.isError()
+                ? "Approved action failed: " + result.content()
+                : "Approved and executed: " + pending.toolName() + "\n\n" + result.content();
+        postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(pending.toolName()), 0));
+    }
+
+    private ProgressTracker createProgressTracker(String ticketKey) {
+        return new ProgressTracker() {
+            @Override
+            public void updateProgress(String commentId, List<ToolResult> results) {
+                log.info("Progress update for {}: {} tools executed", commentId, results.size());
             }
-            throw e; // Rethrow to ensure DLQ routing if needed
+
+            @Override
+            public void complete(String commentId, String finalResponse) {
+                // Handled by orchestrator return value
+            }
+
+            @Override
+            public void fail(String commentId, String errorMessage) {
+                try {
+                    jiraClient.addComment(ticketKey, "Agent failed: " + errorMessage);
+                } catch (Exception e) {
+                    log.error("Failed to post failure comment", e);
+                }
+            }
+        };
+    }
+
+    /**
+     * Posts a response to Jira, preferring editComment with fallback to addComment.
+     */
+    private void postResponse(String ticketKey, String ackCommentId, String formattedResponse) {
+        try {
+            jiraClient.editComment(ticketKey, ackCommentId, formattedResponse);
+            log.info("Updated ack comment {} for ticket={}", ackCommentId, ticketKey);
+        } catch (UnsupportedOperationException e) {
+            log.warn("editComment not supported, posting new comment for ticket={}", ticketKey);
+            try {
+                jiraClient.addComment(ticketKey, formattedResponse);
+            } catch (Exception ex) {
+                log.error("Failed to post fallback comment for ticket={}", ticketKey, ex);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to edit ack comment, posting new comment for ticket={}", ticketKey);
+            try {
+                jiraClient.addComment(ticketKey, formattedResponse);
+            } catch (Exception ex) {
+                log.error("Failed to post fallback comment for ticket={}", ticketKey, ex);
+            }
         }
     }
 

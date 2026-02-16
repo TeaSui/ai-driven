@@ -92,7 +92,7 @@ class JiraCommentFormatterTest {
     void should_convert_code_blocks() {
         String md = "```java\nSystem.out.println();\n```";
         String result = formatter.convertMarkdownToJira(md);
-        assertTrue(result.contains("{code:title=java}"));
+        assertTrue(result.contains("{code:java}"));
         assertTrue(result.contains("{code}"));
     }
 

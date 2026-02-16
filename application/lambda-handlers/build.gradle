@@ -12,6 +12,7 @@ dependencies {
     implementation project(':tool-source-control')
     implementation project(':tool-issue-tracker')
     implementation project(':tool-code-context')
+    implementation project(':mcp-bridge')
 
     // AWS Lambda
     implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
@@ -24,7 +25,9 @@ dependencies {
 
     // AWS Lambda Powertools
     implementation "software.amazon.lambda:powertools-logging:${project.property('powertoolsVersion')}"
-    implementation "software.amazon.lambda:powertools-tracing:${project.property('powertoolsVersion')}"
+    implementation("software.amazon.lambda:powertools-tracing:${project.property('powertoolsVersion')}") {
+        exclude group: 'com.amazonaws', module: 'aws-xray-recorder-sdk-aws-sdk-v2-instrumentor'
+    }
 }
 
 shadowJar {

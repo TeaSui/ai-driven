@@ -38,7 +38,10 @@ public class DynamoConversationRepository implements ConversationRepository {
         String pk = ConversationMessage.createPk(ticketKey);
 
         return table.query(r -> r
-                .queryConditional(QueryConditional.keyEqualTo(Key.builder().partitionValue(pk).build()))
+                .queryConditional(QueryConditional.sortBeginsWith(Key.builder()
+                        .partitionValue(pk)
+                        .sortValue("MSG#")
+                        .build()))
                 .scanIndexForward(true) // Chronological order (oldest first)
         ).items().stream().collect(Collectors.toList());
     }

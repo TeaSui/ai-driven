@@ -157,6 +157,11 @@ public class ConversationWindowManager {
                 }
             }
 
+            if (content == null) {
+                log.warn("Skipping message {} with null content", msg.getSk());
+                continue;
+            }
+
             apiMessages.add(Map.of(
                     "role", msg.getRole(),
                     "content", content));

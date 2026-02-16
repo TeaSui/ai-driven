@@ -7,8 +7,10 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Rule-based classifier for Jira comment intents.
- * Fast and deterministic — no LLM call needed for routing.
+ * Hybrid classifier for Jira comment intents.
+ * <p>
+ * Phase 1-2: Rule-based fast path (deterministic, zero latency).
+ * Phase 3+: Optional LLM fallback for ambiguous cases (behind feature flag).
  */
 @Slf4j
 public class CommentIntentClassifier {
@@ -22,12 +24,41 @@ public class CommentIntentClassifier {
             "\\[~accountId:[^\\]]+\\]");
 
     private static final Set<String> APPROVAL_KEYWORDS = Set.of(
-            "lgtm", "approved", "approve", "proceed", "go ahead", "ship it", "merge it");
+            "lgtm", "approved", "approve", "proceed", "go ahead", "ship it",
+            "merge it", "looks good", "accept", "confirm", "yes do it", "yes, do it");
+
+    private static final Set<String> REJECTION_KEYWORDS = Set.of(
+            "reject", "cancel", "don't do it", "abort", "stop", "no don't", "no, don't");
 
     private static final Set<String> FEEDBACK_KEYWORDS = Set.of(
             "doesn't work", "doesn't handle", "should also", "please fix",
             "incorrect", "wrong", "missing", "instead of", "change this",
-            "update this", "revert", "not what i", "try again");
+            "update this", "revert", "not what i", "try again",
+            "use optional", "use a different", "better approach", "refactor",
+            "rename", "remove the", "add a test", "add tests", "add error handling",
+            "handle the case", "what about", "you forgot", "also need");
+
+    private static final Set<String> QUESTION_STARTERS = Set.of(
+            "why", "how", "what", "when", "where", "which", "who",
+            "can you explain", "could you explain", "is there", "are there",
+            "do you", "does this", "will this");
+
+    private final AiClient aiClient; // nullable — only used if LLM fallback is enabled
+    private final boolean useLlmFallback;
+
+    /** Default constructor: rule-based only, no LLM fallback. */
+    public CommentIntentClassifier() {
+        this(null, false);
+    }
+
+    /**
+     * @param aiClient       AI client for LLM classification fallback (nullable)
+     * @param useLlmFallback Whether to use Claude for ambiguous cases
+     */
+    public CommentIntentClassifier(AiClient aiClient, boolean useLlmFallback) {
+        this.aiClient = aiClient;
+        this.useLlmFallback = useLlmFallback && aiClient != null;
+    }
 
     /**
      * Classifies a Jira comment's intent.
@@ -58,28 +89,42 @@ public class CommentIntentClassifier {
 
         String body = stripMention(trimmed).strip().toLowerCase();
 
-        // Check for approval patterns
-        for (String keyword : APPROVAL_KEYWORDS) {
+        // 1. Check for rejection patterns (before approval to avoid false positives)
+        for (String keyword : REJECTION_KEYWORDS) {
             if (body.contains(keyword)) {
+                log.info("Classified as APPROVAL (rejection) via keyword: {}", keyword);
+                // Rejection is handled through the approval flow (orchestrator checks content)
                 return CommentIntent.APPROVAL;
             }
         }
 
-        // Check for feedback patterns (criticism or correction of AI's previous work)
+        // 2. Check for approval patterns
+        for (String keyword : APPROVAL_KEYWORDS) {
+            if (body.contains(keyword)) {
+                log.info("Classified as APPROVAL via keyword: {}", keyword);
+                return CommentIntent.APPROVAL;
+            }
+        }
+
+        // 3. Check for feedback patterns (criticism or correction of AI's previous work)
         for (String keyword : FEEDBACK_KEYWORDS) {
             if (body.contains(keyword)) {
+                log.info("Classified as HUMAN_FEEDBACK via keyword: {}", keyword);
                 return CommentIntent.HUMAN_FEEDBACK;
             }
         }
 
-        // Check if it's a question
-        if (body.endsWith("?") || body.startsWith("why") || body.startsWith("how")
-                || body.startsWith("what") || body.startsWith("when") || body.startsWith("where")
-                || body.startsWith("can you explain")) {
+        // 4. Check if it's a question
+        if (body.endsWith("?")) {
             return CommentIntent.QUESTION;
         }
+        for (String starter : QUESTION_STARTERS) {
+            if (body.startsWith(starter)) {
+                return CommentIntent.QUESTION;
+            }
+        }
 
-        // Default: treat as a command
+        // 5. Default: treat as a command
         return CommentIntent.AI_COMMAND;
     }
 

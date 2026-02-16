@@ -164,7 +164,18 @@ public class AppConfig {
                 getIntEnv("AGENT_MAX_WALL_CLOCK_SECONDS", 600),
                 getEnv("AGENT_TRIGGER_PREFIX", "@ai"),
                 getIntEnv("AGENT_TOKEN_BUDGET", 50000),
-                getIntEnv("AGENT_RECENT_MESSAGES_TO_KEEP", 2));
+                getIntEnv("AGENT_RECENT_MESSAGES_TO_KEEP", 2),
+                Boolean.parseBoolean(getEnv("AGENT_GUARDRAILS_ENABLED", "true")),
+                getIntEnv("AGENT_COST_BUDGET_PER_TICKET", 200000),
+                Boolean.parseBoolean(getEnv("AGENT_CLASSIFIER_USE_LLM", "false")));
+    }
+
+    /**
+     * MCP server configurations as JSON string from environment.
+     * Format: JSON array of McpServerConfig objects.
+     */
+    public String getMcpServersConfig() {
+        return getEnv("MCP_SERVERS_CONFIG", "[]");
     }
 
     public ContextMode getContextMode() {

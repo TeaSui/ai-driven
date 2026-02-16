@@ -276,9 +276,11 @@ class AgentEndToEndTest {
                                 assertTrue(msg.getSk().startsWith("MSG#"), "SK should start with MSG#");
                         }
 
-                        // Verify Final Comment posted to Jira
-                        verify(jiraClient, times(2)).addComment(eq("CRM-86"), anyString()); // 1 ack + 1 final
-                        verify(jiraClient).addComment(eq("CRM-86"),
+                        // Verify Final Comment posted to Jira:
+                        // 1 addComment (ack from webhook)
+                        // 1 editComment (final response updates the ack comment in-place)
+                        verify(jiraClient, times(1)).addComment(eq("CRM-86"), anyString()); // 1 ack only
+                        verify(jiraClient).editComment(eq("CRM-86"), eq("comment-ack-123"),
                                         contains("I have analyzed the ticket and code context"));
                 }
         }

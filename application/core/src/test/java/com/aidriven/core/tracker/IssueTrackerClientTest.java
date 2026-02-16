@@ -37,12 +37,12 @@ class IssueTrackerClientTest {
     }
 
     @Test
-    void interface_should_have_exactly_four_methods() {
+    void interface_should_have_exactly_five_methods() {
         Set<String> methods = Arrays.stream(IssueTrackerClient.class.getDeclaredMethods())
                 .map(Method::getName)
                 .collect(Collectors.toSet());
 
-        assertEquals(Set.of("getTicket", "addComment", "transitionTicket", "updateStatus"), methods);
+        assertEquals(Set.of("getTicket", "addComment", "editComment", "transitionTicket", "updateStatus"), methods);
     }
 
 }

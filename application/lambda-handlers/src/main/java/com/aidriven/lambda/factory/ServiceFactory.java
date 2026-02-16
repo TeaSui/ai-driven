@@ -17,9 +17,20 @@ import com.aidriven.tool.context.SmartContextStrategy;
 import com.aidriven.tool.context.FullRepoStrategy;
 import com.aidriven.core.context.ContextStrategy;
 import com.aidriven.core.agent.ConversationRepository;
+import com.aidriven.core.agent.CostTracker;
 import com.aidriven.core.agent.DynamoConversationRepository;
 import com.aidriven.core.agent.ConversationWindowManager;
+import com.aidriven.core.agent.guardrail.ApprovalStore;
+import com.aidriven.core.agent.guardrail.GuardedToolRegistry;
+import com.aidriven.core.agent.guardrail.ToolRiskRegistry;
+import com.aidriven.core.agent.tool.ToolRegistry;
 import com.aidriven.core.config.AgentConfig;
+import com.aidriven.core.config.McpServerConfig;
+import com.aidriven.mcp.McpBridgeToolProvider;
+import com.aidriven.mcp.McpConnectionFactory;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import com.aidriven.core.service.IdempotencyService;
 import com.aidriven.core.source.Platform;
@@ -30,13 +41,22 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sfn.SfnClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Singleton factory for creating services and clients.
  * Ensures single instances of expensive clients (DynamoDB, SecretsManager) are
- * reused
- * across Lambda invocations (execution context reuse).
+ * reused across Lambda invocations (execution context reuse).
+ *
+ * <p>
+ * Phase 3: Added guardrails (GuardedToolRegistry, ApprovalStore, CostTracker).
+ * </p>
+ * <p>
+ * Phase 4: Added MCP bridge providers (McpBridgeToolProvider via
+ * McpConnectionFactory).
+ * </p>
  */
+@Slf4j
 public class ServiceFactory {
 
     private static final ServiceFactory INSTANCE = new ServiceFactory();
@@ -252,5 +272,95 @@ public class ServiceFactory {
                 (long) appConfig.getMaxTotalContextChars());
 
         return new ContextService(smartStrategy, fullRepoStrategy, appConfig.getContextMode());
+    }
+
+    // --- Phase 3: Guardrails + Cost Tracking ---
+
+    private ApprovalStore approvalStore;
+    private CostTracker costTracker;
+    private McpConnectionFactory mcpConnectionFactory;
+    private List<McpBridgeToolProvider> mcpProviders;
+
+    public synchronized ApprovalStore getApprovalStore() {
+        if (approvalStore == null) {
+            approvalStore = new ApprovalStore(getDynamoDbClient(), appConfig.getDynamoDbTableName());
+        }
+        return approvalStore;
+    }
+
+    public synchronized CostTracker getCostTracker() {
+        if (costTracker == null) {
+            AgentConfig config = appConfig.getAgentConfig();
+            costTracker = new CostTracker(getDynamoDbClient(), appConfig.getDynamoDbTableName(),
+                    config.costBudgetPerTicket());
+        }
+        return costTracker;
+    }
+
+    /**
+     * Creates a GuardedToolRegistry wrapping the given ToolRegistry.
+     * Uses guardrail configuration from AgentConfig.
+     */
+    public GuardedToolRegistry createGuardedToolRegistry(ToolRegistry toolRegistry) {
+        AgentConfig config = appConfig.getAgentConfig();
+        return new GuardedToolRegistry(
+                toolRegistry,
+                new ToolRiskRegistry(),
+                getApprovalStore(),
+                config.guardrailsEnabled());
+    }
+
+    // --- Phase 4: MCP Integration ---
+
+    public synchronized McpConnectionFactory getMcpConnectionFactory() {
+        if (mcpConnectionFactory == null) {
+            mcpConnectionFactory = new McpConnectionFactory(getSecretsProvider());
+        }
+        return mcpConnectionFactory;
+    }
+
+    /**
+     * Creates MCP tool providers from configuration.
+     * Connects to each enabled MCP server and discovers tools.
+     * Results are cached for Lambda execution context reuse.
+     *
+     * @return List of MCP bridge tool providers (may be empty if none configured)
+     */
+    public synchronized List<McpBridgeToolProvider> getMcpToolProviders() {
+        if (mcpProviders != null) {
+            return mcpProviders;
+        }
+
+        mcpProviders = new java.util.ArrayList<>();
+        String configJson = appConfig.getMcpServersConfig();
+
+        if (configJson == null || configJson.isBlank() || "[]".equals(configJson.trim())) {
+            return mcpProviders;
+        }
+
+        try {
+            McpServerConfig[] configs = getObjectMapper().readValue(configJson, McpServerConfig[].class);
+            McpConnectionFactory factory = getMcpConnectionFactory();
+
+            for (McpServerConfig config : configs) {
+                if (!config.enabled()) {
+                    log.info("MCP server '{}' is disabled, skipping", config.namespace());
+                    continue;
+                }
+
+                try {
+                    McpBridgeToolProvider provider = factory.createProvider(config);
+                    mcpProviders.add(provider);
+                    log.info("Registered MCP tool provider: {}", provider);
+                } catch (Exception e) {
+                    log.error("Failed to connect MCP server '{}': {}", config.namespace(), e.getMessage(), e);
+                    // Continue with remaining servers — one failure shouldn't block all MCP
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse MCP_SERVERS_CONFIG: {}", e.getMessage(), e);
+        }
+
+        return mcpProviders;
     }
 }

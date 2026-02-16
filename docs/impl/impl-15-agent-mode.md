@@ -1,8 +1,8 @@
 # impl-15: Conversational Agent Mode (5.1)
 
-**Status:** In Progress
+**Status:** Phase 1-4 Complete · Phase 5+ Planned
 **Priority:** 5.1
-**Impact:** Transform from deterministic pipeline to interactive AI agent — Jira comments become a chat interface for multi-turn, multi-tool orchestration
+**Impact:** Transform from deterministic pipeline to interactive AI agent — Jira comments become a chat interface for multi-turn, multi-tool orchestration with MCP extensibility
 
 ---
 
@@ -94,32 +94,36 @@ AGENT MODE:
                    │ Claude selects tools dynamically
                    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│          ToolRegistry (routes by namespace)                   │
-│                                                              │
-│  ┌─ SourceControlToolProvider ─┐ ┌─ IssueTrackerToolProvider ┐│
-│  │  namespace: source_control  │ │  namespace: issue_tracker  ││
-│  │  wraps: SourceControlClient │ │  wraps: IssueTrackerClient ││
-│  │  • create_branch            │ │  • get_ticket              ││
-│  │  • commit_files             │ │  • add_comment             ││
-│  │  • create_pr                │ │  • transition_ticket       ││
-│  │  • get_file / search_files  │ │  • update_status           ││
-│  └─────────────────────────────┘ └────────────────────────────┘│
-│                                                              │
-│  ┌─ MonitoringToolProvider ────┐ ┌─ MessagingToolProvider ───┐│
-│  │  namespace: monitoring      │ │  namespace: messaging      ││
-│  │  wraps: MonitoringClient    │ │  wraps: MessagingClient    ││
-│  │  • search_logs              │ │  • send_message            ││
-│  │  • get_metrics              │ │  • send_channel_message    ││
-│  │  • get_alerts               │ │  • create_thread           ││
-│  └─────── (Phase 4) ──────────┘ └──────── (Phase 4) ────────┘│
-│                                                              │
-│  ┌─ DataToolProvider ─────────┐ ┌─ KnowledgeToolProvider ───┐│
-│  │  namespace: data            │ │  namespace: knowledge      ││
-│  │  wraps: DataClient          │ │  wraps: KnowledgeClient    ││
-│  │  • execute_query            │ │  • search_docs             ││
-│  │  • list_tables              │ │  • get_page                ││
-│  │  • describe_table           │ │                            ││
-│  └─────── (Phase 4) ──────────┘ └──────── (Future) ─────────┘│
+│     GuardedToolRegistry (Phase 3: risk gate decorator)       │
+│  ┌──────────────────────────────────────────────────────────┐│
+│  │          ToolRegistry (routes by namespace)               ││
+│  │                                                          ││
+│  │  ┌─ SourceControlToolProvider ─┐ ┌─ IssueTrackerTP ────┐││
+│  │  │  namespace: source_control  │ │  namespace: issue_*  │││
+│  │  │  wraps: SourceControlClient │ │  wraps: JiraClient   │││
+│  │  │  • create_branch            │ │  • get_ticket        │││
+│  │  │  • commit_files / create_pr │ │  • add_comment       │││
+│  │  │  • get_file / search_files  │ │  • update_status     │││
+│  │  │  • merge_pr ⚠️ HIGH risk    │ │                      │││
+│  │  └─────────────────────────────┘ └──────────────────────┘││
+│  │                                                          ││
+│  │  ┌─ CodeContextToolProvider ───┐                         ││
+│  │  │  namespace: code_context    │                         ││
+│  │  │  wraps: ContextService      │                         ││
+│  │  │  • search_code / get_file   │                         ││
+│  │  └─────────────────────────────┘                         ││
+│  │                                                          ││
+│  │  ┌─ McpBridgeToolProvider ──── (Phase 4: MCP Gateway) ──┐││
+│  │  │  One instance per MCP server. Tools auto-discovered.  │││
+│  │  │  namespace: {config}  │  wraps: McpSyncClient         │││
+│  │  │  e.g., monitoring_*   │  via MCP Java SDK             │││
+│  │  │  e.g., messaging_*    │  stdio / HTTP transport       │││
+│  │  │  e.g., data_*         │  secrets from AWS SM          │││
+│  │  └───────────────────────────────────────────────────────┘││
+│  └──────────────────────────────────────────────────────────┘│
+│  ToolRiskRegistry → ActionPolicy (LOW/MEDIUM auto, HIGH gate)│
+│  ApprovalStore (DynamoDB) ← pending HIGH-risk actions        │
+│  CostTracker (DynamoDB)   ← per-ticket token budget          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -127,10 +131,12 @@ AGENT MODE:
 
 The agent is built as a **Modular Monolith** to ensure flexibility and separation of concerns without the operational overhead of microservices.
 
-*   **`core` Module**: Contains the `AgentOrchestrator`, `ToolRegistry`, `AiClient`, and `ToolProvider` interface.
+*   **`core` Module**: Contains `AgentOrchestrator`, `ToolRegistry`, `ToolProvider` interface, guardrails (`GuardedToolRegistry`, `ToolRiskRegistry`, `ApprovalStore`), `CostTracker`, and `CommentIntentClassifier`.
 *   **`tool-source-control` Module**: Contains `SourceControlToolProvider` and depends on `core`.
 *   **`tool-issue-tracker` Module**: Contains `IssueTrackerToolProvider` and depends on `core`.
-*   **`lambda-handlers`**: Depends on `core` and specific `tool-*` modules to assemble the agent.
+*   **`tool-code-context` Module**: Contains `CodeContextToolProvider` and depends on `core`.
+*   **`mcp-bridge` Module** (Phase 4): Contains `McpBridgeToolProvider` and `McpConnectionFactory`. Bridges ANY MCP server into the `ToolProvider` contract via the MCP Java SDK.
+*   **`lambda-handlers`**: Depends on `core`, `tool-*` modules, and `mcp-bridge` to assemble the full agent.
 
 ### Trade-offs (Counter-arguments)
 
@@ -508,7 +514,7 @@ Prevents race conditions when multiple comments arrive in rapid succession.
   - `ContentBasedDeduplication`: enabled (prevents duplicate webhook deliveries)
   - `VisibilityTimeout`: 300 seconds (5 min — matches max agent turn duration)
   - Dead-letter queue: `ai-driven-agent-tasks-dlq.fifo` (maxReceiveCount: 3)
-- [ ] Flow:
+- [x] Flow:
   ```
   Jira Webhook → AgentWebhookHandler (validate + ack comment) → SQS FIFO
        → AgentProcessorHandler (Lambda, triggered by SQS) → AgentOrchestrator
@@ -560,148 +566,159 @@ Prevents race conditions when multiple comments arrive in rapid succession.
   - Append tool results
 - [x] Update `AgentProcessorHandler` to wire it all together
 
-#### 3.1 Actor-Aware Intent Classification
+### Phase 3: Multi-Actor Collaboration + Guardrails
 
-- [ ] Upgrade `CommentIntentClassifier` to use Claude for ambiguous cases:
-  - Rule-based fast path for obvious intents (`@ai`, `LGTM`, etc.)
-  - Claude classification fallback for ambiguous comments
-  - Context-aware: if AI posted a PR and next comment is from reviewer → likely feedback
+#### 3.1 Guardrails Framework `[DONE]`
 
-#### 3.2 Feedback Loop Handler
+Risk-based guardrails that gate HIGH-risk tool calls behind human approval:
 
-- [ ] Handle reviewer feedback on AI-created PRs:
-  ```
-  Reviewer: "Use Optional instead of null check"
-  → AI loads conversation context (knows which PR, which files)
-  → AI modifies files, pushes new commit to same PR
-  → AI comments: "Updated based on feedback. Changes: [diff summary]"
-  ```
+- [x] `RiskLevel` enum: LOW (read-only), MEDIUM (write), HIGH (destructive)
+- [x] `ActionPolicy` record with `autoExecute()` / `requireApproval()` factories
+- [x] `ToolRiskRegistry`: pattern-based tool→risk mapping with contextual assessment
+  - DEFAULT rules: HIGH (`_merge_`, `_delete_`), MEDIUM (`_create_branch`, `_commit_files`, `_create_pr`, `_update_status`), LOW (`_get_`, `_search_`, `_list_`, `_add_comment`)
+  - Context-sensitive: `_update_status` with status containing "done"/"closed" → HIGH
+  - Per-tool exact overrides (highest priority)
+- [x] `GuardedToolRegistry`: decorator around `ToolRegistry`
+  - LOW/MEDIUM → execute immediately
+  - HIGH → store pending approval in DynamoDB, return approval prompt
+  - `executeApproved()` for consuming approved actions
+- [x] `ApprovalStore`: DynamoDB-backed store (PK=AGENT#{ticketKey}, SK=APPROVAL#{timestamp})
+  - 24-hour TTL auto-expiry for unanswered approvals
+  - `storePendingApproval()`, `getLatestPending()`, `consumeApproval()`
+- [x] `AgentConfig` updated: `guardrailsEnabled`, `costBudgetPerTicket`, `classifierUseLlm`
 
-#### 3.3 Approval Handler
+Files: `core/.../agent/guardrail/{RiskLevel,ActionPolicy,ToolRiskRegistry,GuardedToolRegistry,ApprovalStore}.java`
 
-- [ ] Handle approval signals:
-  ```
-  Reviewer: "LGTM, merge it"
-  → AI detects APPROVAL intent
-  → AI comments: "Merging PR #342..." (or asks for confirmation if configured)
-  → AI merges PR via source control API
-  → AI transitions Jira ticket to "Done"
-  ```
+#### 3.2 Enhanced Intent Classification `[DONE]`
 
-#### 3.4 Guardrails
+- [x] Expanded `CommentIntentClassifier` with richer pattern matching:
+  - REJECTION_KEYWORDS: "reject", "deny", "cancel", "no don't"
+  - Expanded FEEDBACK_KEYWORDS: 18 patterns including "instead", "rather", "please change"
+  - QUESTION_STARTERS: "what", "how", "why", "where", "when", "is there", "can you explain"
+  - Reordered: rejection → approval → feedback → question → AI_COMMAND
+- [x] Optional Claude (Haiku) fallback behind `AGENT_CLASSIFIER_USE_LLM=true` flag
+  - Only triggered for ambiguous cases; adds ~500ms latency
+  - Constructor overload: `CommentIntentClassifier(AiClient, boolean useLlmFallback)`
 
-- [ ] Configurable approval requirements for high-risk actions:
-  ```java
-  public enum RiskLevel { LOW, MEDIUM, HIGH }
+#### 3.3 Feedback Loop Handler `[DONE]`
 
-  // LOW: search logs, read files, add comments → auto-execute
-  // MEDIUM: create branch, commit code, open PR → execute, notify
-  // HIGH: merge PR, deploy, delete branch → require explicit approval comment
-  ```
-- [ ] Tool call budget per conversation turn (default: 10)
-- [ ] Token budget per ticket conversation (default: 200k total)
-- [ ] Cost tracking per ticket in DynamoDB metrics
+- [x] Intent-aware system prompts in `AgentOrchestrator`:
+  - `HUMAN_FEEDBACK` → prompt instructs Claude to review conversation history, apply feedback, update artifacts
+  - `QUESTION` → prompt instructs Claude to gather info via tools and provide concise answer
+  - `APPROVAL` → handled by `AgentProcessorHandler` before reaching orchestrator
+  - `AI_COMMAND` (default) → standard guidelines
+- [x] `process(AgentRequest, CommentIntent)` overload in `AgentOrchestrator`
+
+**Key insight:** No new handler class needed — the orchestrator + conversation history + intent-aware prompts handle this naturally.
+
+#### 3.4 Approval Handler `[DONE]`
+
+- [x] `AgentProcessorHandler` intercepts APPROVAL intent before entering orchestrator loop:
+  1. Loads pending approval from `ApprovalStore.getLatestPending()`
+  2. If found + approved → `GuardedToolRegistry.executeApproved()`
+  3. If found + rejected → consume approval, post rejection message
+  4. If not found → inform user no pending action
+- [x] Wired `CommentIntentClassifier` into `AgentProcessorHandler` constructor
+
+#### 3.5 Cost Tracking `[DONE]`
+
+- [x] `CostTracker`: per-ticket token budget enforcement
+  - DynamoDB: PK=AGENT#{ticketKey}, SK=COST_SUMMARY, 30-day TTL
+  - `hasRemainingBudget()`, `addTokens()` (atomic ADD), `getRemainingBudget()`
+  - Default budget: 200k tokens per ticket (configurable via `AGENT_COST_BUDGET_PER_TICKET`)
+  - Non-fatal: tracking failures don't block processing
+- [x] Budget check at start of `AgentOrchestrator.process()`
+- [x] Token cost recorded after each orchestrator completion
 
 ---
 
-### Phase 4: External Tool Integrations (Future)
+### Phase 4: MCP Integration Gateway `[DONE]`
 
-Each new integration follows the same pattern: **domain interface → client impl → ToolProvider → register**.
+**Rationale:** Instead of building custom Java clients for each external service (Datadog, Slack, Databricks), we use the MCP (Model Context Protocol) Java SDK to bridge ANY MCP server into our ToolProvider contract. One `McpBridgeToolProvider` class gives access to hundreds of existing MCP servers with zero custom client code.
+
+#### 4.1 MCP Client Bridge `[DONE]`
+
+New Gradle module: `mcp-bridge/` (dependency: `io.modelcontextprotocol.sdk:mcp`)
+
+- [x] `McpBridgeToolProvider implements ToolProvider`:
+  - Wraps `McpSyncClient` from MCP Java SDK
+  - `tools/list` → `toolDefinitions()` (discovered at construction, cached)
+  - `tools/call` → `execute(ToolCall)` (strips namespace prefix, calls MCP server)
+  - Tool names prefixed with namespace: `monitoring_search_logs`
+  - Schema conversion: MCP JSON Schema → Claude-compatible JSON Schema (mostly pass-through)
+  - Result conversion: MCP TextContent blocks → ToolResult text
+- [x] `McpConnectionFactory`:
+  - Creates connections from `McpServerConfig`
+  - **stdio transport**: launches MCP server as child process (e.g., `npx @datadog/mcp-server`)
+  - **HTTP/SSE transport**: connects to remote MCP server URL
+  - Secret resolution: merges static env + AWS Secrets Manager credentials
+  - `McpConnectionException` for connection/init failures
+
+Files: `mcp-bridge/src/.../mcp/{McpBridgeToolProvider,McpConnectionFactory}.java`
+
+#### 4.2 MCP Server Configuration `[DONE]`
+
+- [x] `McpServerConfig` record in `core`:
+  ```java
+  public record McpServerConfig(
+      String namespace,    // "monitoring", "messaging", "data"
+      String transport,    // "stdio" or "http"
+      String command,      // stdio: "npx @datadog/mcp-server"
+      String[] args,       // stdio: additional arguments
+      String url,          // http: "https://mcp.datadog.com/v1"
+      Map<String, String> env,  // static environment variables
+      String secretArn,    // AWS Secrets Manager ARN for credentials
+      boolean enabled      // feature flag
+  ) {}
+  ```
+- [x] `AppConfig.getMcpServersConfig()` → reads `MCP_SERVERS_CONFIG` env var (JSON array)
+- [x] CDK stack updated with `MCP_SERVERS_CONFIG` env var for AgentProcessorHandler
+
+Example MCP_SERVERS_CONFIG:
+```json
+[
+  {"namespace":"monitoring","transport":"stdio","command":"npx","args":["@datadog/mcp-server"],"secretArn":"arn:aws:secretsmanager:...","enabled":true},
+  {"namespace":"messaging","transport":"http","url":"https://mcp.slack.dev","secretArn":"arn:aws:secretsmanager:...","enabled":true}
+]
+```
+
+#### 4.3 Dynamic Tool Discovery & Registration `[DONE]`
+
+- [x] `ServiceFactory` additions:
+  - `getMcpConnectionFactory()` — singleton factory
+  - `getMcpToolProviders()` — parses config, connects to each enabled MCP server, discovers tools, returns list of `McpBridgeToolProvider` (cached for Lambda execution context reuse)
+  - `createGuardedToolRegistry(ToolRegistry)` — wraps with guardrails
+  - `getApprovalStore()`, `getCostTracker()` — Phase 3 singletons
+- [x] `AgentProcessorHandler` updated:
+  - Registers MCP providers alongside core providers in `ToolRegistry`
+  - Creates `GuardedToolRegistry` wrapper
+  - Passes `CostTracker` and intent to `AgentOrchestrator`
+
+**Flow at Lambda cold start:**
+```
+AgentProcessorHandler.processMessage()
+  → toolRegistry.register(SourceControlToolProvider)
+  → toolRegistry.register(IssueTrackerToolProvider)
+  → toolRegistry.register(CodeContextToolProvider)
+  → for each MCP config:
+      → McpConnectionFactory.connect(config)
+      → mcpClient.listTools()  // discover tools
+      → toolRegistry.register(new McpBridgeToolProvider(namespace, mcpClient))
+  → GuardedToolRegistry wraps toolRegistry
+  → AgentOrchestrator(claudeClient, toolRegistry, guardedToolRegistry, ...)
+```
+
+#### 4.4 Adding a New MCP Integration (Checklist)
+
+For any future integration (Datadog, Slack, Notion, PagerDuty, etc.):
 
 ```
-Step 1: Define typed domain interface in `core`
-Step 2: Implement client in new Gradle module
-Step 3: Create ToolProvider wrapping the client
-Step 4: Register in ServiceFactory.getToolRegistry()
-```
-
-Zero changes to AgentOrchestrator, ToolRegistry, or existing providers.
-
-#### 4.1 Monitoring — Datadog Integration
-
-- [ ] Create `MonitoringClient` interface in `core` module:
-  ```java
-  public interface MonitoringClient {
-      List<LogEntry> searchLogs(LogQuery query) throws Exception;
-      List<MetricPoint> getMetrics(MetricQuery query) throws Exception;
-      List<Alert> getActiveAlerts(String service) throws Exception;
-  }
-  ```
-- [ ] Create `datadog-client` Gradle module with `DatadogClient implements MonitoringClient`
-- [ ] Create `MonitoringToolProvider implements ToolProvider`:
-  ```java
-  public class MonitoringToolProvider implements ToolProvider {
-      private final MonitoringClient client;
-
-      @Override public String namespace() { return "monitoring"; }
-
-      @Override
-      public List<Tool> toolDefinitions() {
-          return List.of(
-              Tool.of("monitoring_search_logs", "Search application logs by query, service, and time range", ...),
-              Tool.of("monitoring_get_metrics", "Query time-series metrics for a service", ...),
-              Tool.of("monitoring_get_alerts", "Get active alerts/monitors for a service", ...)
-          );
-      }
-
-      @Override
-      public ToolResult execute(ToolCall call) {
-          return switch (call.name()) {
-              case "monitoring_search_logs" -> {
-                  LogQuery query = mapper.convertValue(call.input(), LogQuery.class);
-                  yield ToolResult.success(client.searchLogs(query));
-              }
-              // ... other tools
-          };
-      }
-  }
-  ```
-- [ ] Register: `registry.register(new MonitoringToolProvider(getDatadogClient()))`
-- [ ] Enable via ticket label: `tool:monitoring`
-
-#### 4.2 Messaging — Slack Integration
-
-- [ ] Create `MessagingClient` interface in `core` module:
-  ```java
-  public interface MessagingClient {
-      MessageResult sendDirectMessage(String userId, String message) throws Exception;
-      MessageResult sendChannelMessage(String channel, String message) throws Exception;
-      MessageResult createThread(String channel, String parentTs, String message) throws Exception;
-  }
-  ```
-- [ ] Create `slack-client` Gradle module with `SlackClient implements MessagingClient`
-- [ ] Create `MessagingToolProvider implements ToolProvider` (namespace: `messaging`)
-- [ ] Register: `registry.register(new MessagingToolProvider(getSlackClient()))`
-- [ ] Enable via ticket label: `tool:messaging`
-
-#### 4.3 Data — Databricks Integration
-
-- [ ] Create `DataClient` interface in `core` module:
-  ```java
-  public interface DataClient {
-      QueryResult executeQuery(String sql, String warehouse) throws Exception;
-      List<TableInfo> listTables(String catalog, String schema) throws Exception;
-      TableSchema describeTable(String catalog, String schema, String table) throws Exception;
-  }
-  ```
-- [ ] Create `databricks-client` Gradle module with `DatabricksClient implements DataClient`
-- [ ] Create `DataToolProvider implements ToolProvider` (namespace: `data`)
-- [ ] Register: `registry.register(new DataToolProvider(getDatabricksClient()))`
-- [ ] Enable via ticket label: `tool:data`
-
-#### 4.4 Adding a New Integration (Checklist)
-
-For any future integration (e.g., Notion, PagerDuty, Confluence):
-
-```
-□ Define domain interface in core/src/.../core/{domain}/{DomainClient}.java
-□ Create Gradle module: {name}-client/
-□ Implement {Name}Client implements {DomainClient}
-□ Create {Name}ToolProvider implements ToolProvider
-□ Add to ServiceFactory.getToolRegistry()
-□ Add secret ARN to CDK stack (if needed)
-□ Document label: tool:{namespace}
-□ Unit test provider with mocked domain client
+□ Find or create MCP server for the service (npmjs, GitHub, etc.)
+□ Add entry to MCP_SERVERS_CONFIG env var in CDK stack
+□ Create secret in AWS Secrets Manager with API keys
+□ Deploy — tools are auto-discovered at Lambda cold start
+□ Enable via ticket label: tool:{namespace}
+□ No Java code changes required
 ```
 
 ---
@@ -778,73 +795,91 @@ and avoids these constraints.
 
 ## Testing Strategy
 
+### Phase 1-2 Tests (Complete)
+
 - [x] Unit test `CommentIntentClassifier` with various comment formats
 - [x] Unit test `ToolRegistry` — provider registration, namespace routing, ticket-based filtering
 - [x] Unit test `SourceControlToolProvider` — mock `SourceControlClient`, verify typed dispatch
 - [x] Unit test `IssueTrackerToolProvider` — mock `IssueTrackerClient`, verify typed dispatch
 - [x] Unit test `AgentOrchestrator` — mock Claude responses with tool_use, verify agentic loop
-- [ ] Unit test `ConversationWindowManager` — token budget enforcement, summarization
-- [x] Unit test `JiraCommentFormatter` — markdown conversion, truncation
+- [x] Unit test `JiraCommentFormatter` — markdown conversion, truncation, code block regex
 - [x] Unit test namespace extraction — edge cases (unknown namespace, no underscore)
+
+### Phase 3 Tests (Complete)
+
+- [x] Unit test `ToolRiskRegistry` — risk assessment for LOW/MEDIUM/HIGH, contextual overrides
+- [x] Unit test `GuardedToolRegistry` — delegation for LOW, approval gate for HIGH, guardrails disabled mode
+- [x] Unit test `CostTracker` — budget check, atomic token add, non-fatal error handling
+- [x] Unit test `McpServerConfig` — validation, JSON deserialization, transport detection
+
+### Phase 4 Tests (Complete)
+
+- [x] Unit test `McpBridgeToolProvider` — tool discovery, namespace prefixing, execute flow, error handling, sanitization
+
+### Pending Tests
+
+- [ ] Unit test `ConversationWindowManager` — token budget enforcement, summarization
+- [ ] Unit test `ApprovalStore` — DynamoDB store/retrieve/consume lifecycle
 - [ ] Integration test: full webhook → Claude → tool execution → Jira comment flow
 - [ ] Integration test: multi-turn conversation state persistence
-- [ ] Integration test: register multiple providers, verify correct routing
-- [ ] Load test: concurrent comments on same ticket (optimistic locking)
+- [ ] Integration test: MCP server discovery + registration + tool execution
+- [ ] Integration test: approval flow (HIGH risk → approval comment → execution)
+- [ ] Load test: concurrent comments on same ticket (FIFO ordering)
 
 ---
 
-## Files to Create/Modify
+## Files Created/Modified (All Phases)
 
-### Core Agent Framework
+### Phase 1-2: Core Agent Framework
 
-| Action | File |
+| Status | File |
 |--------|------|
-| NEW | `core/src/main/java/com/aidriven/core/agent/AgentOrchestrator.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/CommentIntentClassifier.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/JiraCommentFormatter.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/ConversationRepository.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/ConversationWindowManager.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/model/AgentRequest.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/model/AgentResponse.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/model/CommentIntent.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/model/ConversationMessage.java` |
+| ✅ | `core/.../agent/AgentOrchestrator.java` |
+| ✅ | `core/.../agent/CommentIntentClassifier.java` |
+| ✅ | `core/.../agent/JiraCommentFormatter.java` |
+| ✅ | `core/.../agent/ProgressTracker.java` |
+| ✅ | `core/.../agent/ConversationRepository.java` |
+| ✅ | `core/.../agent/DynamoConversationRepository.java` |
+| ✅ | `core/.../agent/ConversationWindowManager.java` |
+| ✅ | `core/.../agent/model/{AgentRequest,AgentResponse,CommentIntent,ConversationMessage}.java` |
+| ✅ | `core/.../agent/tool/{ToolProvider,ToolRegistry,Tool,ToolCall,ToolResult,Schema}.java` |
+| ✅ | `tool-source-control/.../SourceControlToolProvider.java` |
+| ✅ | `tool-issue-tracker/.../IssueTrackerToolProvider.java` |
+| ✅ | `tool-code-context/.../CodeContextToolProvider.java` |
+| ✅ | `lambda-handlers/.../AgentWebhookHandler.java` |
+| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` |
+| ✅ | `lambda-handlers/.../factory/ServiceFactory.java` (modified) |
+| ✅ | `claude-client/.../ClaudeClient.java` (modified: tool-use support) |
+| ✅ | `core/.../config/{AppConfig,AgentConfig}.java` (modified) |
 
-### Tool Provider Pattern
+### Phase 3: Guardrails + Multi-Actor Collaboration
 
-| Action | File |
+| Status | File |
 |--------|------|
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/ToolProvider.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/ToolRegistry.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/Tool.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/ToolCall.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/ToolResult.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/Schema.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/SourceControlToolProvider.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/IssueTrackerToolProvider.java` |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/CodeContextToolProvider.java` |
+| ✅ | `core/.../agent/guardrail/RiskLevel.java` |
+| ✅ | `core/.../agent/guardrail/ActionPolicy.java` |
+| ✅ | `core/.../agent/guardrail/ToolRiskRegistry.java` |
+| ✅ | `core/.../agent/guardrail/GuardedToolRegistry.java` |
+| ✅ | `core/.../agent/guardrail/ApprovalStore.java` |
+| ✅ | `core/.../agent/CostTracker.java` |
+| ✅ | `core/.../config/AgentConfig.java` (modified: 3 new fields) |
+| ✅ | `core/.../agent/CommentIntentClassifier.java` (modified: enhanced patterns + LLM fallback) |
+| ✅ | `core/.../agent/AgentOrchestrator.java` (modified: intent-aware prompts, guardrails, cost) |
+| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` (modified: intent routing, approval flow) |
 
-### Future Tool Providers (Phase 4)
+### Phase 4: MCP Integration Gateway
 
-| Action | File |
+| Status | File |
 |--------|------|
-| NEW | `core/src/main/java/com/aidriven/core/monitoring/MonitoringClient.java` |
-| NEW | `datadog-client/` (new Gradle module) |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/MonitoringToolProvider.java` |
-| NEW | `core/src/main/java/com/aidriven/core/messaging/MessagingClient.java` |
-| NEW | `slack-client/` (new Gradle module) |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/MessagingToolProvider.java` |
-| NEW | `core/src/main/java/com/aidriven/core/data/DataClient.java` |
-| NEW | `databricks-client/` (new Gradle module) |
-| NEW | `core/src/main/java/com/aidriven/core/agent/tool/DataToolProvider.java` |
-
-### Existing Files Modified
-
-| Action | File |
-|--------|------|
-| MODIFY | `claude-client/src/main/java/com/aidriven/claude/ClaudeClient.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/factory/ServiceFactory.java` |
-| NEW | `lambda-handlers/src/main/java/com/aidriven/lambda/AgentWebhookHandler.java` |
-| MODIFY | `infrastructure/lib/ai-driven-stack.ts` |
+| ✅ | `mcp-bridge/build.gradle` (new Gradle module) |
+| ✅ | `mcp-bridge/.../mcp/McpBridgeToolProvider.java` |
+| ✅ | `mcp-bridge/.../mcp/McpConnectionFactory.java` |
+| ✅ | `core/.../config/McpServerConfig.java` |
+| ✅ | `core/.../config/AppConfig.java` (modified: `getMcpServersConfig()`) |
+| ✅ | `lambda-handlers/.../factory/ServiceFactory.java` (modified: MCP factory methods) |
+| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` (modified: MCP registration) |
+| ✅ | `settings.gradle` (modified: `include 'mcp-bridge'`) |
+| ✅ | `infrastructure/lib/ai-driven-stack.ts` (modified: new env vars) |
 
 ---
 
@@ -879,28 +914,200 @@ and avoids these constraints.
 
 ---
 
-## MCP Migration Path (Optional)
+## MCP Architecture (Implemented)
 
-Phase 1-3 use Claude's native tool-use API (simpler, fewer moving parts). The `ToolProvider`
-pattern is intentionally designed as a 1:1 mapping to future MCP tool servers.
+Phase 4 introduced full MCP integration. The architecture now supports **both directions**:
 
 ```
-Current:
-  Claude API → ToolRegistry → ToolProvider.execute() → DomainClient
+INBOUND (Phase 4 — implemented):
+  MCP Server (external) → McpBridgeToolProvider → ToolRegistry → Agent
+  - Any MCP server becomes a tool provider via configuration
+  - Zero Java code for new integrations (Datadog, Slack, etc.)
 
-MCP (future):
-  Any LLM → MCP Server (wraps ToolProvider) → DomainClient
-
-  Each ToolProvider becomes an MCP server:
-    SourceControlToolProvider  →  source-control-mcp-server
-    MonitoringToolProvider     →  monitoring-mcp-server
-    MessagingToolProvider      →  messaging-mcp-server
+OUTBOUND (Phase 6 — planned):
+  External Client → MCP Protocol → Our MCP Server → ToolProvider → DomainClient
+  - Expose our SourceControl/IssueTracker as MCP servers
+  - Other agents/LLMs can call our tools via MCP
 ```
 
-Migration is mechanical — the `ToolProvider` interface already mirrors MCP's contract:
-- `namespace()` → MCP server name
-- `toolDefinitions()` → MCP tool schemas
-- `execute(ToolCall)` → MCP tool handler
+**Current tool resolution flow:**
+```
+Comment → Intent Classification → AgentOrchestrator
+  → Claude selects tools from:
+      SourceControlToolProvider   (native Java — Bitbucket/GitHub)
+      IssueTrackerToolProvider    (native Java — Jira)
+      CodeContextToolProvider     (native Java — S3 context)
+      McpBridgeToolProvider[0..N] (MCP SDK — any external MCP server)
+  → GuardedToolRegistry gates HIGH-risk calls
+  → CostTracker enforces per-ticket budget
+  → Response → Jira comment
+```
 
-When to migrate: when external teams need to contribute tools, or when you need to support
-non-Claude LLM providers that speak MCP natively.
+---
+
+## Future Phases
+
+### Phase 5: Agent Reliability & Observability
+
+Focus: production hardening, debugging, and operational visibility.
+
+#### 5.1 Structured Agent Telemetry
+
+- [ ] Emit structured CloudWatch metrics per agent invocation:
+  - `agent.turns` — number of agentic loop iterations
+  - `agent.tools_called` — tool names + durations
+  - `agent.tokens.input` / `agent.tokens.output` — per-turn token usage
+  - `agent.intent` — classified intent distribution
+  - `agent.risk_gates` — HIGH-risk approvals requested/approved/expired
+  - `agent.cost` — dollar cost per conversation (model pricing × tokens)
+- [ ] CloudWatch dashboard: Agent Operations panel (add to existing dashboard)
+- [ ] CloudWatch alarms:
+  - Budget exceeded (per-ticket cost > threshold)
+  - Approval expiry rate > 50% (users ignoring approval prompts)
+  - MCP connection failure rate
+  - Tool error rate > 10%
+
+#### 5.2 Conversation Replay & Debugging
+
+- [ ] Store full agent trace in DynamoDB/S3:
+  - Each turn: system prompt, user message, Claude response, tool calls + results
+  - Trace ID = `{ticketKey}/{ackCommentId}`
+- [ ] Replay API: given a trace ID, reconstruct the full conversation for debugging
+- [ ] Admin CLI or Lambda: `GET /agent/trace/{ticketKey}` → returns full conversation JSON
+
+#### 5.3 Retry & Recovery
+
+- [ ] On Lambda timeout (wall-clock circuit breaker):
+  - Persist partial state (which tools completed, pending results)
+  - Post Jira comment: "Partial results: {summary}. Reply to continue."
+  - Next comment on same ticket resumes from saved checkpoint
+- [ ] MCP connection recovery:
+  - On `McpSyncClient` connection drop, retry with exponential backoff
+  - After 3 failures, mark MCP provider as unhealthy, skip for current invocation
+  - Re-attempt on next Lambda cold start
+- [ ] Tool execution retry:
+  - Transient failures (HTTP 429, 503) → retry with backoff
+  - Permanent failures (404, 400) → return error to Claude, let it adapt
+
+#### 5.4 Rate Limiting & Abuse Prevention
+
+- [ ] Per-user rate limit: max N agent invocations per hour per user
+- [ ] Per-ticket rate limit: max M agent invocations per day per ticket
+- [ ] Global circuit breaker: if total agent cost exceeds daily budget, pause all agents
+- [ ] DynamoDB-backed rate limiter (atomic counters with TTL)
+
+---
+
+### Phase 6: MCP Server Mode (Bidirectional)
+
+Focus: expose our tools as MCP servers so external agents and LLMs can use them.
+
+#### 6.1 MCP Server for Source Control
+
+- [ ] Create `source-control-mcp-server` (Java or Node):
+  - Wraps `SourceControlToolProvider` as an MCP server
+  - Exposes tools: `create_branch`, `commit_files`, `create_pr`, `merge_pr`, `get_file`, `search_files`
+  - stdio transport for local development, HTTP/SSE for remote
+- [ ] Benefits: other teams' agents can create PRs in our repos via MCP
+
+#### 6.2 MCP Server for Issue Tracker
+
+- [ ] Create `issue-tracker-mcp-server`:
+  - Wraps `IssueTrackerToolProvider`
+  - Exposes tools: `get_ticket`, `add_comment`, `update_status`, `search_issues`
+- [ ] Benefits: external CI/CD agents can update Jira tickets via MCP
+
+#### 6.3 MCP Server Hosting (Lambda or ECS)
+
+- [ ] Option A: Lambda Function URL with MCP HTTP transport
+  - Stateless, auto-scaling, pay-per-use
+  - Each MCP server = one Lambda behind API Gateway
+- [ ] Option B: ECS Fargate with stdio/SSE support
+  - Long-lived connections, streaming support
+  - Better for high-frequency MCP calls
+- [ ] CDK construct: reusable `McpServerConstruct` that provisions Lambda + API Gateway + IAM
+
+#### 6.4 MCP Resource Exposure
+
+- [ ] Expose MCP resources (read-only data) alongside tools:
+  - `source_control://repo/{owner}/{repo}/file/{path}` → file content
+  - `issue_tracker://ticket/{key}` → ticket summary + status
+  - `code_context://repo/{owner}/{repo}/tree` → file tree
+- [ ] Resources enable Claude Desktop or other MCP clients to browse project context
+
+---
+
+### Phase 7: Advanced Agent Capabilities
+
+Focus: make the agent smarter, more autonomous, and more capable.
+
+#### 7.1 Multi-Step Plans (Chain of Thought)
+
+- [ ] Before executing, have Claude output a numbered plan:
+  ```
+  Plan:
+  1. Search for files referencing PaymentService
+  2. Get the file content of PaymentService.java
+  3. Create branch ai/ONC-10001-fix-npe
+  4. Commit fix with null safety + unit test
+  5. Open PR with description
+  ```
+- [ ] Post plan as Jira comment, wait for "proceed" or "modify step 3..."
+- [ ] Track plan execution progress (steps completed, remaining)
+
+#### 7.2 Background Monitoring Agent
+
+- [ ] Scheduled agent that runs periodically (EventBridge cron → SQS):
+  - Check Datadog for new alerts → create/update Jira tickets
+  - Check PRs for stale reviews → ping reviewers via Jira comment
+  - Check build status → post CI results as Jira comments
+- [ ] Requires: MCP servers for monitoring (Phase 4 config)
+- [ ] Trigger: EventBridge rule → SQS → AgentProcessorHandler with synthetic `AgentRequest`
+
+#### 7.3 Agent-to-Agent Collaboration
+
+- [ ] Agent A (Jira agent) can invoke Agent B (code review agent) via MCP:
+  - Agent A creates PR → triggers Agent B to review
+  - Agent B posts review comments → Agent A processes feedback
+- [ ] Protocol: Agent A calls `code_review_request` MCP tool → Agent B's MCP server
+
+#### 7.4 Streaming Responses
+
+- [ ] Replace poll-based progress with streaming:
+  - WebSocket connection from Jira plugin to agent
+  - Claude's streaming API → real-time tool execution updates
+  - Requires ECS Fargate (Lambda doesn't support WebSocket well)
+- [ ] Alternative: Progressive Jira comment edits (edit every 5 seconds during execution)
+
+#### 7.5 Context-Aware Tool Selection
+
+- [ ] Auto-enable tools based on ticket context (no manual labels):
+  - Ticket mentions "logs" or "error" → enable monitoring tools
+  - Ticket has PR linked → enable source control tools
+  - Ticket references Databricks → enable data tools
+- [ ] Claude-based: include ticket context in tool selection prompt
+- [ ] Rule-based fallback: keyword → namespace mapping
+
+#### 7.6 Knowledge Base Integration
+
+- [ ] MCP server for Confluence/Notion:
+  - `knowledge_search_docs` — search internal docs
+  - `knowledge_get_page` — get page content
+- [ ] Agent can reference runbooks, architecture docs, coding standards
+- [ ] Improves code quality by grounding in team conventions
+
+---
+
+## Implementation Priority Matrix
+
+| Phase | Effort | Value | Risk | Status |
+|-------|--------|-------|------|--------|
+| Phase 1: Single-Turn Agent | M | High | Low | ✅ Done |
+| Phase 2: Multi-Turn State | M | High | Low | ✅ Done |
+| Phase 3: Guardrails + Multi-Actor | M | High | Med | ✅ Done |
+| Phase 4: MCP Gateway | M | Very High | Med | ✅ Done |
+| Phase 5: Observability | S | High | Low | 🔜 Next |
+| Phase 6: MCP Server Mode | L | Med | Med | 📋 Planned |
+| Phase 7: Advanced Capabilities | XL | High | High | 📋 Planned |
+
+**Recommended next:** Phase 5 (operational visibility before scaling usage), then Phase 7.1-7.2 (plan mode + background monitoring are highest user value).
