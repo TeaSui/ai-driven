@@ -1,0 +1,8 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // Minimal dependencies - this module defines contracts only
+    api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+}
