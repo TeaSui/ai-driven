@@ -17,7 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import com.aidriven.core.config.FetchConfig;
 import com.aidriven.core.util.SourceFileFilter;
 
-import com.aidriven.lambda.context.ContextService;
+import com.aidriven.tool.context.ContextService;
 import com.aidriven.lambda.factory.ServiceFactory;
 
 import java.io.IOException;

@@ -1,8 +1,10 @@
 package com.aidriven.claude;
 
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.service.SecretsService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -21,7 +23,7 @@ import java.util.Map;
  * it automatically sends follow-up requests to get the complete response.
  */
 @Slf4j
-public class ClaudeClient {
+public class ClaudeClient implements AiClient {
 
     private static final String API_URL = "https://api.anthropic.com/v1/messages";
     private static final String DEFAULT_MODEL = "claude-opus-4-6";
@@ -186,33 +188,45 @@ public class ClaudeClient {
         return fullResponse.toString();
     }
 
-    private ApiResponse sendRequest(String systemPrompt, List<Map<String, Object>> messages, int maxTokens)
-            throws Exception {
-        Map<String, Object> requestBody = Map.of(
-                "model", model,
-                "max_tokens", maxTokens,
-                "temperature", temperature,
-                "system", systemPrompt,
-                "messages", messages);
+    /**
+     * Sends a message to Claude with tool definitions.
+     * Returns the raw response including tool_use content blocks.
+     * This is the primary entry point for the agent orchestrator.
+     *
+     * @param systemPrompt System prompt
+     * @param messages     Conversation messages (supports text, tool_use,
+     *                     tool_result blocks)
+     * @param tools        Tool definitions in Claude API format
+     * @return Raw response with content blocks and stop reason
+     */
+    @Override
+    public AiClient.ToolUseResponse chatWithTools(String systemPrompt,
+            List<Map<String, Object>> messages,
+            List<Map<String, Object>> tools) throws Exception {
+        JsonNode responseJson = sendRequestRaw(systemPrompt, messages, tools, this.maxTokens);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(API_URL))
-                .header("x-api-key", apiKey)
-                .header("anthropic-version", API_VERSION)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
-                .timeout(Duration.ofMinutes(10))
-                .build();
+        String stopReason = responseJson.has("stop_reason")
+                ? responseJson.get("stop_reason").asText()
+                : "unknown";
 
-        log.info("Sending request to Claude API (model={}, max_tokens={})", model, maxTokens);
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            log.error("Claude API error (HTTP {}): {}", response.statusCode(), response.body());
-            throw new RuntimeException("Claude API error: " + response.body());
+        ArrayNode contentBlocks = (ArrayNode) responseJson.get("content");
+        if (contentBlocks == null) {
+            contentBlocks = objectMapper.createArrayNode();
         }
 
-        JsonNode responseJson = objectMapper.readTree(response.body());
+        int inputTokens = 0, outputTokens = 0;
+        JsonNode usage = responseJson.get("usage");
+        if (usage != null) {
+            inputTokens = usage.has("input_tokens") ? usage.get("input_tokens").asInt() : 0;
+            outputTokens = usage.has("output_tokens") ? usage.get("output_tokens").asInt() : 0;
+        }
+
+        return new AiClient.ToolUseResponse(contentBlocks, stopReason, inputTokens, outputTokens);
+    }
+
+    private ApiResponse sendRequest(String systemPrompt, List<Map<String, Object>> messages, int maxTokens)
+            throws Exception {
+        JsonNode responseJson = sendRequestRaw(systemPrompt, messages, null, maxTokens);
 
         String stopReason = responseJson.has("stop_reason")
                 ? responseJson.get("stop_reason").asText()
@@ -229,6 +243,53 @@ public class ClaudeClient {
 
         String text = extractTextContent(responseJson);
         return new ApiResponse(text, stopReason);
+    }
+
+    /**
+     * Core API call method. Sends a request to Claude and returns the raw JSON
+     * response.
+     * Supports optional tools parameter for tool-use mode.
+     */
+    private JsonNode sendRequestRaw(String systemPrompt, List<Map<String, Object>> messages,
+            List<Map<String, Object>> tools, int maxTokens) throws Exception {
+        Map<String, Object> requestBody = new java.util.LinkedHashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("max_tokens", maxTokens);
+        requestBody.put("temperature", temperature);
+        requestBody.put("system", systemPrompt);
+        requestBody.put("messages", messages);
+        if (tools != null && !tools.isEmpty()) {
+            requestBody.put("tools", tools);
+        }
+
+        String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+
+        // Log the full messages array for debugging tool_result structure
+        log.info("Claude request messages count={}", messages != null ? messages.size() : 0);
+        for (int i = 0; i < (messages != null ? messages.size() : 0); i++) {
+            log.info("Message[{}]: {}", i, objectMapper.writeValueAsString(messages.get(i)));
+        }
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(API_URL))
+                .header("x-api-key", apiKey)
+                .header("anthropic-version", API_VERSION)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .timeout(Duration.ofMinutes(10))
+                .build();
+
+        log.info("Sending request to Claude API (model={}, max_tokens={}, tools={}, bodyLen={})",
+                model, maxTokens, tools != null ? tools.size() : 0, requestBodyJson.length());
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            log.error("Claude API error (HTTP {}): {}", response.statusCode(), response.body());
+            log.error("Failed request body: {}", requestBodyJson);
+            throw new RuntimeException("Claude API error: " + response.body());
+        }
+
+        return objectMapper.readTree(response.body());
     }
 
     private String extractTextContent(JsonNode json) {
@@ -249,6 +310,9 @@ public class ClaudeClient {
 
     private record ApiResponse(String text, String stopReason) {
     }
+
+    // ToolUseResponse is defined in AiClient (the interface this class implements).
+    // Use AiClient.ToolUseResponse throughout.
 
     public record Message(String role, String content) {
         public static Message user(String content) {

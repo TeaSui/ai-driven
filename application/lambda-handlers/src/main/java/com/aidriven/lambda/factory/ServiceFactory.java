@@ -12,10 +12,15 @@ import com.aidriven.core.service.impl.SecretsServiceImpl;
 import com.aidriven.jira.JiraClient;
 import com.aidriven.claude.ClaudeClient;
 import com.aidriven.core.config.ClaudeConfig;
-import com.aidriven.lambda.context.ContextService;
+import com.aidriven.tool.context.ContextService;
+import com.aidriven.tool.context.SmartContextStrategy;
+import com.aidriven.tool.context.FullRepoStrategy;
 import com.aidriven.core.context.ContextStrategy;
-import com.aidriven.lambda.context.SmartContextStrategy;
-import com.aidriven.lambda.context.FullRepoStrategy;
+import com.aidriven.core.agent.ConversationRepository;
+import com.aidriven.core.agent.DynamoConversationRepository;
+import com.aidriven.core.agent.ConversationWindowManager;
+import com.aidriven.core.config.AgentConfig;
+
 import com.aidriven.core.service.IdempotencyService;
 import com.aidriven.core.source.Platform;
 import com.aidriven.core.source.SourceControlClient;
@@ -24,6 +29,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sfn.SfnClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
 /**
  * Singleton factory for creating services and clients.
@@ -41,9 +47,11 @@ public class ServiceFactory {
     private SecretsManagerClient secretsManagerClient;
     private SfnClient sfnClient;
     private S3Client s3Client; // Added S3Client field
+    private SqsClient sqsClient;
 
     private SecretsService secretsService; // Changed type to interface
     private TicketStateRepository ticketStateRepository;
+    private ConversationRepository conversationRepository;
     private GenerationMetricsRepository generationMetricsRepository;
     private ContextStorageService codeContextS3Service; // Changed type to interface
     private IdempotencyService idempotencyService;
@@ -92,6 +100,13 @@ public class ServiceFactory {
         return s3Client;
     }
 
+    public synchronized SqsClient getSqsClient() {
+        if (sqsClient == null) {
+            sqsClient = SqsClient.create();
+        }
+        return sqsClient;
+    }
+
     public synchronized SfnClient getSfnClient() {
         if (sfnClient == null) {
             sfnClient = SfnClient.create();
@@ -111,6 +126,27 @@ public class ServiceFactory {
             ticketStateRepository = new TicketStateRepository(getDynamoDbClient(), appConfig.getDynamoDbTableName());
         }
         return ticketStateRepository;
+    }
+
+    public synchronized ConversationRepository getConversationRepository() {
+        if (conversationRepository == null) {
+            conversationRepository = new DynamoConversationRepository(getDynamoDbClient(),
+                    appConfig.getDynamoDbTableName());
+        }
+        return conversationRepository;
+    }
+
+    private ConversationWindowManager conversationWindowManager;
+
+    public synchronized ConversationWindowManager getConversationWindowManager() {
+        if (conversationWindowManager == null) {
+            AgentConfig config = appConfig.getAgentConfig();
+            conversationWindowManager = new ConversationWindowManager(
+                    getConversationRepository(),
+                    config.tokenBudget(),
+                    config.recentMessagesToKeep());
+        }
+        return conversationWindowManager;
     }
 
     public synchronized GenerationMetricsRepository getGenerationMetricsRepository() {

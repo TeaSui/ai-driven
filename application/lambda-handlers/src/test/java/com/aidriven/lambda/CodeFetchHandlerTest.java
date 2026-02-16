@@ -4,7 +4,7 @@ import com.aidriven.core.config.FetchConfig;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.ContextStorageService;
 import com.aidriven.core.source.SourceControlClient;
-import com.aidriven.lambda.context.ContextService;
+import com.aidriven.tool.context.ContextService;
 import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import org.junit.jupiter.api.BeforeEach;

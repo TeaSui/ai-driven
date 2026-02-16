@@ -9,6 +9,9 @@ dependencies {
     implementation project(':bitbucket-client')
     implementation project(':github-client')
     implementation project(':claude-client')
+    implementation project(':tool-source-control')
+    implementation project(':tool-issue-tracker')
+    implementation project(':tool-code-context')
 
     // AWS Lambda
     implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
@@ -17,6 +20,7 @@ dependencies {
     // AWS Step Functions SDK
     implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     implementation 'software.amazon.awssdk:sfn'
+    implementation 'software.amazon.awssdk:sqs'
 
     // AWS Lambda Powertools
     implementation "software.amazon.lambda:powertools-logging:${project.property('powertoolsVersion')}"

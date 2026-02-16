@@ -9,6 +9,8 @@ import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -87,12 +89,40 @@ export class AiDrivenStack extends cdk.Stack {
             CLAUDE_MAX_TOKENS: '32768',
             CLAUDE_TEMPERATURE: '0.2',
             MERGE_WAIT_TIMEOUT_DAYS: '7',
-            CONTEXT_MODE: 'INCREMENTAL',
+            CONTEXT_MODE: 'FULL_REPO',
             PROMPT_VERSION: 'v1',
             BRANCH_PREFIX: 'ai/',
             DEFAULT_PLATFORM: 'GITHUB',
             DEFAULT_WORKSPACE: 'TeaSui',
             DEFAULT_REPO: 'claude-automation',
+        };
+
+        // ==================== SQS (Agent Task Queue) ====================
+        const agentDlq = new sqs.Queue(this, 'AgentTasksDLQ', {
+            queueName: 'ai-driven-agent-tasks-dlq.fifo',
+            fifo: true,
+            retentionPeriod: cdk.Duration.days(14),
+        });
+
+        const agentQueue = new sqs.Queue(this, 'AgentTasksQueue', {
+            queueName: 'ai-driven-agent-tasks.fifo',
+            fifo: true,
+            contentBasedDeduplication: true,
+            visibilityTimeout: cdk.Duration.seconds(600), // 10 min to match Lambda timeout
+            deadLetterQueue: {
+                queue: agentDlq,
+                maxReceiveCount: 3,
+            },
+        });
+
+        // Agent-specific environment variables
+        const agentEnvironment = {
+            ...lambdaEnvironment,
+            AGENT_ENABLED: 'true',
+            AGENT_TRIGGER_PREFIX: '@ai',
+            AGENT_MAX_TOOL_TURNS: '10',
+            AGENT_MAX_WALL_CLOCK_SECONDS: '720',
+            AGENT_QUEUE_URL: agentQueue.queueUrl,
         };
 
         const javaRuntime = lambda.Runtime.JAVA_21;
@@ -137,6 +167,34 @@ export class AiDrivenStack extends cdk.Stack {
 
         stateTable.grantReadWriteData(mergeWaitRole);
         jiraSecret.grantRead(mergeWaitRole);
+
+        // Role for Agent Webhook Handler (Jira, SQS send, DynamoDB)
+        const agentWebhookRole = new iam.Role(this, 'AgentWebhookRole', {
+            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+            managedPolicies: [
+                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+            ],
+        });
+
+        stateTable.grantReadWriteData(agentWebhookRole);
+        jiraSecret.grantRead(agentWebhookRole);
+        agentQueue.grantSendMessages(agentWebhookRole);
+
+        // Role for Agent Processor Handler (SQS consume, DynamoDB, Secrets, S3, Claude)
+        const agentProcessorRole = new iam.Role(this, 'AgentProcessorRole', {
+            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+            managedPolicies: [
+                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+            ],
+        });
+
+        stateTable.grantReadWriteData(agentProcessorRole);
+        claudeApiKeySecret.grantRead(agentProcessorRole);
+        bitbucketSecret.grantRead(agentProcessorRole);
+        jiraSecret.grantRead(agentProcessorRole);
+        githubSecret.grantRead(agentProcessorRole);
+        codeContextBucket.grantReadWrite(agentProcessorRole);
+        agentQueue.grantConsumeMessages(agentProcessorRole);
 
         // ==================== LAMBDA FUNCTIONS ====================
 
@@ -218,6 +276,39 @@ export class AiDrivenStack extends cdk.Stack {
             role: mergeWaitRole,
             tracing: lambda.Tracing.ACTIVE,
         });
+
+        // Agent webhook handler (thin: validate, ack, enqueue to SQS)
+        const agentWebhookHandler = new lambda.Function(this, 'AgentWebhookHandler', {
+            functionName: 'ai-driven-agent-webhook',
+            runtime: javaRuntime,
+            handler: 'com.aidriven.lambda.AgentWebhookHandler::handleRequest',
+            code: lambdaCode,
+            memorySize: 512,
+            timeout: cdk.Duration.minutes(1),
+            environment: agentEnvironment,
+            role: agentWebhookRole,
+            tracing: lambda.Tracing.ACTIVE,
+        });
+
+        // Agent processor handler (heavy: runs orchestrator, triggered by SQS)
+        const agentProcessorHandler = new lambda.Function(this, 'AgentProcessorHandler', {
+            functionName: 'ai-driven-agent-processor',
+            runtime: javaRuntime,
+            handler: 'com.aidriven.lambda.AgentProcessorHandler::handleRequest',
+            code: lambdaCode,
+            memorySize: 2048,
+            timeout: cdk.Duration.minutes(10),
+            environment: agentEnvironment,
+            role: agentProcessorRole,
+            tracing: lambda.Tracing.ACTIVE,
+        });
+
+        // SQS trigger for agent processor
+        agentProcessorHandler.addEventSource(
+            new lambdaEventSources.SqsEventSource(agentQueue, {
+                batchSize: 1, // Process one task at a time
+            })
+        );
 
         // ==================== STEP FUNCTIONS ====================
 
@@ -362,6 +453,12 @@ export class AiDrivenStack extends cdk.Stack {
             new apigateway.LambdaIntegration(mergeWaitHandler, { proxy: true })
         );
 
+        // Agent webhook endpoint (agent comment processing)
+        api.root.addResource('agent-webhook').addMethod(
+            'POST',
+            new apigateway.LambdaIntegration(agentWebhookHandler, { proxy: true })
+        );
+
         // ==================== CLOUDWATCH DASHBOARD ====================
         const allHandlers = [
             { fn: jiraWebhookHandler, label: 'JiraWebhook' },
@@ -370,6 +467,8 @@ export class AiDrivenStack extends cdk.Stack {
             { fn: claudeInvokeHandler, label: 'ClaudeInvoke' },
             { fn: prCreatorHandler, label: 'PrCreator' },
             { fn: mergeWaitHandler, label: 'MergeWait' },
+            { fn: agentWebhookHandler, label: 'AgentWebhook' },
+            { fn: agentProcessorHandler, label: 'AgentProcessor' },
         ];
 
         const dashboard = new cloudwatch.Dashboard(this, 'OperationalDashboard', {
@@ -457,6 +556,16 @@ export class AiDrivenStack extends cdk.Stack {
         new cdk.CfnOutput(this, 'MergeWebhookUrl', {
             value: `${api.url}merge-webhook`,
             description: 'Bitbucket Merge Webhook URL',
+        });
+
+        new cdk.CfnOutput(this, 'AgentWebhookUrl', {
+            value: `${api.url}agent-webhook`,
+            description: 'Agent Webhook URL',
+        });
+
+        new cdk.CfnOutput(this, 'AgentQueueUrl', {
+            value: agentQueue.queueUrl,
+            description: 'Agent Tasks SQS FIFO Queue URL',
         });
 
         new cdk.CfnOutput(this, 'DynamoDBTableName', {

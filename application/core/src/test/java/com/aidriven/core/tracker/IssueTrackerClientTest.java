@@ -21,7 +21,7 @@ class IssueTrackerClientTest {
     @Test
     void interface_should_declare_addComment_method() throws NoSuchMethodException {
         Method method = IssueTrackerClient.class.getMethod("addComment", String.class, String.class);
-        assertEquals(void.class, method.getReturnType());
+        assertEquals(String.class, method.getReturnType());
     }
 
     @Test

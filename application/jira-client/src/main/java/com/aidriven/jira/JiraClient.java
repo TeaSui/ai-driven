@@ -194,8 +194,11 @@ public class JiraClient implements IssueTrackerClient {
 
     /**
      * Adds a comment to a ticket.
+     *
+     * @return The ID of the created comment.
      */
-    public void addComment(String ticketKey, String comment) throws Exception {
+    @Override
+    public String addComment(String ticketKey, String comment) throws Exception {
         validateTicketKey(ticketKey);
         Objects.requireNonNull(comment, "comment must not be null");
         String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/comment";
@@ -224,7 +227,46 @@ public class JiraClient implements IssueTrackerClient {
             HttpResponseHandler.checkResponse(response, "Jira", "addComment " + ticketKey);
         }
 
-        log.info("Added comment to ticket {}", ticketKey);
+        JsonNode json = objectMapper.readTree(response.body());
+        String commentId = json.get("id").asText();
+        log.info("Added comment {} to ticket {}", commentId, ticketKey);
+        return commentId;
+    }
+
+    /**
+     * Edits an existing comment on a ticket (replaces content in-place).
+     * Uses PUT /rest/api/3/issue/{issueKey}/comment/{commentId}
+     */
+    @Override
+    public void editComment(String ticketKey, String commentId, String newBody) throws Exception {
+        validateTicketKey(ticketKey);
+        Objects.requireNonNull(commentId, "commentId must not be null");
+        Objects.requireNonNull(newBody, "newBody must not be null");
+
+        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/comment/" + commentId;
+
+        String body = objectMapper.writeValueAsString(java.util.Map.of(
+                "body", java.util.Map.of(
+                        "type", "doc",
+                        "version", 1,
+                        "content", List.of(java.util.Map.of(
+                                "type", "paragraph",
+                                "content", List.of(java.util.Map.of(
+                                        "type", "text",
+                                        "text", newBody)))))));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", authHeader)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            HttpResponseHandler.checkResponse(response, "Jira", "editComment " + ticketKey + "/" + commentId);
+        }
+        log.info("Edited comment {} on ticket {}", commentId, ticketKey);
     }
 
     private TicketInfo parseTicket(JsonNode json) {

@@ -22,8 +22,22 @@ public interface IssueTrackerClient {
      *
      * @param ticketKey The ticket key
      * @param comment   The comment text
+     * @return The ID of the created comment (or null if not applicable/available).
      */
-    void addComment(String ticketKey, String comment) throws Exception;
+    String addComment(String ticketKey, String comment) throws Exception;
+
+    /**
+     * Edits an existing comment on a ticket (replaces content in-place).
+     *
+     * @param ticketKey The ticket key
+     * @param commentId The ID of the comment to edit
+     * @param newBody   The new comment text
+     */
+    default void editComment(String ticketKey, String commentId, String newBody) throws Exception {
+        // Default no-op for implementations that don't support editing.
+        // Subclasses should override (e.g., JiraClient).
+        throw new UnsupportedOperationException("editComment not supported by this implementation");
+    }
 
     /**
      * Transitions a ticket to a new status using a transition ID.

@@ -26,6 +26,7 @@ AiDrivenStack
 |--------|---------|
 | `ai-driven/claude-api-key` | Claude API key |
 | `ai-driven/bitbucket-credentials` | Bitbucket app password |
+| `ai-driven/github-credentials` | GitHub personal access token |
 | `ai-driven/jira-credentials` | Jira API token |
 
 ### DynamoDB
@@ -62,10 +63,11 @@ All functions use Java 21, share a common environment config, and have X-Ray tra
 - Timeout: configurable via `MERGE_WAIT_TIMEOUT_DAYS` (default: 7 days)
 
 ### API Gateway
-| Endpoint | Handler | Purpose |
-|----------|---------|---------|
-| POST `/jira-webhook` | JiraWebhookHandler | Jira event entry point |
-| POST `/merge-webhook` | MergeWaitHandler | Bitbucket merge callback |
+| Endpoint | Handler | Mode | Purpose |
+|----------|---------|------|---------|
+| POST `/jira-webhook` | JiraWebhookHandler | Pipeline | Jira event entry point |
+| POST `/merge-webhook` | MergeWaitHandler | Pipeline | Source control merge callback |
+| POST `/agent/webhook` | AgentWebhookHandler | Agent | Jira comment entry point (planned) |
 
 Rate limiting: 100 rps / 200 burst
 

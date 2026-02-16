@@ -27,3 +27,10 @@ This document outlines improvements and new features to pursue after the initial
 - [ ] 4.1 Cost Controls → [impl-12](impl/impl-12-cost-controls.md)
 - [ ] 4.2 Audit Trail → [impl-13](impl/impl-13-audit-trail.md)
 - [ ] 4.3 Input Sanitization → [impl-14](impl/impl-14-input-sanitization.md)
+
+### Priority 5 — Conversational Agent
+- [ ] 5.1 Agent Mode (Jira-as-Chat) → [impl-15](impl/impl-15-agent-mode.md)
+  - Phase 1: Single-turn agent (webhook → Claude + tools → comment back)
+  - Phase 2: Multi-turn conversation state (DynamoDB history, sliding window)
+  - Phase 3: Multi-actor collaboration (reviewer feedback loop, approval flow)
+  - Phase 4: External tool integrations (Datadog, Slack, Databricks)
