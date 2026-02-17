@@ -28,13 +28,11 @@ import com.aidriven.core.config.AgentConfig;
 import com.aidriven.core.config.McpServerConfig;
 import com.aidriven.mcp.McpBridgeToolProvider;
 import com.aidriven.mcp.McpConnectionFactory;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 import com.aidriven.core.service.IdempotencyService;
 import com.aidriven.core.source.Platform;
 import com.aidriven.core.source.SourceControlClient;
+import com.aidriven.registry.AwsServiceRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
@@ -43,17 +41,18 @@ import software.amazon.awssdk.services.sfn.SfnClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
+
 /**
- * Singleton factory for creating services and clients.
- * Ensures single instances of expensive clients (DynamoDB, SecretsManager) are
- * reused across Lambda invocations (execution context reuse).
- *
+ * Lambda-specific singleton factory for creating services and clients.
  * <p>
- * Phase 3: Added guardrails (GuardedToolRegistry, ApprovalStore, CostTracker).
+ * Delegates to {@link AwsServiceRegistry} for all service creation,
+ * adding Lambda-specific clients (SFN, SQS) that are not part of the
+ * platform-agnostic registry.
  * </p>
  * <p>
- * Phase 4: Added MCP bridge providers (McpBridgeToolProvider via
- * McpConnectionFactory).
+ * This class exists for backward compatibility with existing Lambda handlers.
+ * New code should prefer injecting {@link com.aidriven.registry.ServiceRegistry} directly.
  * </p>
  */
 @Slf4j
@@ -61,27 +60,16 @@ public class ServiceFactory {
 
     private static final ServiceFactory INSTANCE = new ServiceFactory();
 
-    // Lazy loaded singletons
-    private ObjectMapper objectMapper;
-    private DynamoDbClient dynamoDbClient;
-    private SecretsManagerClient secretsManagerClient;
-    private SfnClient sfnClient;
-    private S3Client s3Client; // Added S3Client field
-    private SqsClient sqsClient;
-
-    private SecretsService secretsService; // Changed type to interface
-    private TicketStateRepository ticketStateRepository;
-    private ConversationRepository conversationRepository;
-    private GenerationMetricsRepository generationMetricsRepository;
-    private ContextStorageService codeContextS3Service; // Changed type to interface
-    private IdempotencyService idempotencyService;
-    private ClaudeClient claudeClient;
-
-    // Config
     private final AppConfig appConfig;
+    private final AwsServiceRegistry registry;
+
+    // Lambda-specific clients (not in ServiceRegistry)
+    private volatile SfnClient sfnClient;
+    private volatile SqsClient sqsClient;
 
     private ServiceFactory() {
         this.appConfig = AppConfig.getInstance();
+        this.registry = new AwsServiceRegistry(appConfig);
     }
 
     public static ServiceFactory getInstance() {
@@ -92,40 +80,108 @@ public class ServiceFactory {
         return appConfig;
     }
 
-    public synchronized ObjectMapper getObjectMapper() {
-        if (objectMapper == null) {
-            objectMapper = new ObjectMapper();
-        }
-        return objectMapper;
+    /** Returns the underlying service registry for direct access. */
+    public AwsServiceRegistry getRegistry() {
+        return registry;
     }
 
-    public synchronized DynamoDbClient getDynamoDbClient() {
-        if (dynamoDbClient == null) {
-            dynamoDbClient = DynamoDbClient.create();
-        }
-        return dynamoDbClient;
+    // --- Delegate to AwsServiceRegistry ---
+
+    public ObjectMapper getObjectMapper() {
+        return registry.getObjectMapper();
     }
 
-    public synchronized SecretsManagerClient getSecretsManagerClient() {
-        if (secretsManagerClient == null) {
-            secretsManagerClient = SecretsManagerClient.create();
-        }
-        return secretsManagerClient;
+    public DynamoDbClient getDynamoDbClient() {
+        return registry.getDynamoDbClient();
     }
 
-    public synchronized S3Client getS3Client() {
-        if (s3Client == null) {
-            s3Client = S3Client.create();
-        }
-        return s3Client;
+    public SecretsService getSecretsProvider() {
+        return registry.getSecretsService();
     }
 
-    public synchronized SqsClient getSqsClient() {
-        if (sqsClient == null) {
-            sqsClient = SqsClient.create();
-        }
-        return sqsClient;
+    public TicketStateRepository getTicketStateRepository() {
+        return registry.getTicketStateRepository();
     }
+
+    public ConversationRepository getConversationRepository() {
+        return registry.getConversationRepository();
+    }
+
+    public ConversationWindowManager getConversationWindowManager() {
+        return registry.getConversationWindowManager();
+    }
+
+    public GenerationMetricsRepository getGenerationMetricsRepository() {
+        return registry.getGenerationMetricsRepository();
+    }
+
+    public ContextStorageService getContextStorageService() {
+        return registry.getContextStorageService();
+    }
+
+    public IdempotencyService getIdempotencyService() {
+        return registry.getIdempotencyService();
+    }
+
+    public JiraClient getJiraClient() {
+        return (JiraClient) registry.getIssueTrackerClient();
+    }
+
+    public BitbucketClient getBitbucketClient() {
+        return (BitbucketClient) registry.getSourceControlClient(Platform.BITBUCKET);
+    }
+
+    public BitbucketClient getBitbucketClient(String workspace, String repoSlug) {
+        if (workspace == null || workspace.isBlank() || repoSlug == null || repoSlug.isBlank()) {
+            return getBitbucketClient();
+        }
+        return (BitbucketClient) registry.getSourceControlClient(Platform.BITBUCKET, workspace, repoSlug);
+    }
+
+    public GitHubClient getGitHubClient() {
+        return (GitHubClient) registry.getSourceControlClient(Platform.GITHUB);
+    }
+
+    public GitHubClient getGitHubClient(String owner, String repo) {
+        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            return getGitHubClient();
+        }
+        return (GitHubClient) registry.getSourceControlClient(Platform.GITHUB, owner, repo);
+    }
+
+    public SourceControlClient getSourceControlClient(Platform platform) {
+        return registry.getSourceControlClient(platform);
+    }
+
+    public ClaudeClient getClaudeClient() {
+        return (ClaudeClient) registry.getAiClient();
+    }
+
+    public ContextService createContextService() {
+        return registry.createContextService(getBitbucketClient());
+    }
+
+    public ContextService createContextService(SourceControlClient sourceControlClient) {
+        return registry.createContextService(sourceControlClient);
+    }
+
+    public ApprovalStore getApprovalStore() {
+        return registry.getApprovalStore();
+    }
+
+    public CostTracker getCostTracker() {
+        return registry.getCostTracker();
+    }
+
+    public GuardedToolRegistry createGuardedToolRegistry(ToolRegistry toolRegistry) {
+        return registry.createGuardedToolRegistry(toolRegistry);
+    }
+
+    public List<McpBridgeToolProvider> getMcpToolProviders() {
+        return registry.getMcpToolProviders();
+    }
+
+    // --- Lambda-specific clients ---
 
     public synchronized SfnClient getSfnClient() {
         if (sfnClient == null) {
@@ -134,233 +190,10 @@ public class ServiceFactory {
         return sfnClient;
     }
 
-    public synchronized SecretsService getSecretsProvider() {
-        if (secretsService == null) {
-            secretsService = new SecretsServiceImpl(getSecretsManagerClient(), getObjectMapper());
+    public synchronized SqsClient getSqsClient() {
+        if (sqsClient == null) {
+            sqsClient = SqsClient.create();
         }
-        return secretsService;
-    }
-
-    public synchronized TicketStateRepository getTicketStateRepository() {
-        if (ticketStateRepository == null) {
-            ticketStateRepository = new TicketStateRepository(getDynamoDbClient(), appConfig.getDynamoDbTableName());
-        }
-        return ticketStateRepository;
-    }
-
-    public synchronized ConversationRepository getConversationRepository() {
-        if (conversationRepository == null) {
-            conversationRepository = new DynamoConversationRepository(getDynamoDbClient(),
-                    appConfig.getDynamoDbTableName());
-        }
-        return conversationRepository;
-    }
-
-    private ConversationWindowManager conversationWindowManager;
-
-    public synchronized ConversationWindowManager getConversationWindowManager() {
-        if (conversationWindowManager == null) {
-            AgentConfig config = appConfig.getAgentConfig();
-            conversationWindowManager = new ConversationWindowManager(
-                    getConversationRepository(),
-                    config.tokenBudget(),
-                    config.recentMessagesToKeep());
-        }
-        return conversationWindowManager;
-    }
-
-    public synchronized GenerationMetricsRepository getGenerationMetricsRepository() {
-        if (generationMetricsRepository == null) {
-            generationMetricsRepository = new GenerationMetricsRepository(getDynamoDbClient(),
-                    appConfig.getDynamoDbTableName());
-        }
-        return generationMetricsRepository;
-    }
-
-    public synchronized ContextStorageService getContextStorageService() {
-        if (codeContextS3Service == null) {
-            codeContextS3Service = new CodeContextS3ServiceImpl(getS3Client(), appConfig.getCodeContextBucket());
-        }
-        return codeContextS3Service;
-    }
-
-    public synchronized IdempotencyService getIdempotencyService() {
-        if (idempotencyService == null) {
-            idempotencyService = new IdempotencyService(getTicketStateRepository());
-        }
-        return idempotencyService;
-    }
-
-    private JiraClient jiraClient;
-    private BitbucketClient bitbucketClient;
-    private GitHubClient gitHubClient;
-
-    public synchronized JiraClient getJiraClient() {
-        if (jiraClient == null) {
-            jiraClient = JiraClient.fromSecrets(getSecretsProvider(), appConfig.getJiraSecretArn());
-        }
-        return jiraClient;
-    }
-
-    public synchronized BitbucketClient getBitbucketClient() {
-        if (bitbucketClient == null) {
-            bitbucketClient = BitbucketClient.fromSecrets(getSecretsProvider(), appConfig.getBitbucketSecretArn());
-        }
-        return bitbucketClient;
-    }
-
-    public BitbucketClient getBitbucketClient(String workspace, String repoSlug) {
-        if (workspace == null || workspace.isBlank() || repoSlug == null || repoSlug.isBlank()) {
-            return getBitbucketClient();
-        }
-        return getBitbucketClient().withRepository(workspace, repoSlug);
-    }
-
-    public synchronized GitHubClient getGitHubClient() {
-        if (gitHubClient == null) {
-            String secretArn = appConfig.getGitHubSecretArn();
-            if (secretArn == null || secretArn.isBlank()) {
-                throw new IllegalStateException("GITHUB_SECRET_ARN is not configured");
-            }
-            gitHubClient = GitHubClient.fromSecrets(getSecretsProvider(), secretArn);
-        }
-        return gitHubClient;
-    }
-
-    public GitHubClient getGitHubClient(String owner, String repo) {
-        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
-            return getGitHubClient();
-        }
-        return getGitHubClient().withRepository(owner, repo);
-    }
-
-    /**
-     * Returns the appropriate SourceControlClient for the given platform.
-     */
-    public SourceControlClient getSourceControlClient(Platform platform) {
-        return switch (platform) {
-            case GITHUB -> getGitHubClient();
-            case BITBUCKET -> getBitbucketClient();
-        };
-    }
-
-    public synchronized ClaudeClient getClaudeClient() {
-        if (claudeClient == null) {
-            claudeClient = ClaudeClient.fromSecrets(getSecretsProvider(), appConfig.getClaudeSecretArn());
-            // Apply default config from AppConfig
-            ClaudeConfig config = appConfig.getClaudeConfig();
-            claudeClient = claudeClient.withModel(config.model())
-                    .withMaxTokens(config.maxTokens())
-                    .withTemperature(config.temperature());
-        }
-        return claudeClient;
-    }
-
-    public ContextService createContextService() {
-        return createContextService(getBitbucketClient());
-    }
-
-    public ContextService createContextService(SourceControlClient sourceControlClient) {
-        ContextStrategy smartStrategy = new SmartContextStrategy(
-                sourceControlClient,
-                appConfig.getMaxFileSizeChars(),
-                appConfig.getMaxTotalContextChars());
-
-        ContextStrategy fullRepoStrategy = new FullRepoStrategy(
-                sourceControlClient,
-                appConfig.getMaxFileSizeChars(),
-                (long) appConfig.getMaxTotalContextChars());
-
-        return new ContextService(smartStrategy, fullRepoStrategy, appConfig.getContextMode());
-    }
-
-    // --- Phase 3: Guardrails + Cost Tracking ---
-
-    private ApprovalStore approvalStore;
-    private CostTracker costTracker;
-    private McpConnectionFactory mcpConnectionFactory;
-    private List<McpBridgeToolProvider> mcpProviders;
-
-    public synchronized ApprovalStore getApprovalStore() {
-        if (approvalStore == null) {
-            approvalStore = new ApprovalStore(getDynamoDbClient(), appConfig.getDynamoDbTableName());
-        }
-        return approvalStore;
-    }
-
-    public synchronized CostTracker getCostTracker() {
-        if (costTracker == null) {
-            AgentConfig config = appConfig.getAgentConfig();
-            costTracker = new CostTracker(getDynamoDbClient(), appConfig.getDynamoDbTableName(),
-                    config.costBudgetPerTicket());
-        }
-        return costTracker;
-    }
-
-    /**
-     * Creates a GuardedToolRegistry wrapping the given ToolRegistry.
-     * Uses guardrail configuration from AgentConfig.
-     */
-    public GuardedToolRegistry createGuardedToolRegistry(ToolRegistry toolRegistry) {
-        AgentConfig config = appConfig.getAgentConfig();
-        return new GuardedToolRegistry(
-                toolRegistry,
-                new ToolRiskRegistry(),
-                getApprovalStore(),
-                config.guardrailsEnabled());
-    }
-
-    // --- Phase 4: MCP Integration ---
-
-    public synchronized McpConnectionFactory getMcpConnectionFactory() {
-        if (mcpConnectionFactory == null) {
-            mcpConnectionFactory = new McpConnectionFactory(getSecretsProvider());
-        }
-        return mcpConnectionFactory;
-    }
-
-    /**
-     * Creates MCP tool providers from configuration.
-     * Connects to each enabled MCP server and discovers tools.
-     * Results are cached for Lambda execution context reuse.
-     *
-     * @return List of MCP bridge tool providers (may be empty if none configured)
-     */
-    public synchronized List<McpBridgeToolProvider> getMcpToolProviders() {
-        if (mcpProviders != null) {
-            return mcpProviders;
-        }
-
-        mcpProviders = new java.util.ArrayList<>();
-        String configJson = appConfig.getMcpServersConfig();
-
-        if (configJson == null || configJson.isBlank() || "[]".equals(configJson.trim())) {
-            return mcpProviders;
-        }
-
-        try {
-            McpServerConfig[] configs = getObjectMapper().readValue(configJson, McpServerConfig[].class);
-            McpConnectionFactory factory = getMcpConnectionFactory();
-
-            for (McpServerConfig config : configs) {
-                if (!config.enabled()) {
-                    log.info("MCP server '{}' is disabled, skipping", config.namespace());
-                    continue;
-                }
-
-                try {
-                    McpBridgeToolProvider provider = factory.createProvider(config);
-                    mcpProviders.add(provider);
-                    log.info("Registered MCP tool provider: {}", provider);
-                } catch (Exception e) {
-                    log.error("Failed to connect MCP server '{}': {}", config.namespace(), e.getMessage(), e);
-                    // Continue with remaining servers — one failure shouldn't block all MCP
-                }
-            }
-        } catch (Exception e) {
-            log.error("Failed to parse MCP_SERVERS_CONFIG: {}", e.getMessage(), e);
-        }
-
-        return mcpProviders;
+        return sqsClient;
     }
 }

@@ -13,6 +13,7 @@ dependencies {
     implementation project(':tool-issue-tracker')
     implementation project(':tool-code-context')
     implementation project(':mcp-bridge')
+    implementation project(':service-registry')
 
     // AWS Lambda
     implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'

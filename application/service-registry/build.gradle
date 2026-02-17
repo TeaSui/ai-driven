@@ -1,0 +1,20 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':core')
+    api project(':jira-client')
+    api project(':bitbucket-client')
+    api project(':github-client')
+    api project(':claude-client')
+    api project(':tool-source-control')
+    api project(':tool-issue-tracker')
+    api project(':tool-code-context')
+    api project(':mcp-bridge')
+
+    // AWS SDK for infrastructure clients
+    implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
+    implementation 'software.amazon.awssdk:sfn'
+    implementation 'software.amazon.awssdk:sqs'
+}

@@ -11,6 +11,11 @@ application/
   bitbucket-client/       # SourceControlClient → Bitbucket REST API
   github-client/          # SourceControlClient → GitHub REST API
   claude-client/          # Claude AI direct API client (auto-continuation + tool use)
+  tool-source-control/    # SourceControlToolProvider (agent tool)
+  tool-issue-tracker/     # IssueTrackerToolProvider (agent tool)
+  tool-code-context/      # CodeContextToolProvider + ContextService
+  mcp-bridge/             # MCP protocol bridge for external tool servers
+  service-registry/       # Platform-agnostic service wiring + multi-tenant support
   lambda-handlers/        # Lambda handler implementations (fat JAR)
 ```
 
@@ -18,11 +23,20 @@ application/
 
 ```
 lambda-handlers
+  ├── service-registry    → core + all clients + tools + mcp-bridge
   ├── core
-  ├── jira-client       → core
-  ├── bitbucket-client  → core
-  ├── github-client     → core
-  └── claude-client     → core
+  └── (Lambda-specific: SFN, SQS clients)
+
+service-registry
+  ├── core
+  ├── jira-client         → core
+  ├── bitbucket-client    → core
+  ├── github-client       → core
+  ├── claude-client       → core
+  ├── tool-source-control → core
+  ├── tool-issue-tracker  → core
+  ├── tool-code-context   → core
+  └── mcp-bridge          → core
 ```
 
 ## Modules
@@ -38,14 +52,26 @@ Shared models, domain interfaces, utilities, and agent framework used by all oth
 - `com.aidriven.core.context` — Code context strategy (`ContextStrategy`)
 - `com.aidriven.core.repository` — DynamoDB repositories (`TicketStateRepository`, `GenerationMetricsRepository`)
 - `com.aidriven.core.service` — AWS service wrappers (`SecretsService`, `ContextStorageService`, `IdempotencyService`)
-- `com.aidriven.core.exception` — Typed exceptions (`AiDrivenException`, `ExternalServiceException`)
-- `com.aidriven.core.util` — Utilities (`LambdaCorrelationContext`, `LambdaInputValidator`, `SourceFileFilter`, `OutputSanitizer`)
-- `com.aidriven.core.agent` — Agent orchestration (planned: `AgentOrchestrator`, `CommentIntentClassifier`)
-- `com.aidriven.core.agent.tool` — Tool provider pattern (planned: `ToolProvider`, `ToolRegistry`, `*ToolProvider` implementations)
+- `com.aidriven.core.exception` — Typed exceptions (`HttpClientException`, `ConflictException`)
+- `com.aidriven.core.util` — Utilities (`SourceFileFilter`, `JsonRepairService`, `HttpResponseHandler`)
+- `com.aidriven.core.agent` — Agent orchestration (`AgentOrchestrator`, `CommentIntentClassifier`)
+- `com.aidriven.core.agent.tool` — Tool provider pattern (`ToolProvider`, `ToolRegistry`)
+- `com.aidriven.core.agent.guardrail` — Risk-based guardrails (`GuardedToolRegistry`, `ToolRiskRegistry`)
+
+### `service-registry` (NEW)
+Platform-agnostic service wiring with multi-tenant support.
+
+**Key classes:**
+- `ServiceRegistry` — Interface defining all service access points
+- `AwsServiceRegistry` — AWS-native implementation (DynamoDB, S3, Secrets Manager)
+- `TenantContext` — Multi-tenant configuration holder
+
+This module decouples service creation from any specific runtime (Lambda, Spring Boot, etc.).
+Each deployment target provides its own wiring while reusing the same `ServiceRegistry` interface.
 
 ### `jira-client`
 Jira Cloud REST API client implementing `IssueTrackerClient`.
-- `JiraClient` — Fetch ticket, add comments, transition status, extract labels
+- `JiraClient` — Fetch ticket, add comments, edit comments, transition status, extract labels
 
 ### `bitbucket-client`
 Bitbucket Cloud REST API client implementing `SourceControlClient`.
@@ -57,8 +83,13 @@ GitHub REST API v3 client implementing `SourceControlClient`.
 
 ### `claude-client`
 Direct Claude API client (not AWS Bedrock).
-- `ClaudeClient` — Send prompts, handle auto-continuation for truncated responses, tool-use support (planned)
+- `ClaudeClient` — Send prompts, handle auto-continuation for truncated responses, tool-use support
 - Configurable: model, max tokens, temperature via constructor params
+
+### `mcp-bridge`
+Model Context Protocol bridge for external tool servers.
+- `McpBridgeToolProvider` — Bridges any MCP server into our ToolProvider contract
+- `McpConnectionFactory` — Creates MCP client connections (stdio/HTTP transports)
 
 ### `lambda-handlers`
 AWS Lambda handler implementations, packaged as a single fat JAR.
@@ -71,16 +102,11 @@ AWS Lambda handler implementations, packaged as a single fat JAR.
 | `ClaudeInvokeHandler` | Pipeline | Reads S3 context, invokes Claude, parses JSON response |
 | `PrCreatorHandler` | Pipeline | Creates branch, commits generated files, opens PR |
 | `MergeWaitHandler` | Pipeline | Manages task-token callback for PR merge wait |
-| `AgentWebhookHandler` | Agent | Validates comment webhooks, invokes AgentOrchestrator (planned) |
+| `AgentWebhookHandler` | Agent | Validates comment webhooks, enqueues to SQS FIFO |
+| `AgentProcessorHandler` | Agent | Consumes SQS tasks, runs AgentOrchestrator |
 
 **Key classes:**
-- `ServiceFactory` — Singleton factory for all service instantiation (client creation, tool registry, context services)
-- `ContextService` — Orchestrates smart vs full-repo context strategies
-
-**Handler patterns:**
-- Dual-constructor pattern (no-arg for Lambda, package-private for testing)
-- MDC correlation context (`correlationId`, `ticketKey`, `handler`) on every invocation
-- Configurable via environment variables with fallback defaults
+- `ServiceFactory` — Lambda-specific singleton that delegates to `AwsServiceRegistry`
 
 ## Core Design Patterns
 
@@ -91,19 +117,29 @@ SourceControlClient (interface)     IssueTrackerClient (interface)
 ├── BitbucketClient                 └── JiraClient
 └── GitHubClient
 
-ServiceFactory.getSourceControlClient(platform) → resolves implementation
+ServiceRegistry.getSourceControlClient(platform) → resolves implementation
 ```
 
-### ToolProvider + ToolRegistry (Agent Mode — Planned)
+### ServiceRegistry (Multi-Tenant / Multi-Runtime)
+
+```
+ServiceRegistry (interface)
+├── AwsServiceRegistry     → DynamoDB, S3, Secrets Manager (production)
+└── (future) LocalServiceRegistry → In-memory, file-based (development)
+
+ServiceFactory (Lambda-specific)
+└── delegates to AwsServiceRegistry + adds SFN/SQS clients
+```
+
+### ToolProvider + ToolRegistry (Agent Mode)
 
 ```
 ToolProvider (interface)
 ├── SourceControlToolProvider  → wraps SourceControlClient
 ├── IssueTrackerToolProvider   → wraps IssueTrackerClient
 ├── CodeContextToolProvider    → wraps ContextService
-├── MonitoringToolProvider     → wraps MonitoringClient (future)
-├── MessagingToolProvider      → wraps MessagingClient (future)
-└── DataToolProvider           → wraps DataClient (future)
+├── McpBridgeToolProvider      → wraps any MCP server
+└── (future) custom providers per tenant
 
 ToolRegistry
 ├── register(ToolProvider)     → register provider by namespace
@@ -117,8 +153,15 @@ ToolRegistry
 # Build fat JAR (all handlers in one artifact)
 ./gradlew clean build
 
+# Build specific module only
+./gradlew :service-registry:build
+./gradlew :core:build
+
 # Run unit tests
 ./gradlew test
+
+# Run tests for a specific module
+./gradlew :service-registry:test
 
 # Build without tests
 ./gradlew build -x test
@@ -134,7 +177,7 @@ ToolRegistry
 | AWS SDK v2 | DynamoDB, Secrets Manager, S3, Step Functions |
 | Lombok | Boilerplate reduction (`@Slf4j`, `@Builder`) |
 | Jackson | JSON serialization/deserialization |
-| Apache Commons | String utilities |
+| MCP Java SDK | Model Context Protocol client |
 | JUnit 5 | Testing framework |
 | Mockito | Mocking in unit tests |
 
@@ -145,3 +188,10 @@ The `lambda-handlers` module produces a fat JAR at:
 lambda-handlers/build/libs/lambda-handlers-all.jar
 ```
 This single JAR is deployed to all Lambda functions, with each function pointing to a different handler class.
+
+Individual modules can also be published as separate JARs for microservice deployments:
+```
+service-registry/build/libs/service-registry.jar
+core/build/libs/core.jar
+jira-client/build/libs/jira-client.jar
+```
