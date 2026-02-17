@@ -1,12 +1,25 @@
 rootProject.name = 'ai-driven'
 
+// Core domain module (interfaces, models, config, utilities)
 include 'core'
+
+// Client implementations (one per external integration)
 include 'jira-client'
 include 'bitbucket-client'
 include 'github-client'
 include 'claude-client'
-include 'lambda-handlers'
+
+// Tool providers (agent mode: expose clients as Claude tools)
 include 'tool-source-control'
 include 'tool-issue-tracker'
 include 'tool-code-context'
+
+// MCP bridge (external tool integrations)
 include 'mcp-bridge'
+
+// Deployable service modules (independent shadow JARs)
+include 'pipeline-handlers'
+include 'agent-handlers'
+
+// Legacy monolithic module (retained for backward compatibility)
+include 'lambda-handlers'

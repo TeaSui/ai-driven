@@ -1,0 +1,40 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+description = 'Pipeline Service handlers - deterministic Step Functions workflow'
+
+dependencies {
+    implementation project(':core')
+    implementation project(':jira-client')
+    implementation project(':bitbucket-client')
+    implementation project(':github-client')
+    implementation project(':claude-client')
+    implementation project(':tool-code-context')
+
+    // AWS Lambda
+    implementation 'com.amazonaws:aws-lambda-java-core:1.2.3'
+    implementation 'com.amazonaws:aws-lambda-java-events:3.11.4'
+
+    // AWS Step Functions SDK
+    implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
+    implementation 'software.amazon.awssdk:sfn'
+
+    // AWS Lambda Powertools
+    implementation "software.amazon.lambda:powertools-logging:${project.property('powertoolsVersion')}"
+    implementation("software.amazon.lambda:powertools-tracing:${project.property('powertoolsVersion')}") {
+        exclude group: 'com.amazonaws', module: 'aws-xray-recorder-sdk-aws-sdk-v2-instrumentor'
+    }
+}
+
+shadowJar {
+    archiveClassifier.set('all')
+    archiveFileName.set('pipeline-handlers-all.jar')
+    mergeServiceFiles()
+    transform(com.github.jengelman.gradle.plugins.shadow.transformers.Log4j2PluginsCacheFileTransformer)
+}
+
+tasks.named('build') {
+    dependsOn 'shadowJar'
+}
