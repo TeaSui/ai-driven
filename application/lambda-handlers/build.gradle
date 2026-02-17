@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation project(':core')
+    implementation project(':platform-api')
     implementation project(':jira-client')
     implementation project(':bitbucket-client')
     implementation project(':github-client')
