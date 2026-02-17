@@ -1,0 +1,26 @@
+{
+  "name": "ai-driven-workflow-platform",
+  "version": "1.0.0",
+  "description": "Modular multi-tenant workflow automation platform",
+  "private": true,
+  "workspaces": [
+    "shared/*",
+    "services/*"
+  ],
+  "scripts": {
+    "bootstrap": "npm install && npm run build:shared",
+    "build:shared": "cd shared/common && npm run build",
+    "build:all": "npm run build:shared && npm -ws run build",
+    "test": "npm -ws run test --if-present",
+    "lint": "npm -ws run lint --if-present",
+    "dev:gateway": "cd services/api-gateway && npm run dev",
+    "dev:auth": "cd services/auth-service && npm run dev",
+    "dev:workflow": "cd services/workflow-engine && npm run dev",
+    "dev:integration": "cd services/integration-service && npm run dev",
+    "dev:notification": "cd services/notification-service && npm run dev",
+    "dev:tenant": "cd services/tenant-service && npm run dev"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

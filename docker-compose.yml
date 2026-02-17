@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:3001
+      - WORKFLOW_SERVICE_URL=http://workflow-engine:3002
+      - INTEGRATION_SERVICE_URL=http://integration-service:3003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3004
+      - TENANT_SERVICE_URL=http://tenant-service:3005
+    depends_on:
+      - auth-service
+      - workflow-engine
+      - integration-service
+      - notification-service
+      - tenant-service
+    networks:
+      - app-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth-service/Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET:-default-dev-secret}
+      - JWT_EXPIRATION=3600
+    networks:
+      - app-network
+
+  workflow-engine:
+    build:
+      context: .
+      dockerfile: services/workflow-engine/Dockerfile
+    ports:
+      - '3002:3002'
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - INTEGRATION_SERVICE_URL=http://integration-service:3003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3004
+    networks:
+      - app-network
+
+  integration-service:
+    build:
+      context: .
+      dockerfile: services/integration-service/Dockerfile
+    ports:
+      - '3003:3003'
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+    networks:
+      - app-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    ports:
+      - '3004:3004'
+    environment:
+      - NODE_ENV=development
+      - PORT=3004
+    networks:
+      - app-network
+
+  tenant-service:
+    build:
+      context: .
+      dockerfile: services/tenant-service/Dockerfile
+    ports:
+      - '3005:3005'
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
