@@ -42,6 +42,7 @@ public class PluginLoader {
      * @return Number of plugins successfully loaded
      */
     public int loadPlugins() {
+        log.info("Start loadPlugins");
         ServiceLoader<PluginDescriptor> serviceLoader = ServiceLoader.load(PluginDescriptor.class);
 
         int loaded = 0;
