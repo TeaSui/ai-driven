@@ -1,0 +1,9 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // SPI module has ZERO dependencies on other application modules.
+    // It defines only interfaces and value types that modules implement.
+    api project(':core')
+}
