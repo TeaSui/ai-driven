@@ -3,6 +3,9 @@ plugins {
 }
 
 dependencies {
+    // Contracts module (lightweight interfaces)
+    api project(':contracts')
+
     // AWS SDK v2
     api platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     api 'software.amazon.awssdk:dynamodb'
