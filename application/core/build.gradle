@@ -3,6 +3,9 @@ plugins {
 }
 
 dependencies {
+    // SPI module - core depends on SPI for ModuleProvider contract
+    api project(':spi')
+
     // AWS SDK v2
     api platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     api 'software.amazon.awssdk:dynamodb'

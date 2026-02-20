@@ -8,4 +8,3 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
     // java.net.http.HttpClient is built into Java 11+, no external dependency needed
 }
-

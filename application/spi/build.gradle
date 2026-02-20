@@ -1,0 +1,10 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // Minimal dependencies - SPI should be lightweight
+    api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+    compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
+    annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
+}
