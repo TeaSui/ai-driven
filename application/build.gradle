@@ -15,6 +15,7 @@ allprojects {
 subprojects {
     apply plugin: 'java'
     apply plugin: 'idea'
+    apply plugin: 'maven-publish'
 
     java {
         sourceCompatibility = JavaVersion.toVersion(project.property('javaVersion'))
@@ -49,6 +50,18 @@ subprojects {
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
         options.compilerArgs += ['-parameters']
+    }
+
+    // Enable publishing for each module as an independent artifact
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+                groupId = project.group
+                artifactId = project.name
+                version = project.version
+            }
+        }
     }
 }
 
