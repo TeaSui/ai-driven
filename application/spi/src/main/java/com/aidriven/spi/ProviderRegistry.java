@@ -2,6 +2,7 @@ package com.aidriven.spi;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Logger;
 
 /**
  * Registry for SPI provider implementations.
@@ -22,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * }</pre>
  */
 public class ProviderRegistry {
+
+    private static final Logger logger = Logger.getLogger(ProviderRegistry.class.getName());
 
     /** providerId → provider instance, keyed by SPI interface */
     private final Map<Class<?>, Map<String, Object>> providers = new ConcurrentHashMap<>();
@@ -75,6 +78,7 @@ public class ProviderRegistry {
      */
     @SuppressWarnings("unchecked")
     public <T> T resolve(Class<T> spiInterface, TenantContext tenant) {
+        logger.info("Start resolve");
         Map<String, Object> registered = providers.get(spiInterface);
         if (registered == null || registered.isEmpty()) {
             throw new IllegalStateException(
