@@ -3,6 +3,9 @@ plugins {
 }
 
 dependencies {
+    // SPI module (tenant context, module registry, event bus)
+    api project(':spi')
+
     // AWS SDK v2
     api platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     api 'software.amazon.awssdk:dynamodb'
