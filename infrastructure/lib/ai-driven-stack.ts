@@ -129,7 +129,29 @@ export class AiDrivenStack extends cdk.Stack {
             AGENT_CLASSIFIER_USE_LLM: 'false',
             // Phase 4: MCP server configurations (JSON array)
             // Example: '[{"namespace":"monitoring","transport":"stdio","command":"npx","args":["@datadog/mcp-server"],"secretArn":"...","enabled":true}]'
-            MCP_SERVERS_CONFIG: '[]',
+            MCP_SERVERS_CONFIG: JSON.stringify([
+                {
+                    namespace: 'jira',
+                    transport: 'stdio',
+                    command: 'java',
+                    args: ['-jar', 'mcp-server-jira.jar'], // Assuming these are in the classpath/working dir
+                    enabled: true
+                },
+                {
+                    namespace: 'github',
+                    transport: 'stdio',
+                    command: 'java',
+                    args: ['-jar', 'mcp-server-github.jar'],
+                    enabled: true
+                },
+                {
+                    namespace: 'context7',
+                    transport: 'http',
+                    url: 'https://context7.liam.sh/mcp',
+                    enabled: true
+                }
+            ]),
+            MCP_ALLOW_STDIO_IN_LAMBDA: 'true',
         };
 
         const javaRuntime = lambda.Runtime.JAVA_21;
