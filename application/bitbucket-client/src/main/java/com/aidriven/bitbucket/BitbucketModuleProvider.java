@@ -2,6 +2,8 @@ package com.aidriven.bitbucket;
 
 import com.aidriven.spi.*;
 
+import java.util.logging.Logger;
+
 /**
  * SPI module provider for the Bitbucket client.
  * Enables Bitbucket integration to be discovered and activated per-tenant.
@@ -17,6 +19,8 @@ public class BitbucketModuleProvider implements ModuleProvider {
             .capabilities("source-control", "code-browsing", "pr-management")
             .build();
 
+    private static final Logger LOGGER = Logger.getLogger(BitbucketModuleProvider.class.getName());
+
     private volatile boolean initialized = false;
 
     @Override
@@ -26,6 +30,7 @@ public class BitbucketModuleProvider implements ModuleProvider {
 
     @Override
     public void initialize(TenantContext context) throws ModuleInitializationException {
+        LOGGER.info("Start initialize");
         try {
             context.getConfig("bitbucket.secretArn").orElseThrow(() ->
                     new IllegalStateException("bitbucket.secretArn not configured"));
