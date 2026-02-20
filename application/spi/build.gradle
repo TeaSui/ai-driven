@@ -1,0 +1,8 @@
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // SPI module has ZERO internal dependencies — only standard Java + Jackson for serialization
+    api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+}
