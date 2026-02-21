@@ -3,5 +3,9 @@ plugins {
 }
 
 dependencies {
-    implementation project(':core')
+    api project(':core')
+    implementation project(':bitbucket-client')
+    implementation project(':github-client')
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
 }

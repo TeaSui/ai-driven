@@ -3,5 +3,8 @@ plugins {
 }
 
 dependencies {
-    implementation project(':core')
+    api project(':core')
+    implementation project(':jira-client')
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
