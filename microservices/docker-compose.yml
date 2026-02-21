@@ -1,0 +1,277 @@
+version: '3.9'
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: crm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: crm-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-admin}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  postgres-auth:
+    image: postgres:15-alpine
+    container_name: crm-postgres-auth
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: ${AUTH_DB_USER:-auth_user}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASS:-auth_pass}
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${AUTH_DB_USER:-auth_user} -d auth_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  postgres-workflow:
+    image: postgres:15-alpine
+    container_name: crm-postgres-workflow
+    environment:
+      POSTGRES_DB: workflow_db
+      POSTGRES_USER: ${WORKFLOW_DB_USER:-workflow_user}
+      POSTGRES_PASSWORD: ${WORKFLOW_DB_PASS:-workflow_pass}
+    volumes:
+      - postgres_workflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WORKFLOW_DB_USER:-workflow_user} -d workflow_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  postgres-integration:
+    image: postgres:15-alpine
+    container_name: crm-postgres-integration
+    environment:
+      POSTGRES_DB: integration_db
+      POSTGRES_USER: ${INTEGRATION_DB_USER:-integration_user}
+      POSTGRES_PASSWORD: ${INTEGRATION_DB_PASS:-integration_pass}
+    volumes:
+      - postgres_integration_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INTEGRATION_DB_USER:-integration_user} -d integration_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  postgres-notification:
+    image: postgres:15-alpine
+    container_name: crm-postgres-notification
+    environment:
+      POSTGRES_DB: notification_db
+      POSTGRES_USER: ${NOTIFICATION_DB_USER:-notification_user}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASS:-notification_pass}
+    volumes:
+      - postgres_notification_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER:-notification_user} -d notification_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crm-network
+
+  # ─── Application Services ──────────────────────────────────────
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: crm-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      WORKFLOW_SERVICE_URL: http://workflow-service:8082
+      INTEGRATION_SERVICE_URL: http://integration-service:8083
+      NOTIFICATION_SERVICE_URL: http://notification-service:8084
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-100}
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: crm-auth-service
+    ports:
+      - "8081:8081"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8081
+      DATABASE_URL: postgresql://${AUTH_DB_USER:-auth_user}:${AUTH_DB_PASS:-auth_pass}@postgres-auth:5432/auth_db
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASS:-admin}@rabbitmq:5672
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  workflow-service:
+    build:
+      context: ./workflow-service
+      dockerfile: Dockerfile
+    container_name: crm-workflow-service
+    ports:
+      - "8082:8082"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8082
+      DATABASE_URL: postgresql://${WORKFLOW_DB_USER:-workflow_user}:${WORKFLOW_DB_PASS:-workflow_pass}@postgres-workflow:5432/workflow_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASS:-admin}@rabbitmq:5672
+      AUTH_SERVICE_URL: http://auth-service:8081
+      INTEGRATION_SERVICE_URL: http://integration-service:8083
+    depends_on:
+      postgres-workflow:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  integration-service:
+    build:
+      context: ./integration-service
+      dockerfile: Dockerfile
+    container_name: crm-integration-service
+    ports:
+      - "8083:8083"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8083
+      DATABASE_URL: postgresql://${INTEGRATION_DB_USER:-integration_user}:${INTEGRATION_DB_PASS:-integration_pass}@postgres-integration:5432/integration_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASS:-admin}@rabbitmq:5672
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    depends_on:
+      postgres-integration:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: crm-notification-service
+    ports:
+      - "8084:8084"
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8084
+      DATABASE_URL: postgresql://${NOTIFICATION_DB_USER:-notification_user}:${NOTIFICATION_DB_PASS:-notification_pass}@postgres-notification:5432/notification_db
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-admin}:${RABBITMQ_PASS:-admin}@rabbitmq:5672
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+    depends_on:
+      postgres-notification:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - crm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+  rabbitmq_data:
+  postgres_auth_data:
+  postgres_workflow_data:
+  postgres_integration_data:
+  postgres_notification_data:
+
+networks:
+  crm-network:
+    driver: bridge

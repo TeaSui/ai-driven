@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Integration {
+  id             String    @id @default(uuid())
+  name           String
+  type           String
+  config         Json      @default("{}")
+  encryptedCreds String?   @map("encrypted_creds")
+  isActive       Boolean   @default(true) @map("is_active")
+  status         String    @default("PENDING")
+  tenantId       String    @map("tenant_id")
+  lastTestedAt   DateTime? @map("last_tested_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  actionLogs IntegrationActionLog[]
+
+  @@index([tenantId])
+  @@index([type])
+  @@map("integrations")
+}
+
+model IntegrationActionLog {
+  id                  String   @id @default(uuid())
+  integrationId       String   @map("integration_id")
+  action              String
+  params              Json     @default("{}")
+  result              Json?    @default("{}")
+  success             Boolean
+  error               String?
+  durationMs          Int      @map("duration_ms")
+  workflowExecutionId String?  @map("workflow_execution_id")
+  stepId              String?  @map("step_id")
+  tenantId            String   @map("tenant_id")
+  executedAt          DateTime @default(now()) @map("executed_at")
+
+  integration Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([integrationId])
+  @@index([tenantId])
+  @@map("integration_action_logs")
+}

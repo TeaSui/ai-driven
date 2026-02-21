@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workflow {
+  id             String      @id @default(uuid())
+  name           String
+  description    String?
+  triggerType    String      @map("trigger_type")
+  triggerConfig  Json        @default("{}") @map("trigger_config")
+  steps          Json        @default("[]")
+  isActive       Boolean     @default(true) @map("is_active")
+  tags           String[]    @default([])
+  tenantId       String      @map("tenant_id")
+  createdBy      String      @map("created_by")
+  executionCount Int         @default(0) @map("execution_count")
+  lastExecutedAt DateTime?   @map("last_executed_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  executions WorkflowExecution[]
+
+  @@index([tenantId])
+  @@index([isActive])
+  @@map("workflows")
+}
+
+model WorkflowExecution {
+  id          String   @id @default(uuid())
+  workflowId  String   @map("workflow_id")
+  status      String   @default("PENDING")
+  triggeredBy String   @map("triggered_by")
+  payload     Json?    @default("{}")
+  stepResults Json     @default("[]") @map("step_results")
+  error       String?
+  startedAt   DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  durationMs  Int?     @map("duration_ms")
+  tenantId    String   @map("tenant_id")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId])
+  @@index([tenantId])
+  @@index([status])
+  @@map("workflow_executions")
+}
