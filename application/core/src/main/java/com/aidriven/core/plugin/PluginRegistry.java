@@ -41,7 +41,6 @@ public class PluginRegistry {
      * @param plugin The plugin to register
      */
     public void register(WorkflowPlugin plugin) {
-        log.debug("Registering plugin: {}", plugin.pluginId());
         if (plugin.tenantId() == null) {
             globalPlugins.add(plugin);
             log.info("Registered global plugin: {}", plugin.pluginId());
