@@ -1,0 +1,68 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        - id: auth-service
+          uri: lb://auth-service
+          predicates:
+            - Path=/auth/**
+          filters:
+            - StripPrefix=1
+
+        - id: tenant-service
+          uri: lb://tenant-service
+          predicates:
+            - Path=/tenants/**
+          filters:
+            - StripPrefix=0
+
+        - id: workflow-service
+          uri: lb://workflow-service
+          predicates:
+            - Path=/workflows/**
+          filters:
+            - StripPrefix=0
+
+        - id: integration-service
+          uri: lb://integration-service
+          predicates:
+            - Path=/integrations/**
+          filters:
+            - StripPrefix=0
+
+        - id: notification-service
+          uri: lb://notification-service
+          predicates:
+            - Path=/notifications/**
+          filters:
+            - StripPrefix=0
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://${REGISTRY_USER:admin}:${REGISTRY_PASSWORD:admin}@${REGISTRY_HOST:localhost}:8761/eureka/
+  instance:
+    prefer-ip-address: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    com.teasui.gateway: DEBUG
