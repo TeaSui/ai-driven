@@ -52,7 +52,7 @@ public class BedrockClient implements AiClient, AiProvider {
     private static final Map<String, String> MODEL_MAPPING = new HashMap<>();
     static {
         // Claude 4.6 models (latest) - use exact BedRock model IDs
-        MODEL_MAPPING.put("claude-opus-4-6", "anthropic.claude-opus-4-6");
+        MODEL_MAPPING.put("claude-opus-4-6", "anthropic.claude-opus-4-6-v1:0");
         MODEL_MAPPING.put("claude-sonnet-4-6", "anthropic.claude-sonnet-4-6");
         // Claude 4.5 models
         MODEL_MAPPING.put("claude-opus-4-5", "anthropic.claude-opus-4-5-20251101-v1:0");

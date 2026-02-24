@@ -127,7 +127,11 @@
       "WebFetch(domain:bedrock.ap-southeast-1.amazonaws.com)",
       "WebFetch(domain:sts.amazonaws.com)",
       "WebFetch(domain:get.sdkman.io)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:bedrock.us-east-1.amazonaws.com)",
+      "WebSearch",
+      "Bash(export JAVA_HOME=/opt/homebrew/opt/openjdk && ./gradlew clean build -x test 2>&1 | tail -50)",
+      "Bash(export JAVA_HOME=/opt/homebrew/opt/openjdk && ./gradlew clean 2>&1 | tail -20)"
     ]
   },
   "sandbox": {

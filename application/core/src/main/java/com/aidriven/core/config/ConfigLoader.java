@@ -30,7 +30,7 @@ public final class ConfigLoader {
                 .claudeTemperature(getDoubleEnv("CLAUDE_TEMPERATURE", 0.2))
                 .promptVersion(getEnv("PROMPT_VERSION", "v1"))
                 .claudeProvider(getEnv("CLAUDE_PROVIDER", "BEDROCK")) // ANTHROPIC_API - BEDROCK
-                .bedrockRegion(getEnv("BEDROCK_REGION", "us-east-1"))
+                .bedrockRegion(getEnv("BEDROCK_REGION", "ap-southeast-1"))
                 .branchPrefix(getEnv("BRANCH_PREFIX", "ai/"))
                 .gitHubSecretArn(System.getenv("GITHUB_SECRET_ARN"))
                 .jiraWebhookSecret(System.getenv("JIRA_WEBHOOK_SECRET"))
