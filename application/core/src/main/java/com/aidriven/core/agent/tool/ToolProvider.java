@@ -1,5 +1,6 @@
 package com.aidriven.core.agent.tool;
 
+import com.aidriven.spi.model.OperationContext;
 import java.util.List;
 
 /**
@@ -30,7 +31,7 @@ public interface ToolProvider {
     List<Tool> toolDefinitions();
 
     /** Dispatch a tool call to the underlying typed client. */
-    ToolResult execute(ToolCall call);
+    ToolResult execute(OperationContext context, ToolCall call);
 
     /**
      * Maximum output characters for tool results.

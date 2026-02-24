@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.NonNull;
 
 import java.time.Instant;
 import java.util.List;
@@ -19,11 +20,12 @@ import java.util.Map;
 public class TicketInfo {
 
     private String ticketId;
-    private String ticketKey;
+    private @NonNull String ticketKey;
     private String projectKey;
     private String summary;
     private String description;
-    private List<String> labels;
+    @Builder.Default
+    private List<String> labels = java.util.Collections.emptyList();
     private String status;
     private String assignee;
     private String reporter;
@@ -91,7 +93,7 @@ public class TicketInfo {
         }
 
         // 2. Check description/summary as fallback
-        String content = (summary + " " + description).toLowerCase();
+        String content = (summary + " " + (description != null ? description : "")).toLowerCase();
         if (content.contains("frontend") || content.contains("react") || content.contains("css")) {
             return AgentType.FRONTEND;
         }

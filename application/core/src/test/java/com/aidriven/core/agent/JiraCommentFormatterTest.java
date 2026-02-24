@@ -54,6 +54,44 @@ class JiraCommentFormatterTest {
         assertTrue(result.contains("..."));
     }
 
+    @Test
+    void should_format_ack_with_author_account_id_prepends_mention() {
+        String result = formatter.formatAck("fix the NPE", "5a2b3c4d5e6f7a8b9c0d");
+
+        // Jira @-mention format: [~accountId:xxx]
+        assertTrue(result.contains("[~accountId:5a2b3c4d5e6f7a8b9c0d]"),
+                "formatAck with accountId should prepend Jira mention, got: " + result);
+        assertTrue(result.contains("fix the NPE"));
+        assertTrue(result.contains("🤖 Processing"));
+    }
+
+    @Test
+    void should_format_ack_with_null_account_id_omits_mention() {
+        String result = formatter.formatAck("fix the NPE", null);
+
+        assertFalse(result.contains("[~accountId:"),
+                "formatAck with null accountId must not include mention");
+        assertTrue(result.contains("🤖 Processing"));
+        assertTrue(result.contains("fix the NPE"));
+    }
+
+    @Test
+    void should_format_ack_with_blank_account_id_omits_mention() {
+        String result = formatter.formatAck("do something", "  ");
+
+        assertFalse(result.contains("[~accountId:"),
+                "formatAck with blank accountId must not include mention");
+    }
+
+    @Test
+    void single_arg_formatAck_is_backward_compatible_with_two_arg_null_variant() {
+        String oneArg = formatter.formatAck("check the logs");
+        String twoArg = formatter.formatAck("check the logs", null);
+
+        assertEquals(oneArg, twoArg,
+                "Single-arg formatAck should produce same result as formatAck(msg, null)");
+    }
+
     // ─── Error Formatting ───
 
     @Test

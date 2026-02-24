@@ -26,6 +26,7 @@ class DryRunModeTest {
     void should_detect_dry_run_labels(String label) {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(List.of("backend", label))
+                .ticketKey("TEST-123")
                 .build();
 
         assertTrue(ticket.isDryRun());
@@ -36,6 +37,7 @@ class DryRunModeTest {
     void should_detect_dry_run_labels_case_insensitive(String label) {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(List.of(label))
+                .ticketKey("TEST-123")
                 .build();
 
         assertTrue(ticket.isDryRun());
@@ -45,6 +47,7 @@ class DryRunModeTest {
     void should_detect_dry_run_when_label_contains_keyword() {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(List.of("my-ai-test-feature"))
+                .ticketKey("TEST-123")
                 .build();
 
         assertTrue(ticket.isDryRun());
@@ -54,6 +57,7 @@ class DryRunModeTest {
     void should_not_detect_dry_run_for_normal_labels() {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(List.of("backend", "bug", "urgent"))
+                .ticketKey("TEST-123")
                 .build();
 
         assertFalse(ticket.isDryRun());
@@ -63,6 +67,7 @@ class DryRunModeTest {
     void should_not_detect_dry_run_for_null_labels() {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(null)
+                .ticketKey("TEST-123")
                 .build();
 
         assertFalse(ticket.isDryRun());
@@ -72,6 +77,7 @@ class DryRunModeTest {
     void should_not_detect_dry_run_for_empty_labels() {
         TicketInfo ticket = TicketInfo.builder()
                 .labels(Collections.emptyList())
+                .ticketKey("TEST-123")
                 .build();
 
         assertFalse(ticket.isDryRun());
@@ -197,6 +203,7 @@ class DryRunModeTest {
                 .labels(List.of("backend", "ai-test"))
                 .summary("Test")
                 .description("Test")
+                .ticketKey("TEST-123")
                 .build();
 
         boolean dryRunFromOrchestrator = ticket.isDryRun();

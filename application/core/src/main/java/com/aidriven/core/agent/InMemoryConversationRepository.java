@@ -20,8 +20,8 @@ public class InMemoryConversationRepository implements ConversationRepository {
     }
 
     @Override
-    public List<ConversationMessage> getConversation(String ticketKey) {
-        String pk = ConversationMessage.createPk(ticketKey);
+    public List<ConversationMessage> getConversation(String tenantId, String ticketKey) {
+        String pk = ConversationMessage.createPk(tenantId, ticketKey);
         List<ConversationMessage> messages = store.getOrDefault(pk, List.of());
         return messages.stream()
                 .sorted(Comparator.comparing(ConversationMessage::getSk))
@@ -29,15 +29,15 @@ public class InMemoryConversationRepository implements ConversationRepository {
     }
 
     @Override
-    public int getTotalTokens(String ticketKey) {
-        return getConversation(ticketKey).stream()
+    public int getTotalTokens(String tenantId, String ticketKey) {
+        return getConversation(tenantId, ticketKey).stream()
                 .mapToInt(ConversationMessage::getTokenCount)
                 .sum();
     }
 
     @Override
-    public void deleteConversation(String ticketKey) {
-        String pk = ConversationMessage.createPk(ticketKey);
+    public void deleteConversation(String tenantId, String ticketKey) {
+        String pk = ConversationMessage.createPk(tenantId, ticketKey);
         store.remove(pk);
     }
 }

@@ -40,8 +40,8 @@ Shared models, domain interfaces, utilities, and agent framework used by all oth
 - `com.aidriven.core.service` — AWS service wrappers (`SecretsService`, `ContextStorageService`, `IdempotencyService`)
 - `com.aidriven.core.exception` — Typed exceptions (`AiDrivenException`, `ExternalServiceException`)
 - `com.aidriven.core.util` — Utilities (`LambdaCorrelationContext`, `LambdaInputValidator`, `SourceFileFilter`, `OutputSanitizer`)
-- `com.aidriven.core.agent` — Agent orchestration (planned: `AgentOrchestrator`, `CommentIntentClassifier`)
-- `com.aidriven.core.agent.tool` — Tool provider pattern (planned: `ToolProvider`, `ToolRegistry`, `*ToolProvider` implementations)
+- `com.aidriven.core.agent` — Agent orchestration (`AgentOrchestrator`, `CommentIntentClassifier`)
+- `com.aidriven.core.agent.tool` — Tool provider pattern (`ToolProvider`, `ToolRegistry`, `*ToolProvider` implementations)
 
 ### `jira-client`
 Jira Cloud REST API client implementing `IssueTrackerClient`.
@@ -57,7 +57,7 @@ GitHub REST API v3 client implementing `SourceControlClient`.
 
 ### `claude-client`
 Direct Claude API client (not AWS Bedrock).
-- `ClaudeClient` — Send prompts, handle auto-continuation for truncated responses, tool-use support (planned)
+- `ClaudeClient` — Send prompts, handle auto-continuation for truncated responses, tool-use support
 - Configurable: model, max tokens, temperature via constructor params
 
 ### `lambda-handlers`
@@ -71,7 +71,7 @@ AWS Lambda handler implementations, packaged as a single fat JAR.
 | `ClaudeInvokeHandler` | Pipeline | Reads S3 context, invokes Claude, parses JSON response |
 | `PrCreatorHandler` | Pipeline | Creates branch, commits generated files, opens PR |
 | `MergeWaitHandler` | Pipeline | Manages task-token callback for PR merge wait |
-| `AgentWebhookHandler` | Agent | Validates comment webhooks, invokes AgentOrchestrator (planned) |
+| `AgentWebhookHandler` | Agent | Validates comment webhooks, invokes AgentOrchestrator |
 
 **Key classes:**
 - `ServiceFactory` — Singleton factory for all service instantiation (client creation, tool registry, context services)
@@ -94,16 +94,16 @@ SourceControlClient (interface)     IssueTrackerClient (interface)
 ServiceFactory.getSourceControlClient(platform) → resolves implementation
 ```
 
-### ToolProvider + ToolRegistry (Agent Mode — Planned)
+### ToolProvider + ToolRegistry (Agent Mode)
 
 ```
 ToolProvider (interface)
 ├── SourceControlToolProvider  → wraps SourceControlClient
 ├── IssueTrackerToolProvider   → wraps IssueTrackerClient
 ├── CodeContextToolProvider    → wraps ContextService
-├── MonitoringToolProvider     → wraps MonitoringClient (future)
-├── MessagingToolProvider      → wraps MessagingClient (future)
-└── DataToolProvider           → wraps DataClient (future)
+├── MonitoringToolProvider     → wraps MonitoringClient
+├── MessagingToolProvider      → wraps MessagingClient
+└── DataToolProvider           → wraps DataClient
 
 ToolRegistry
 ├── register(ToolProvider)     → register provider by namespace

@@ -4,15 +4,14 @@ import com.aidriven.core.model.TicketInfo;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import com.aidriven.spi.model.OperationContext;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,11 +31,13 @@ class JiraClientValidationTest {
     private HttpResponse<String> mockResponse;
 
     private JiraClient jiraClient;
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         jiraClient = new JiraClient("https://test.atlassian.net", "test@test.com", "token");
+        operationContext = OperationContext.builder().tenantId("test-tenant").build();
         try {
             var field = JiraClient.class.getDeclaredField("httpClient");
             field.setAccessible(true);
@@ -50,7 +51,7 @@ class JiraClientValidationTest {
     void should_throw_null_pointer_exception_for_null_ticket_key_in_get_ticket() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            jiraClient.getTicket(null);
+            jiraClient.getTicket(operationContext, null);
         });
     }
 
@@ -58,7 +59,7 @@ class JiraClientValidationTest {
     void should_throw_null_pointer_exception_for_null_ticket_key_in_update_status() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            jiraClient.updateStatus(null, "Done");
+            jiraClient.updateStatus(operationContext, null, "Done");
         });
     }
 
@@ -66,7 +67,7 @@ class JiraClientValidationTest {
     void should_throw_null_pointer_exception_for_null_status_in_update_status() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            jiraClient.updateStatus("PROJ-123", null);
+            jiraClient.updateStatus(operationContext, "PROJ-123", null);
         });
     }
 
@@ -74,7 +75,7 @@ class JiraClientValidationTest {
     void should_throw_null_pointer_exception_for_null_ticket_key_in_add_comment() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            jiraClient.addComment(null, "Test comment");
+            jiraClient.addComment(operationContext, null, "Test comment");
         });
     }
 
@@ -82,16 +83,16 @@ class JiraClientValidationTest {
     void should_throw_null_pointer_exception_for_null_comment_in_add_comment() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            jiraClient.addComment("PROJ-123", null);
+            jiraClient.addComment(operationContext, "PROJ-123", null);
         });
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"invalid", "123", "PROJ", "proj-123", "PROJ_123", "PROJ-", "-123"})
+    @ValueSource(strings = { "invalid", "PROJ", "proj-123", "PROJ_123", "PROJ-", "-123" })
     void should_throw_illegal_argument_exception_for_invalid_ticket_key_format(String invalidKey) {
         // When/Then: Verify IllegalArgumentException is thrown for invalid formats
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
-            jiraClient.getTicket(invalidKey);
+            jiraClient.getTicket(operationContext, invalidKey);
         });
 
         assertTrue(exception.getMessage().contains("Invalid ticket key format"));
@@ -118,13 +119,39 @@ class JiraClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: Call with valid ticket keys
-        TicketInfo ticket1 = jiraClient.getTicket("PROJ-123");
-        TicketInfo ticket2 = jiraClient.getTicket("AB-1");
-        TicketInfo ticket3 = jiraClient.getTicket("MYPROJECT-9999");
+        TicketInfo ticket1 = jiraClient.getTicket(operationContext, "PROJ-123");
 
         // Then: No exceptions thrown
         assertNotNull(ticket1);
         assertEquals("PROJ-123", ticket1.getTicketKey());
+    }
+
+    @Test
+    void should_accept_numeric_ticket_keys() throws Exception {
+        // Given: Mock successful response
+        String validResponse = """
+                {
+                    "id": "14",
+                    "key": "14",
+                    "fields": {
+                        "summary": "GitHub PR #14",
+                        "description": null,
+                        "status": {"name": "Open"},
+                        "labels": []
+                    }
+                }
+                """;
+        when(mockResponse.statusCode()).thenReturn(200);
+        when(mockResponse.body()).thenReturn(validResponse);
+        when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
+                .thenReturn(mockResponse);
+
+        // When: Call with numeric ticket key (e.g. GitHub PR)
+        TicketInfo ticket = jiraClient.getTicket(operationContext, "14");
+
+        // Then: No exceptions thrown
+        assertNotNull(ticket);
+        assertEquals("14", ticket.getTicketKey());
     }
 
     @Test
@@ -153,7 +180,7 @@ class JiraClientValidationTest {
 
         // When/Then: Verify IllegalStateException is thrown
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> {
-            jiraClient.updateStatus("PROJ-123", "Done");
+            jiraClient.updateStatus(operationContext, "PROJ-123", "Done");
         });
 
         assertTrue(exception.getMessage().contains("Transition to 'Done' not available"));
@@ -175,7 +202,7 @@ class JiraClientValidationTest {
 
         // When/Then: Verify IllegalStateException is thrown
         IllegalStateException exception = assertThrows(IllegalStateException.class, () -> {
-            jiraClient.updateStatus("PROJ-123", "Done");
+            jiraClient.updateStatus(operationContext, "PROJ-123", "Done");
         });
 
         assertTrue(exception.getMessage().contains("Transition to 'Done' not available"));
@@ -197,30 +224,32 @@ class JiraClientValidationTest {
                 """;
 
         // Each updateStatus makes 2 HTTP requests: getTransitions + transitionTicket
-        // getTransitions: checkResponse reads statusCode()+body(), then readTree reads body() again
-        // transitionTicket: reads statusCode() twice (line 107 + line 110), no body() if 204
+        // getTransitions: checkResponse reads statusCode()+body(), then readTree reads
+        // body() again
+        // transitionTicket: reads statusCode() twice (line 107 + line 110), no body()
+        // if 204
         // So per call: statusCode() x3, body() x2
         when(mockResponse.statusCode()).thenReturn(
-                200,       // checkResponse in getTransitions (1st call)
-                204, 204,  // transitionTicket statusCode checks (1st call)
-                200,       // checkResponse in getTransitions (2nd call)
-                204, 204   // transitionTicket statusCode checks (2nd call)
+                200, // checkResponse in getTransitions (1st call)
+                204, 204, // transitionTicket statusCode checks (1st call)
+                200, // checkResponse in getTransitions (2nd call)
+                204, 204 // transitionTicket statusCode checks (2nd call)
         );
         when(mockResponse.body()).thenReturn(
-                transitionsResponse, transitionsResponse,  // checkResponse + readTree in getTransitions (1st call)
-                transitionsResponse, transitionsResponse   // checkResponse + readTree in getTransitions (2nd call)
+                transitionsResponse, transitionsResponse, // checkResponse + readTree in getTransitions (1st call)
+                transitionsResponse, transitionsResponse // checkResponse + readTree in getTransitions (2nd call)
         );
         when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                 .thenReturn(mockResponse);
 
         // When: Call with different case - lowercase
         assertDoesNotThrow(() -> {
-            jiraClient.updateStatus("PROJ-123", "done");
+            jiraClient.updateStatus(operationContext, "PROJ-123", "done");
         });
 
         // When: Call with different case - uppercase
         assertDoesNotThrow(() -> {
-            jiraClient.updateStatus("PROJ-123", "DONE");
+            jiraClient.updateStatus(operationContext, "PROJ-123", "DONE");
         });
     }
 }

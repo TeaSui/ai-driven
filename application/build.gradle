@@ -3,6 +3,8 @@ plugins {
     id 'idea'
 }
 
+// ==================== ROOT CONFIGURATION ====================
+
 allprojects {
     group = project.property('group')
     version = project.property('version')
@@ -12,29 +14,32 @@ allprojects {
     }
 }
 
+// ==================== COMMON SUBPROJECT CONFIGURATION ====================
+
 subprojects {
     apply plugin: 'java'
     apply plugin: 'idea'
 
+    // Java Version Configuration
     java {
         sourceCompatibility = JavaVersion.toVersion(project.property('javaVersion'))
         targetCompatibility = JavaVersion.toVersion(project.property('javaVersion'))
     }
 
+    // ==================== DEPENDENCIES ====================
     dependencies {
-        // Lombok
+        // --- Annotation Processing & Code Generation ---
         compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
         annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
 
-        // Logging
-        // Logging (Log4j2 via SLF4J)
+        // --- Logging (SLF4J API + Log4j2 Implementation) ---
         implementation "org.slf4j:slf4j-api:${project.property('slf4jVersion')}"
         runtimeOnly "org.apache.logging.log4j:log4j-api:${project.property('log4jVersion')}"
         runtimeOnly "org.apache.logging.log4j:log4j-core:${project.property('log4jVersion')}"
         runtimeOnly "org.apache.logging.log4j:log4j-slf4j2-impl:${project.property('log4jVersion')}"
         runtimeOnly "com.amazonaws:aws-lambda-java-log4j2:${project.property('awsLambdaLog4jVersion')}"
 
-        // Testing
+        // --- Testing (JUnit 5 + Mockito) ---
         testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"
         testImplementation "org.mockito:mockito-core:${project.property('mockitoVersion')}"
         testImplementation "org.mockito:mockito-junit-jupiter:${project.property('mockitoVersion')}"
@@ -42,17 +47,36 @@ subprojects {
         testAnnotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
     }
 
+    // ==================== TEST CONFIGURATION ====================
     test {
         useJUnitPlatform()
     }
 
+    // ==================== COMPILER CONFIGURATION ====================
     tasks.withType(JavaCompile).configureEach {
         options.encoding = 'UTF-8'
         options.compilerArgs += ['-parameters']
     }
 }
 
-// Convenience task to build everything
+// ==================== CONVENIENCE TASKS ====================
+
+// Build all subprojects
 task buildAll {
+    description = 'Builds all subprojects'
     dependsOn subprojects.collect { it.tasks.build }
 }
+
+// Test all subprojects
+task testAll {
+    description = 'Tests all subprojects'
+    dependsOn subprojects.collect { it.tasks.test }
+}
+
+// Clean build for all subprojects
+task cleanAll {
+    description = 'Cleans all subprojects'
+    dependsOn subprojects.collect { it.tasks.clean }
+}
+
+

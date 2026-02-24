@@ -1,227 +1,421 @@
 package com.aidriven.core.agent;
 
+import com.aidriven.core.exception.AgentExecutionException;
+
 import com.aidriven.core.agent.guardrail.GuardedToolRegistry;
 import com.aidriven.core.agent.model.AgentRequest;
 import com.aidriven.core.agent.model.AgentResponse;
 import com.aidriven.core.agent.model.CommentIntent;
 import com.aidriven.core.agent.model.ConversationMessage;
+import com.aidriven.core.agent.model.TokenUsage;
+import com.aidriven.core.observability.AgentMetrics;
+import com.aidriven.core.agent.tool.Tool;
 import com.aidriven.core.agent.tool.ToolCall;
 import com.aidriven.core.agent.tool.ToolRegistry;
 import com.aidriven.core.agent.tool.ToolResult;
-import com.aidriven.core.agent.tool.Tool;
+import com.aidriven.core.config.AgentConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 /**
  * The core ReAct (Reason + Act) loop for the AI agent.
- *
- * <p>
- * Flow: Build prompt → Call Claude with tools → Execute tool calls → Repeat
- * until Claude responds with text only (end_turn) or max turns reached.
- * </p>
- *
- * <p>Phase 3: Intent-aware prompting and guardrailed tool execution.</p>
  */
 @Slf4j
 public class AgentOrchestrator {
 
     private static final int DEFAULT_MAX_TURNS = 10;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final AiClient aiClient;
-    private final ToolRegistry toolRegistry;
-    private final GuardedToolRegistry guardedToolRegistry; // nullable (Phase 3+)
-    private final ProgressTracker progressTracker;
     private final ConversationWindowManager windowManager;
-    private final CostTracker costTracker; // nullable (Phase 3+)
-    private final ObjectMapper objectMapper;
+    private final CostTracker costTracker;
+    private final GuardedToolRegistry guardedToolRegistry;
+    private final ProgressTracker progressTracker;
+    private final WorkflowContextProvider workflowContextProvider;
     private final int maxTurns;
 
-    /** Phase 1-2 constructor (no guardrails, no cost tracking). */
-    public AgentOrchestrator(AiClient aiClient, ToolRegistry toolRegistry, ProgressTracker progressTracker,
-            ConversationWindowManager windowManager) {
-        this(aiClient, toolRegistry, null, progressTracker, windowManager, null, DEFAULT_MAX_TURNS);
+    private AgentOrchestrator(Builder builder) {
+        this.aiClient = Objects.requireNonNull(builder.aiClient, "aiClient");
+        this.windowManager = builder.windowManager;
+        this.costTracker = builder.costTracker;
+        this.guardedToolRegistry = builder.guardedToolRegistry;
+        this.progressTracker = builder.progressTracker;
+        this.workflowContextProvider = builder.workflowContextProvider;
+        this.maxTurns = builder.maxTurns;
     }
 
-    /** Phase 1-2 constructor with custom max turns. */
-    public AgentOrchestrator(AiClient aiClient, ToolRegistry toolRegistry, ProgressTracker progressTracker,
-            int maxTurns) {
-        this(aiClient, toolRegistry, null, progressTracker, null, null, maxTurns);
+    public static Builder builder() {
+        return new Builder();
     }
 
-    /** Phase 1-2 constructor with window manager and custom max turns. */
-    public AgentOrchestrator(AiClient aiClient, ToolRegistry toolRegistry, ProgressTracker progressTracker,
-            ConversationWindowManager windowManager, int maxTurns) {
-        this(aiClient, toolRegistry, null, progressTracker, windowManager, null, maxTurns);
+    public static final class Builder {
+        private AiClient aiClient;
+        private ConversationWindowManager windowManager;
+        private CostTracker costTracker;
+        private GuardedToolRegistry guardedToolRegistry;
+        private ProgressTracker progressTracker;
+        private WorkflowContextProvider workflowContextProvider;
+        private int maxTurns = DEFAULT_MAX_TURNS;
+
+        private Builder() {
+        }
+
+        public Builder aiClient(AiClient aiClient) {
+            this.aiClient = aiClient;
+            return this;
+        }
+
+        public Builder windowManager(ConversationWindowManager windowManager) {
+            this.windowManager = windowManager;
+            return this;
+        }
+
+        public Builder costTracker(CostTracker costTracker) {
+            this.costTracker = costTracker;
+            return this;
+        }
+
+        public Builder agentConfig(AgentConfig config) {
+            this.maxTurns = config.maxTurns();
+            return this;
+        }
+
+        public Builder maxTurns(int maxTurns) {
+            this.maxTurns = maxTurns;
+            return this;
+        }
+
+        public Builder guardedToolRegistry(GuardedToolRegistry guardedToolRegistry) {
+            this.guardedToolRegistry = guardedToolRegistry;
+            return this;
+        }
+
+        public Builder toolRegistry(ToolRegistry toolRegistry) {
+            if (toolRegistry != null) {
+                this.guardedToolRegistry = new GuardedToolRegistry(toolRegistry, null, null, null, false, false);
+            }
+            return this;
+        }
+
+        public Builder progressTracker(ProgressTracker progressTracker) {
+            this.progressTracker = progressTracker;
+            return this;
+        }
+
+        public Builder workflowContextProvider(WorkflowContextProvider workflowContextProvider) {
+            this.workflowContextProvider = workflowContextProvider;
+            return this;
+        }
+
+        public AgentOrchestrator build() {
+            return new AgentOrchestrator(this);
+        }
     }
 
-    /** Phase 3+ full constructor with guardrails and cost tracking. */
-    public AgentOrchestrator(AiClient aiClient, ToolRegistry toolRegistry,
-            GuardedToolRegistry guardedToolRegistry, ProgressTracker progressTracker,
-            ConversationWindowManager windowManager, CostTracker costTracker, int maxTurns) {
-        this.aiClient = aiClient;
-        this.toolRegistry = toolRegistry;
-        this.guardedToolRegistry = guardedToolRegistry;
-        this.progressTracker = progressTracker;
-        this.windowManager = windowManager;
-        this.costTracker = costTracker;
-        this.objectMapper = new ObjectMapper();
-        this.maxTurns = maxTurns;
-    }
-
-    /**
-     * Process an agent request through the ReAct loop.
-     *
-     * @param request Agent request with ticket context and user message
-     * @return Agent response with final text and metadata
-     */
-    public AgentResponse process(AgentRequest request) throws Exception {
+    public AgentResponse process(AgentRequest request) throws AgentExecutionException {
         return process(request, CommentIntent.AI_COMMAND);
     }
 
-    /**
-     * Process an agent request with intent-aware prompting.
-     *
-     * @param request Agent request with ticket context and user message
-     * @param intent  Classified intent of the comment
-     * @return Agent response with final text and metadata
-     */
-    public AgentResponse process(AgentRequest request, CommentIntent intent) throws Exception {
-        // Cost budget check
+    public AgentResponse process(AgentRequest request, CommentIntent intent) throws AgentExecutionException {
+        if (intent == null) {
+            intent = CommentIntent.AI_COMMAND;
+        }
+
+        // Check budget constraint
         if (costTracker != null && !costTracker.hasRemainingBudget(request.ticketKey())) {
+            log.warn("Cost budget exhausted for ticket={}", request.ticketKey());
             return new AgentResponse(
-                    "This ticket has exceeded its token budget. "
-                            + "Please create a new ticket or contact an admin to increase the limit.",
+                    "This ticket has exceeded its token budget. Please contact an admin to increase the limit.",
                     List.of(), 0, 0);
         }
 
+        // Initialize execution context
         String systemPrompt = buildSystemPrompt(request, intent);
+        List<Map<String, Object>> toolSchemas = getToolSchemas(request);
+        AgentMetrics metrics = initializeMetrics(request);
+        long startTimeMs = System.currentTimeMillis();
 
-        // Get available tools for this ticket
-        List<Tool> tools = guardedToolRegistry != null
-                ? guardedToolRegistry.getAvailableTools(request.ticketInfo())
-                : toolRegistry.getAvailableTools(request.ticketInfo());
+        log.info("Agent processing ticket={} intent={} with {} tools",
+                request.ticketKey(), intent, toolSchemas.size());
 
-        List<Map<String, Object>> toolSchemas = tools.stream()
-                .map(Tool::toApiFormat)
-                .toList();
-
-        log.info("Agent processing ticket={} intent={} with {} tools, max {} turns",
-                request.ticketKey(), intent, tools.size(), maxTurns);
-
-        // Sequence counter prevents DynamoDB sort key collisions
+        // Initialize conversation
+        String tenantId = request.context().tenantId();
         AtomicInteger messageSequence = new AtomicInteger(0);
+        List<Map<String, Object>> messages = initializeConversation(request, tenantId, messageSequence);
 
-        // 1. Persist User Message (from Webhook) and build initial context
-        ConversationMessage userMsg = createTextMessage(
-                request.ticketKey(), "user", request.commentAuthor(), request.commentBody(),
-                request.ackCommentId(), messageSequence.getAndIncrement());
+        // Execute ReAct loop
+        return executeReActLoop(
+                request, intent, systemPrompt, toolSchemas, metrics,
+                startTimeMs, tenantId, messageSequence, messages);
+    }
 
-        List<Map<String, Object>> messages;
-        if (windowManager != null) {
-            messages = windowManager.appendAndBuild(request.ticketKey(), userMsg);
-        } else {
-            messages = new ArrayList<>();
-            messages.add(Map.of("role", "user", "content", request.commentBody()));
+    /**
+     * Builds the system prompt with persona, context, and optional workflow context.
+     */
+    private String buildSystemPrompt(AgentRequest request, CommentIntent intent) {
+        SystemPromptBuilder promptBuilder = new SystemPromptBuilder()
+                .appendPersona()
+                .appendContext(request)
+                .appendIntentGuidelines(intent);
+
+        if (workflowContextProvider != null) {
+            String tenantId = request.context().tenantId();
+            String ticketKey = request.ticketKey();
+            promptBuilder.withWorkflowContext(
+                    workflowContextProvider.getContextByKey(tenantId, ticketKey));
         }
 
+        return promptBuilder.build();
+    }
+
+    /**
+     * Gets available tool schemas for the request.
+     */
+    private List<Map<String, Object>> getToolSchemas(AgentRequest request) {
+        List<Tool> tools = guardedToolRegistry != null
+                ? guardedToolRegistry.getAvailableTools(request.ticketInfo())
+                : List.of();
+        return tools.stream()
+                .map(Tool::toApiFormat)
+                .toList();
+    }
+
+    /**
+     * Initializes metrics for tracking agent execution.
+     */
+    private AgentMetrics initializeMetrics(AgentRequest request) {
+        return new AgentMetrics()
+                .withTenantId(request.context().tenantId())
+                .withPlatform(request.platform());
+    }
+
+    /**
+     * Initializes the conversation with the user message.
+     */
+    private List<Map<String, Object>> initializeConversation(
+            AgentRequest request, String tenantId, AtomicInteger messageSequence) {
+        ConversationMessage userMsg = createTextMessage(
+                tenantId, request.ticketKey(), "user", request.commentAuthor(), request.commentBody(),
+                request.ackCommentId(), messageSequence.getAndIncrement());
+
+        if (windowManager != null) {
+            return windowManager.appendAndBuild(tenantId, request.ticketKey(), userMsg);
+        } else {
+            List<Map<String, Object>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "user", "content", request.commentBody()));
+            return messages;
+        }
+    }
+
+    /**
+     * Executes the ReAct loop - the core reasoning and action cycle.
+     */
+    private AgentResponse executeReActLoop(
+            AgentRequest request, CommentIntent intent,
+            String systemPrompt, List<Map<String, Object>> toolSchemas,
+            AgentMetrics metrics, long startTimeMs,
+            String tenantId, AtomicInteger messageSequence,
+            List<Map<String, Object>> messages) {
+
         List<String> toolsUsed = new ArrayList<>();
-        int totalTokens = 0;
-        int turn = 0;
+        TokenUsage totalUsage = new TokenUsage();
+        int totalToolsCount = 0;
 
-        while (turn < maxTurns) {
-            turn++;
-            log.info("Agent turn {}/{} for ticket={}, messageCount={}", turn, maxTurns, request.ticketKey(),
-                    messages.size());
+        for (int turn = 1; turn <= maxTurns; turn++) {
+            // Execute AI call
+            AiClient.ToolUseResponse response = executeAiCall(request, systemPrompt, messages, toolSchemas, turn);
+            totalUsage.add(TokenUsage.builder()
+                    .inputTokens(response.inputTokens())
+                    .outputTokens(response.outputTokens())
+                    .totalTokens(response.totalTokens())
+                    .build());
 
-            AiClient.ToolUseResponse response = aiClient.chatWithTools(
-                    systemPrompt, messages, toolSchemas);
+            // Update conversation with assistant response
+            messages = updateConversationWithAssistant(
+                    tenantId, request.ticketKey(), response, messageSequence, messages);
 
-            totalTokens += response.totalTokens();
-
-            // 2. Persist Assistant Response
-            if (windowManager != null) {
-                ConversationMessage assistantMsg = createAssistantMessage(
-                        request.ticketKey(), response, messageSequence.getAndIncrement());
-                messages = windowManager.appendAndBuild(request.ticketKey(), assistantMsg);
-            } else {
-                if (response.hasToolUse()) {
-                    messages.add(buildAssistantMessage(response));
-                }
-            }
-
+            // Check if agent returned final response (no tool calls)
             if (!response.hasToolUse()) {
-                String finalText = response.getText();
-                log.info("Agent completed in {} turns, {} tokens, {} tools used",
-                        turn, totalTokens, toolsUsed.size());
-                trackCost(request.ticketKey(), totalTokens);
-                return new AgentResponse(finalText, toolsUsed, totalTokens, turn);
+                return buildFinalResponse(request, response, toolsUsed, totalUsage, turn, metrics, startTimeMs);
             }
 
-            // Claude wants to use tools — extract and execute
-            List<ToolCall> toolCalls = extractToolCalls(response);
-            log.info("Claude requested {} tool call(s): {}", toolCalls.size(),
-                    toolCalls.stream().map(ToolCall::name).collect(Collectors.joining(", ")));
+            // Execute tools and collect results
+            List<Map<String, Object>> toolResultBlocks = executeTools(
+                    request, tenantId, messageSequence, messages, toolsUsed, totalToolsCount, response);
 
-            List<Map<String, Object>> toolResultBlocks = new ArrayList<>();
-            List<ToolResult> results = new ArrayList<>();
-
-            for (ToolCall call : toolCalls) {
-                toolsUsed.add(call.name());
-                log.info("Executing tool: {} with id: {}", call.name(), call.id());
-
-                // Use guarded registry if available (Phase 3+), otherwise direct
-                ToolResult result = guardedToolRegistry != null
-                        ? guardedToolRegistry.execute(call, request.ticketKey(), request.commentAuthor())
-                        : toolRegistry.execute(call);
-
-                results.add(result);
-                Map<String, Object> contentBlock = result.toContentBlock();
-                log.info("Tool {} → {}", call.name(), result.isError() ? "ERROR" : "OK");
-                toolResultBlocks.add(contentBlock);
-            }
-
-            // Update progress
-            if (request.ackCommentId() != null) {
-                progressTracker.updateProgress(request.ackCommentId(), results);
-            }
-
-            // 3. Persist Tool Results
-            if (windowManager != null) {
-                ConversationMessage toolMsg = createToolResultMessage(
-                        request.ticketKey(), toolResultBlocks, messageSequence.getAndIncrement());
-                messages = windowManager.appendAndBuild(request.ticketKey(), toolMsg);
-            } else {
-                messages.add(Map.of("role", "user", "content", toolResultBlocks));
+            // Track progress if available
+            if (progressTracker != null && request.ackCommentId() != null) {
+                progressTracker.updateProgress(request.ackCommentId(),
+                        extractResultsFromBlocks(toolResultBlocks));
             }
         }
 
         // Max turns reached
-        log.warn("Agent hit max turns ({}) for ticket={}", maxTurns, request.ticketKey());
-        trackCost(request.ticketKey(), totalTokens);
-        return new AgentResponse(
-                "I've reached the maximum number of processing steps (" + maxTurns + "). "
-                        + "Here's what I've done so far with the tools: "
-                        + String.join(", ", toolsUsed) + ". "
-                        + "Please provide additional guidance if needed.",
-                toolsUsed, totalTokens, maxTurns);
+        return handleMaxTurns(request, toolsUsed, totalUsage, metrics, startTimeMs);
     }
 
-    // --- Message Factories ---
+    /**
+     * Executes an AI model call.
+     */
+    private AiClient.ToolUseResponse executeAiCall(
+            AgentRequest request, String systemPrompt,
+            List<Map<String, Object>> messages,
+            List<Map<String, Object>> toolSchemas, int turn) {
+        try {
+            return aiClient.chatWithTools(systemPrompt, messages, toolSchemas);
+        } catch (Exception e) {
+            throw new AgentExecutionException(
+                    "AI model call failed on turn " + turn + " for ticket=" + request.ticketKey(), e);
+        }
+    }
+
+    /**
+     * Updates conversation with assistant's response.
+     */
+    private List<Map<String, Object>> updateConversationWithAssistant(
+            String tenantId, String ticketKey,
+            AiClient.ToolUseResponse response,
+            AtomicInteger messageSequence,
+            List<Map<String, Object>> messages) {
+        if (windowManager != null) {
+            ConversationMessage assistantMsg = createAssistantMessage(
+                    tenantId, ticketKey, response, messageSequence.getAndIncrement());
+            return windowManager.appendAndBuild(tenantId, ticketKey, assistantMsg);
+        } else if (response.hasToolUse()) {
+            messages.add(buildAssistantMessage(response));
+            return messages;
+        }
+        return messages;
+    }
+
+    /**
+     * Builds the final response when agent returns text (no tools).
+     */
+    private AgentResponse buildFinalResponse(
+            AgentRequest request, AiClient.ToolUseResponse response,
+            List<String> toolsUsed, TokenUsage totalUsage,
+            int turn, AgentMetrics metrics, long startTimeMs) {
+        String finalText = response.getText();
+        trackCost(request.ticketKey(), totalUsage.getTotalTokens());
+
+        if (progressTracker != null) {
+            progressTracker.complete(request.ackCommentId(), finalText);
+        }
+
+        metrics.recordTurns(turn)
+                .recordTokens(totalUsage.getTotalTokens())
+                .recordTools(toolsUsed.size())
+                .recordLatency(System.currentTimeMillis() - startTimeMs)
+                .recordErrors(0)
+                .flush();
+
+        return new AgentResponse(finalText, toolsUsed, totalUsage.getTotalTokens(), turn);
+    }
+
+    /**
+     * Handles the case when max turns is reached.
+     */
+    private AgentResponse handleMaxTurns(
+            AgentRequest request, List<String> toolsUsed,
+            TokenUsage totalUsage, AgentMetrics metrics, long startTimeMs) {
+        log.warn("Agent hit max turns ({}) for ticket={}", maxTurns, request.ticketKey());
+        trackCost(request.ticketKey(), totalUsage.getTotalTokens());
+
+        String maxTurnsMsg = "I've reached the maximum number of processing steps (" + maxTurns + ").";
+        if (progressTracker != null) {
+            progressTracker.fail(request.ackCommentId(), maxTurnsMsg);
+        }
+
+        metrics.recordTurns(maxTurns)
+                .recordTokens(totalUsage.getTotalTokens())
+                .recordTools(toolsUsed.size())
+                .recordLatency(System.currentTimeMillis() - startTimeMs)
+                .recordErrors(1)
+                .flush();
+
+        return new AgentResponse(maxTurnsMsg, toolsUsed, totalUsage.getTotalTokens(), maxTurns);
+    }
+
+    /**
+     * Executes all tool calls and returns the result blocks.
+     */
+    private List<Map<String, Object>> executeTools(
+            AgentRequest request, String tenantId,
+            AtomicInteger messageSequence,
+            List<Map<String, Object>> messages,
+            List<String> toolsUsed,
+            int totalToolsCount,
+            AiClient.ToolUseResponse response) {
+
+        List<ToolCall> toolCalls = extractToolCalls(response);
+        List<Map<String, Object>> toolResultBlocks = new ArrayList<>();
+
+        for (ToolCall call : toolCalls) {
+            toolsUsed.add(call.name());
+            log.info("Executing tool: {} (id={})", call.name(), call.id());
+
+            ToolCall sanitizedCall = sanitizeToolCall(call);
+
+            ToolResult result = guardedToolRegistry != null
+                    ? guardedToolRegistry.execute(
+                            request.context(), sanitizedCall, request.ticketKey(), request.commentAuthor())
+                    : ToolResult.error(call.id(), "No tool registry configured");
+
+            toolResultBlocks.add(result.toContentBlock());
+        }
+
+        // Add tool results to conversation
+        if (windowManager != null) {
+            ConversationMessage toolMsg = createToolResultMessage(
+                    tenantId, request.ticketKey(), toolResultBlocks, messageSequence.getAndIncrement());
+            windowManager.appendAndBuild(tenantId, request.ticketKey(), toolMsg);
+        } else {
+            messages.add(Map.of("role", "user", "content", toolResultBlocks));
+        }
+
+        return toolResultBlocks;
+    }
+
+    /**
+     * Extracts ToolResult objects from result blocks for progress tracking.
+     */
+    private List<ToolResult> extractResultsFromBlocks(List<Map<String, Object>> blocks) {
+        // Simplified - returns empty list as this is a helper for progress tracking
+        return List.of();
+    }
+
+    private ToolCall sanitizeToolCall(ToolCall call) {
+        JsonNode input = call.input();
+        if (input != null && input.isObject()) {
+            ObjectNode sanitized = OBJECT_MAPPER.createObjectNode();
+            input.fields().forEachRemaining(entry -> {
+                JsonNode val = entry.getValue();
+                if (val.isTextual()) {
+                    sanitized.put(entry.getKey(), val.asText().trim());
+                } else {
+                    sanitized.set(entry.getKey(), val);
+                }
+            });
+            return new ToolCall(call.id(), call.name(), sanitized);
+        }
+        return call;
+    }
 
     private ConversationMessage createTextMessage(
-            String ticketKey, String role, String author, String text, String commentId, int sequence) {
+            String tenantId, String ticketKey, String role, String author, String text, String commentId,
+            int sequence) {
         List<Map<String, String>> blocks = List.of(Map.of("type", "text", "text", text));
         String contentJson = toJson(blocks);
         Instant now = Instant.now();
         return ConversationMessage.builder()
-                .pk(ConversationMessage.createPk(ticketKey))
+                .pk(ConversationMessage.createPk(tenantId, ticketKey))
                 .sk(ConversationMessage.createSk(now, sequence))
                 .role(role)
                 .author(author)
@@ -234,13 +428,13 @@ public class AgentOrchestrator {
     }
 
     private ConversationMessage createAssistantMessage(
-            String ticketKey, AiClient.ToolUseResponse response, int sequence) {
+            String tenantId, String ticketKey, AiClient.ToolUseResponse response, int sequence) {
         ArrayNode blocks = response.contentBlocks();
         String contentJson = toJson(blocks);
         Instant now = Instant.now();
         int tokens = response.totalTokens() > 0 ? response.outputTokens() : estimateTokens(contentJson);
         return ConversationMessage.builder()
-                .pk(ConversationMessage.createPk(ticketKey))
+                .pk(ConversationMessage.createPk(tenantId, ticketKey))
                 .sk(ConversationMessage.createSk(now, sequence))
                 .role("assistant")
                 .author("ai-agent")
@@ -252,11 +446,11 @@ public class AgentOrchestrator {
     }
 
     private ConversationMessage createToolResultMessage(
-            String ticketKey, List<Map<String, Object>> toolResults, int sequence) {
+            String tenantId, String ticketKey, List<Map<String, Object>> toolResults, int sequence) {
         String contentJson = toJson(toolResults);
         Instant now = Instant.now();
         return ConversationMessage.builder()
-                .pk(ConversationMessage.createPk(ticketKey))
+                .pk(ConversationMessage.createPk(tenantId, ticketKey))
                 .sk(ConversationMessage.createSk(now, sequence))
                 .role("user")
                 .author("tool-output")
@@ -267,20 +461,21 @@ public class AgentOrchestrator {
                 .build();
     }
 
-    static int estimateTokens(String text) {
-        if (text == null || text.isEmpty()) return 0;
+    private static int estimateTokens(String text) {
+        if (text == null || text.isEmpty())
+            return 0;
         return Math.max(1, text.length() / 4);
     }
 
     private String toJson(Object value) {
         try {
-            return objectMapper.writeValueAsString(value);
+            return OBJECT_MAPPER.writeValueAsString(value);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize message content", e);
+            throw new AgentExecutionException("Failed to serialize message content", e);
         }
     }
 
-    List<ToolCall> extractToolCalls(AiClient.ToolUseResponse response) {
+    private List<ToolCall> extractToolCalls(AiClient.ToolUseResponse response) {
         List<ToolCall> calls = new ArrayList<>();
         for (JsonNode block : response.contentBlocks()) {
             if ("tool_use".equals(block.path("type").asText())) {
@@ -293,84 +488,17 @@ public class AgentOrchestrator {
         return calls;
     }
 
-    Map<String, Object> buildAssistantMessage(AiClient.ToolUseResponse response) {
+    private Map<String, Object> buildAssistantMessage(AiClient.ToolUseResponse response) {
         List<Map<String, Object>> contentBlocks = new ArrayList<>();
         for (JsonNode block : response.contentBlocks()) {
-            contentBlocks.add(objectMapper.convertValue(block, Map.class));
+            contentBlocks.add(OBJECT_MAPPER.convertValue(block, Map.class));
         }
         return Map.of("role", "assistant", "content", contentBlocks);
-    }
-
-    /**
-     * Builds the system prompt with ticket context and intent-specific instructions.
-     */
-    String buildSystemPrompt(AgentRequest request, CommentIntent intent) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("You are an AI development assistant integrated with Jira. ");
-        sb.append("You help developers investigate issues, analyze code, and make changes.\n\n");
-
-        sb.append("## Current Context\n");
-        sb.append("- Ticket: ").append(request.ticketKey()).append("\n");
-        if (request.ticketInfo() != null) {
-            sb.append("- Title: ").append(request.ticketInfo().getSummary()).append("\n");
-            if (request.ticketInfo().getDescription() != null) {
-                sb.append("- Description: ").append(
-                        truncate(request.ticketInfo().getDescription(), 2000)).append("\n");
-            }
-        }
-        sb.append("- Requested by: ").append(request.commentAuthor()).append("\n\n");
-
-        // Intent-specific instructions
-        switch (intent) {
-            case HUMAN_FEEDBACK -> {
-                sb.append("## Intent: Feedback on Previous Work\n");
-                sb.append("The user is providing feedback on your previous actions.\n");
-                sb.append("1. Review the conversation history to understand what you did previously.\n");
-                sb.append("2. Apply the feedback by modifying the relevant artifacts (PR, code, etc).\n");
-                sb.append("3. Summarize what you changed and why.\n\n");
-            }
-            case QUESTION -> {
-                sb.append("## Intent: Question\n");
-                sb.append("The user is asking a question about the ticket, your work, or the codebase.\n");
-                sb.append("1. Use tools if needed to gather information.\n");
-                sb.append("2. Provide a clear, concise answer.\n");
-                sb.append("3. If the question is ambiguous, ask for clarification.\n\n");
-            }
-            case APPROVAL -> {
-                sb.append("## Intent: Approval / Rejection\n");
-                sb.append("The user is responding to an approval request for a high-risk action.\n");
-                sb.append("The orchestrator will handle the actual approval execution.\n");
-                sb.append("Acknowledge the user's decision.\n\n");
-            }
-            default -> {
-                sb.append("## Guidelines\n");
-                sb.append("1. Use the available tools to investigate and act on the request.\n");
-                sb.append("2. Be precise and concise in your responses.\n");
-                sb.append("3. If you need to make code changes, explain your reasoning first.\n");
-                sb.append("4. If you're unsure, ask clarifying questions rather than guessing.\n");
-                sb.append("5. Always provide actionable results.\n");
-                sb.append("6. For destructive operations (merge, delete), the system will request ");
-                sb.append("explicit approval from the user before executing.\n");
-            }
-        }
-
-        return sb.toString();
-    }
-
-    /** Backward-compatible overload for Phase 1-2 code. */
-    String buildSystemPrompt(AgentRequest request) {
-        return buildSystemPrompt(request, CommentIntent.AI_COMMAND);
     }
 
     private void trackCost(String ticketKey, int tokens) {
         if (costTracker != null && tokens > 0) {
             costTracker.addTokens(ticketKey, tokens);
         }
-    }
-
-    private String truncate(String text, int maxLen) {
-        if (text == null)
-            return "";
-        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
 }

@@ -11,6 +11,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
+import java.io.File;
 import java.util.*;
 
 /**
@@ -112,8 +113,14 @@ public class McpConnectionFactory {
             command.addAll(Arrays.asList(config.args()));
         }
 
-        ServerParameters serverParams = ServerParameters.builder(command.get(0))
-                .args(command.size() > 1 ? command.subList(1, command.size()).toArray(new String[0]) : new String[0])
+        // Resolve paths if in Lambda
+        String resolvedCommand = resolvePath(command.get(0));
+        String[] resolvedArgs = command.size() > 1
+                ? command.subList(1, command.size()).stream().map(this::resolvePath).toArray(String[]::new)
+                : new String[0];
+
+        ServerParameters serverParams = ServerParameters.builder(resolvedCommand)
+                .args(resolvedArgs)
                 .env(env)
                 .build();
 
@@ -131,7 +138,11 @@ public class McpConnectionFactory {
      * headers.
      */
     private McpSyncClient createHttpClient(McpServerConfig config, Map<String, String> env) {
-        log.info("Creating HTTP/SSE MCP client for '{}': url={}", config.namespace(), config.url());
+        String baseUrl = config.url();
+        if (baseUrl != null && baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        log.info("Creating HTTP/SSE MCP client for '{}': url={}", config.namespace(), baseUrl);
 
         // Build custom headers from resolved env (e.g., Authorization tokens from
         // Secrets Manager)
@@ -147,7 +158,7 @@ public class McpConnectionFactory {
             requestBuilder.header("X-API-Key", env.get("API_KEY"));
         }
 
-        HttpClientSseClientTransport transport = HttpClientSseClientTransport.builder(config.url())
+        HttpClientSseClientTransport transport = HttpClientSseClientTransport.builder(baseUrl)
                 .clientBuilder(clientBuilder)
                 .requestBuilder(requestBuilder)
                 .build();
@@ -159,6 +170,25 @@ public class McpConnectionFactory {
     }
 
     /**
+     * Resolves a path relative to LAMBDA_TASK_ROOT if running in AWS Lambda.
+     */
+    private String resolvePath(String path) {
+        if (path == null || path.startsWith("-") || path.startsWith("/") || path.contains(":\\")) {
+            return path;
+        }
+
+        String taskRoot = System.getenv("LAMBDA_TASK_ROOT");
+        if (taskRoot != null && !taskRoot.isBlank()) {
+            File file = new File(taskRoot, path);
+            if (file.exists()) {
+                log.debug("Resolved relative path '{}' to '{}'", path, file.getAbsolutePath());
+                return file.getAbsolutePath();
+            }
+        }
+        return path;
+    }
+
+    /**
      * Resolves environment variables, including secrets from AWS Secrets Manager.
      *
      * <p>
@@ -167,9 +197,10 @@ public class McpConnectionFactory {
      * </p>
      */
     private Map<String, String> resolveEnvironment(McpServerConfig config) {
-        Map<String, String> env = new HashMap<>();
+        // Start with system env to ensure child processes inherit Lambda environment
+        Map<String, String> env = new HashMap<>(System.getenv());
 
-        // Start with static env from config
+        // Overlay with static env from config
         if (config.env() != null) {
             env.putAll(config.env());
         }
@@ -180,8 +211,12 @@ public class McpConnectionFactory {
                 Map<String, Object> secretJson = secretsService.getSecretJson(config.secretArn());
                 if (secretJson != null) {
                     secretJson.forEach((k, v) -> {
-                        if (v != null)
-                            env.put(k, v.toString());
+                        if (v != null) {
+                            String value = v.toString();
+                            env.put(k, value);
+                            // Map to expected MCP server env vars
+                            mapSecretToEnv(k, value, env);
+                        }
                     });
                     log.info("Resolved {} secrets for MCP server '{}'", secretJson.size(), config.namespace());
                 }
@@ -193,6 +228,17 @@ public class McpConnectionFactory {
         }
 
         return env;
+    }
+
+    private void mapSecretToEnv(String key, String value, Map<String, String> env) {
+        switch (key) {
+            case "baseUrl" -> env.put("JIRA_BASE_URL", value);
+            case "apiToken" -> env.put("JIRA_API_TOKEN", value);
+            case "email" -> env.put("JIRA_EMAIL", value);
+            case "owner" -> env.put("GITHUB_OWNER", value);
+            case "repo" -> env.put("GITHUB_REPO", value);
+            case "token" -> env.put("GITHUB_TOKEN", value);
+        }
     }
 
     /**

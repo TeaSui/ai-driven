@@ -45,6 +45,11 @@ public record Tool(String name, String description, Map<String, Object> inputSch
         return Map.of("type", "string", "description", description);
     }
 
+    /** Convenience: create an integer property schema. */
+    public static Map<String, Object> intProp(String description) {
+        return Map.of("type", "integer", "description", description);
+    }
+
     /** Convenience: create an array property schema with string items. */
     public static Map<String, Object> stringArrayProp(String description) {
         return Map.of("type", "array", "description", description, "items", Map.of("type", "string"));

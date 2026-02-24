@@ -1,16 +1,18 @@
 package com.aidriven.core.config;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
-/**
- * Centralized configuration management for the application.
- * Validates required environment variables on startup.
- */
+@Getter
+@Builder(toBuilder = true)
+@AllArgsConstructor
+@Slf4j
 public class AppConfig {
 
-    private static final AppConfig INSTANCE = new AppConfig();
+    private static final AppConfig INSTANCE = ConfigLoader.loadFromEnv();
 
     public static AppConfig getInstance() {
         return INSTANCE;
@@ -21,113 +23,102 @@ public class AppConfig {
     private final String bitbucketSecretArn;
     private final String jiraSecretArn;
     private final String codeContextBucket;
+    @lombok.Getter(lombok.AccessLevel.NONE)
     private final String stateMachineArn;
     private final int maxContextForClaude;
     private final String claudeModel;
+    /**
+     * Fallback Claude model for complex/precision tasks (e.g. claude-opus-4-6).
+     * Per ADR-012: Sonnet is the default; Opus is the precision escalation.
+     * Populated from CLAUDE_MODEL_FALLBACK env var.
+     */
+    private final String claudeModelFallback;
     private final int claudeMaxTokens;
     private final double claudeTemperature;
     private final String promptVersion;
     private final String branchPrefix;
     private final String gitHubSecretArn;
+    private final String jiraWebhookSecret;
+    /**
+     * ARN of the Secrets Manager secret holding the Jira webhook pre-shared token.
+     */
+    private final String jiraWebhookSecretArn;
+    /**
+     * ARN of the Secrets Manager secret holding the GitHub agent webhook HMAC
+     * secret.
+     */
+    private final String gitHubAgentWebhookSecretArn;
     private final String defaultPlatform;
     private final String defaultWorkspace;
     private final String defaultRepo;
+    /**
+     * Maximum characters per individual source file (immutable at construction
+     * time).
+     */
+    private final int maxFileSizeChars;
+    /**
+     * Maximum total characters of all source files combined (immutable at
+     * construction time).
+     */
+    private final int maxTotalContextChars;
+    /**
+     * Maximum file size in bytes for context file filtering (immutable at
+     * construction time).
+     * Populated from MAX_FILE_SIZE_BYTES env var (default 500_000).
+     */
+    private final long maxFileSizeBytes;
+    /**
+     * Context strategy mode — populated once at construction time from CONTEXT_MODE
+     * env var.
+     * Defaults to INCREMENTAL per ADR-013. Use getContextMode() to access.
+     */
+    private final ContextMode contextMode;
 
-    private AppConfig() {
-        this.dynamoDbTableName = getRequiredEnv("DYNAMODB_TABLE_NAME");
-        this.claudeSecretArn = getRequiredEnv("CLAUDE_SECRET_ARN");
-        this.bitbucketSecretArn = getRequiredEnv("BITBUCKET_SECRET_ARN");
-        this.jiraSecretArn = getRequiredEnv("JIRA_SECRET_ARN");
-        this.codeContextBucket = getRequiredEnv("CODE_CONTEXT_BUCKET");
-        // State Machine ARN is optional for non-entry-point handlers
-        this.stateMachineArn = System.getenv("STATE_MACHINE_ARN");
+    private final String slackWebhookUrl;
+    private final String slackChannel;
+    private final boolean slackFallbackToJira;
 
-        this.maxContextForClaude = getIntEnv("MAX_CONTEXT_FOR_CLAUDE", 700_000);
-        this.claudeModel = getEnv("CLAUDE_MODEL", "claude-opus-4-6");
-        this.claudeMaxTokens = getIntEnv("CLAUDE_MAX_TOKENS", 32768);
-        this.claudeTemperature = getDoubleEnv("CLAUDE_TEMPERATURE", 0.2);
-        this.promptVersion = getEnv("PROMPT_VERSION", "v1");
-        this.branchPrefix = getEnv("BRANCH_PREFIX", "ai/");
+    /**
+     * Whether cost-aware mode is enabled (impl-12).
+     * When true, the handler estimates tokens before invoking the model and may
+     * downgrade context or reject tasks that would exceed budget.
+     */
+    private final boolean costAwareMode;
+    /**
+     * Monthly budget ceiling in USD (impl-12).
+     * The handler aborts if accumulated spend >= this value.
+     */
+    private final double monthlyBudgetUsd;
+    /**
+     * Per-ticket maximum token cap (impl-12).
+     * If total tokens for a ticket would exceed this, the handler downgrades
+     * context or rejects the task.
+     */
+    private final int maxTokensPerTicket;
 
-        // Multi-platform configuration (all optional)
-        this.gitHubSecretArn = System.getenv("GITHUB_SECRET_ARN");
-        this.defaultPlatform = getEnv("DEFAULT_PLATFORM", "BITBUCKET");
-        this.defaultWorkspace = System.getenv("DEFAULT_WORKSPACE");
-        this.defaultRepo = System.getenv("DEFAULT_REPO");
-    }
+    private final int maxRequestsPerUserPerHour;
+    private final int maxRequestsPerTicketPerHour;
 
-    public String getDynamoDbTableName() {
-        return dynamoDbTableName;
-    }
-
-    public String getClaudeSecretArn() {
-        return claudeSecretArn;
-    }
-
-    public String getBitbucketSecretArn() {
-        return bitbucketSecretArn;
-    }
-
-    public String getJiraSecretArn() {
-        return jiraSecretArn;
-    }
-
-    public String getCodeContextBucket() {
-        return codeContextBucket;
-    }
-
-    public Optional<String> getStateMachineArn() {
-        return Optional.ofNullable(stateMachineArn);
-    }
-
-    public int getMaxContextForClaude() {
-        return maxContextForClaude;
-    }
-
-    public String getClaudeModel() {
-        return claudeModel;
-    }
-
-    public int getClaudeMaxTokens() {
-        return claudeMaxTokens;
-    }
-
-    public double getClaudeTemperature() {
-        return claudeTemperature;
-    }
-
-    public String getPromptVersion() {
-        return promptVersion;
-    }
-
-    public String getBranchPrefix() {
-        return branchPrefix;
-    }
-
-    public String getGitHubSecretArn() {
-        return gitHubSecretArn;
-    }
-
-    public String getDefaultPlatform() {
-        return defaultPlatform;
-    }
-
-    public String getDefaultWorkspace() {
-        return defaultWorkspace;
-    }
-
-    public String getDefaultRepo() {
-        return defaultRepo;
+    /**
+     * Loads configuration from environment variables.
+     * 
+     * @deprecated Use {@link ConfigLoader#loadFromEnv()} instead
+     */
+    @Deprecated
+    private static AppConfig loadFromEnv() {
+        return ConfigLoader.loadFromEnv();
     }
 
     // Configurable Limits with Defaults
+    // NOTE: getters for maxFileSizeChars and maxTotalContextChars are generated by
+    // @Getter
+    // (fields are now final and set at construction time by ConfigLoader).
 
-    public int getMaxFileSizeChars() {
-        return getIntEnv("MAX_FILE_SIZE_CHARS", 100000);
-    }
-
-    public int getMaxTotalContextChars() {
-        return getIntEnv("MAX_TOTAL_CONTEXT_CHARS", 3000000);
+    public SlackConfig getSlackConfig() {
+        return new SlackConfig(
+                Optional.ofNullable(slackWebhookUrl).filter(s -> !s.isBlank()),
+                Optional.ofNullable(slackChannel).filter(s -> !s.isBlank()),
+                slackFallbackToJira);
     }
 
     public ClaudeConfig getClaudeConfig() {
@@ -137,15 +128,16 @@ public class AppConfig {
                 claudeMaxTokens,
                 claudeTemperature,
                 promptVersion,
-                claudeSecretArn);
+                claudeSecretArn,
+                claudeModelFallback);
     }
 
     public FetchConfig getFetchConfig() {
         return new FetchConfig(
-                getMaxFileSizeChars(),
-                (long) getMaxTotalContextChars(),
-                500_000L, // Static default for now
-                getEnv("CONTEXT_MODE", "FULL_REPO"));
+                maxFileSizeChars,
+                (long) maxTotalContextChars,
+                maxFileSizeBytes,
+                contextMode.name());
     }
 
     public JiraConfig getJiraConfig() {
@@ -158,111 +150,86 @@ public class AppConfig {
 
     public AgentConfig getAgentConfig() {
         return new AgentConfig(
-                Boolean.parseBoolean(getEnv("AGENT_ENABLED", "false")),
-                getRequiredEnv("AGENT_QUEUE_URL"),
-                getIntEnv("AGENT_MAX_TURNS", 10),
-                getIntEnv("AGENT_MAX_WALL_CLOCK_SECONDS", 600),
-                getEnv("AGENT_TRIGGER_PREFIX", "@ai"),
-                getIntEnv("AGENT_TOKEN_BUDGET", 50000),
-                getIntEnv("AGENT_RECENT_MESSAGES_TO_KEEP", 2),
-                Boolean.parseBoolean(getEnv("AGENT_GUARDRAILS_ENABLED", "true")),
-                getIntEnv("AGENT_COST_BUDGET_PER_TICKET", 200000),
-                Boolean.parseBoolean(getEnv("AGENT_CLASSIFIER_USE_LLM", "false")));
+                ConfigLoader.getBooleanEnv("AGENT_ENABLED", false),
+                ConfigLoader.getRequiredEnv("AGENT_QUEUE_URL"),
+                ConfigLoader.getIntEnv("AGENT_MAX_TURNS", 10),
+                ConfigLoader.getIntEnv("AGENT_MAX_WALL_CLOCK_SECONDS", 600),
+                ConfigLoader.getEnv("AGENT_TRIGGER_PREFIX", "@ai"),
+                ConfigLoader.getIntEnv("AGENT_TOKEN_BUDGET", 50000),
+                ConfigLoader.getIntEnv("AGENT_RECENT_MESSAGES_TO_KEEP", 2),
+                ConfigLoader.getBooleanEnv("AGENT_GUARDRAILS_ENABLED", true),
+                ConfigLoader.getIntEnv("AGENT_COST_BUDGET_PER_TICKET", 200000),
+                ConfigLoader.getBooleanEnv("AGENT_CLASSIFIER_USE_LLM", false),
+                ConfigLoader.getEnv("AGENT_MENTION_KEYWORD", "ai"),
+                System.getenv("AGENT_BOT_ACCOUNT_ID"));
     }
 
     /**
      * MCP server configurations as JSON string from environment.
      * Format: JSON array of McpServerConfig objects.
+     * 
+     * @deprecated Use MCP Gateway instead via {@link #getMcpGatewayUrl()}
      */
+    @Deprecated
     public String getMcpServersConfig() {
-        return getEnv("MCP_SERVERS_CONFIG", "[]");
+        return ConfigLoader.getEnv("MCP_SERVERS_CONFIG", "[]");
+    }
+
+    /**
+     * URL of the MCP Gateway Lambda Function URL.
+     * When set, all MCP tool calls are routed through the unified gateway.
+     */
+    public Optional<String> getMcpGatewayUrl() {
+        String url = ConfigLoader.getEnv("MCP_GATEWAY_URL", null);
+        return Optional.ofNullable(url).filter(s -> !s.isBlank());
+    }
+
+    /**
+     * Whether the MCP Gateway is enabled.
+     */
+    public boolean isMcpGatewayEnabled() {
+        return ConfigLoader.getBooleanEnv("MCP_GATEWAY_ENABLED", false);
+    }
+
+    public Optional<String> getStateMachineArn() {
+        return Optional.ofNullable(stateMachineArn);
+    }
+
+    public Optional<String> getJiraWebhookSecret() {
+        return Optional.ofNullable(jiraWebhookSecret);
+    }
+
+    /**
+     * ARN of the Secrets Manager secret holding the Jira webhook pre-shared token.
+     * Present when deployed via CDK; absent in local test runs (uses raw env var
+     * instead).
+     */
+    public Optional<String> getJiraWebhookSecretArn() {
+        return Optional.ofNullable(jiraWebhookSecretArn);
+    }
+
+    /**
+     * ARN of the Secrets Manager secret holding the GitHub agent webhook HMAC
+     * secret.
+     * Used by {@code AgentWebhookHandler} to verify {@code X-Hub-Signature-256} on
+     * GitHub events.
+     */
+    public String getGitHubAgentWebhookSecretArn() {
+        return gitHubAgentWebhookSecretArn;
     }
 
     public ContextMode getContextMode() {
-        String mode = getEnv("CONTEXT_MODE", "FULL_REPO");
-        try {
-            return ContextMode.valueOf(mode.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            return ContextMode.FULL_REPO;
-        }
-    }
-
-    /**
-     * Validates that all required environment variables are set.
-     * Should be called during Lambda cold start (e.g., in ServiceFactory),
-     * not during class loading, so tests can load AppConfig without env vars.
-     *
-     * @throws IllegalStateException if any required variable is missing
-     */
-    public void validate() {
-        List<String> missing = new ArrayList<>();
-        if (dynamoDbTableName == null)
-            missing.add("DYNAMODB_TABLE_NAME");
-        if (claudeSecretArn == null)
-            missing.add("CLAUDE_SECRET_ARN");
-        if (bitbucketSecretArn == null)
-            missing.add("BITBUCKET_SECRET_ARN");
-        if (jiraSecretArn == null)
-            missing.add("JIRA_SECRET_ARN");
-        if (codeContextBucket == null)
-            missing.add("CODE_CONTEXT_BUCKET");
-        // AGENT_QUEUE_URL is required if AGENT_ENABLED is true, but we can't easily
-        // check that coupling here without
-        // reading env again. Ideally, we just check core infra envs here.
-        // For Phase 2, let's make queue URL optional in validation to not break
-        // existing tests,
-        // but required in getAgentConfig if used.
-
-        if (!missing.isEmpty()) {
-            throw new IllegalStateException(
-                    "Missing required environment variables: " + String.join(", ", missing));
-        }
-    }
-
-    /**
-     * Helper to get required environment variable.
-     * Returns null if the variable is not set; use {@link #validate()} to enforce
-     * presence.
-     */
-    private String getRequiredEnv(String key) {
-        String val = System.getenv(key);
-        if (val == null || val.isBlank()) {
-            return null;
-        }
-        return val;
-    }
-
-    private String getEnv(String key, String defaultValue) {
-        String val = System.getenv(key);
-        return (val != null && !val.isBlank()) ? val : defaultValue;
-    }
-
-    private int getIntEnv(String key, int defaultValue) {
-        String val = System.getenv(key);
-        if (val == null || val.isBlank()) {
-            return defaultValue;
-        }
-        try {
-            return Integer.parseInt(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
-    }
-
-    private double getDoubleEnv(String key, double defaultValue) {
-        String val = System.getenv(key);
-        if (val == null || val.isBlank()) {
-            return defaultValue;
-        }
-        try {
-            return Double.parseDouble(val);
-        } catch (NumberFormatException e) {
-            return defaultValue;
-        }
+        return contextMode;
     }
 
     public enum ContextMode {
         FULL_REPO,
         INCREMENTAL
+    }
+
+    public record SlackConfig(
+            Optional<String> webhookUrl,
+            Optional<String> channel,
+            boolean fallbackToJira) {
     }
 }

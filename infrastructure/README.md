@@ -67,7 +67,7 @@ All functions use Java 21, share a common environment config, and have X-Ray tra
 |----------|---------|------|---------|
 | POST `/jira-webhook` | JiraWebhookHandler | Pipeline | Jira event entry point |
 | POST `/merge-webhook` | MergeWaitHandler | Pipeline | Source control merge callback |
-| POST `/agent/webhook` | AgentWebhookHandler | Agent | Jira comment entry point (planned) |
+| POST `/agent/webhook` | AgentWebhookHandler | Agent | Jira comment entry point |
 
 Rate limiting: 100 rps / 200 burst
 

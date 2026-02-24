@@ -1,5 +1,6 @@
 package com.aidriven.core.config;
 
+import com.aidriven.core.exception.ConfigurationException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -16,12 +17,12 @@ class AppConfigTest {
 
         @Test
         void should_throw_when_required_env_vars_missing() {
-                // In test environments, no env vars are set so all required fields are null
+                // Uses ConfigValidator directly — deprecated config.validate() is removed.
                 AppConfig config = AppConfig.getInstance();
 
-                IllegalStateException exception = assertThrows(
-                                IllegalStateException.class,
-                                config::validate);
+                ConfigurationException exception = assertThrows(
+                                ConfigurationException.class,
+                                () -> ConfigValidator.validate(config));
 
                 String message = exception.getMessage();
                 assertTrue(message.contains("Missing required environment variables"),
@@ -74,11 +75,26 @@ class AppConfigTest {
                                 "State machine ARN should be empty Optional when not set");
         }
 
+        /**
+         * TDD: Default context mode must be INCREMENTAL per ADR-013.
+         * Previously asserted FULL_REPO — that assertion was the bug.
+         */
         @Test
-        void should_return_default_context_mode() {
+        void getContextMode_should_default_to_INCREMENTAL_when_env_not_set() {
                 AppConfig config = AppConfig.getInstance();
 
-                assertEquals(AppConfig.ContextMode.FULL_REPO, config.getContextMode());
+                assertEquals(AppConfig.ContextMode.INCREMENTAL, config.getContextMode(),
+                                "Default context mode must be INCREMENTAL per ADR-013");
+        }
+
+        @Test
+        void getContextMode_should_be_immutable_field_not_reread_env() {
+                // Verifies getContextMode() returns a baked-in field, not a live ConfigLoader
+                // call.
+                AppConfig config = AppConfig.getInstance();
+
+                assertSame(config.getContextMode(), config.getContextMode(),
+                                "getContextMode() must return the same enum instance on repeated calls");
         }
 
         @Test
@@ -101,8 +117,12 @@ class AppConfigTest {
                 assertEquals("v1", claudeConfig.promptVersion());
                 assertNull(claudeConfig.secretArn(),
                                 "Secret ARN should be null when env var not set");
+                assertEquals("claude-opus-4-6", claudeConfig.fallbackModel());
         }
 
+        /**
+         * TDD: fetchConfig.contextMode() must return "INCREMENTAL" per ADR-013.
+         */
         @Test
         void should_create_fetch_config_with_defaults() {
                 AppConfig config = AppConfig.getInstance();
@@ -111,7 +131,7 @@ class AppConfigTest {
                 assertEquals(100000, fetchConfig.maxFileSizeChars());
                 assertEquals(3000000L, fetchConfig.maxTotalContextChars());
                 assertEquals(500_000L, fetchConfig.maxFileSizeBytes());
-                assertEquals("FULL_REPO", fetchConfig.contextMode());
+                assertEquals("INCREMENTAL", fetchConfig.contextMode());
         }
 
         @Test

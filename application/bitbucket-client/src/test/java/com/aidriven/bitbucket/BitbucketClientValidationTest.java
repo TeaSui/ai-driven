@@ -1,6 +1,12 @@
 package com.aidriven.bitbucket;
 
 import com.aidriven.core.model.AgentResult;
+import com.aidriven.core.source.RepositoryWriter;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.provider.SourceControlProvider;
+import com.aidriven.core.exception.ConfigurationException;
+import com.aidriven.core.service.SecretsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,8 +19,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
-import java.util.Map;
-import com.aidriven.core.service.SecretsService;
 import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -35,23 +39,25 @@ class BitbucketClientValidationTest {
     private HttpResponse<String> mockResponse;
 
     private BitbucketClient bitbucketClient;
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         bitbucketClient = new BitbucketClient(
+                "workspace",
+                "repo",
                 "Basic auth",
                 mockHttpClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
-                "workspace",
-                "repo");
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        operationContext = OperationContext.builder().tenantId("test-tenant").userId("test-user").build();
     }
 
     @Test
     void should_throw_null_pointer_exception_for_null_workspace() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("auth", mockHttpClient, null, null, "repo");
+            new BitbucketClient(null, "repo", "auth", mockHttpClient, null);
         });
     }
 
@@ -59,7 +65,7 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_repo_slug() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("auth", mockHttpClient, null, "workspace", null);
+            new BitbucketClient("workspace", null, "auth", mockHttpClient, null);
         });
     }
 
@@ -67,7 +73,7 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_username() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient(null, mockHttpClient, null, "workspace", "repo");
+            new BitbucketClient("workspace", "repo", null, mockHttpClient, null);
         });
     }
 
@@ -75,8 +81,7 @@ class BitbucketClientValidationTest {
     void should_throw_null_pointer_exception_for_null_password() {
         // When/Then: Verify NullPointerException is thrown
         assertThrows(NullPointerException.class, () -> {
-            new BitbucketClient("Basic auth", mockHttpClient, null, "workspace",
-                    "repo");
+            new BitbucketClient("workspace", "repo", "Basic auth", null, null);
         });
     }
 
@@ -86,7 +91,7 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_invalid_branch_name_in_create_branch(String invalidBranch) {
         // When/Then: Verify IllegalArgumentException is thrown
         assertThrows(IllegalArgumentException.class, () -> {
-            bitbucketClient.createBranch(invalidBranch, "main");
+            bitbucketClient.createBranch(operationContext, BranchName.of(invalidBranch), BranchName.of("main"));
         });
     }
 
@@ -96,7 +101,8 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_invalid_from_branch_in_create_branch(String invalidBranch) {
         // When/Then: Verify IllegalArgumentException is thrown
         assertThrows(IllegalArgumentException.class, () -> {
-            bitbucketClient.createBranch("feature-branch", invalidBranch);
+            bitbucketClient.createBranch(operationContext, BranchName.of("feature-branch"),
+                    BranchName.of(invalidBranch));
         });
     }
 
@@ -114,8 +120,10 @@ class BitbucketClientValidationTest {
                     }
                 }
                 """;
-        // First createBranch: getBranchCommitHash(200) + createBranch POST(201)
-        // Second createBranch: getBranchCommitHash(200) + createBranch POST(201)
+        // First createBranch: getBranchCommitHash(200) + createBranch two checks (1st
+        // call)
+        // Second createBranch: getBranchCommitHash(200) + createBranch two checks (2nd
+        // call)
         when(mockResponse.statusCode()).thenReturn(
                 200, 201, 201, // getBranchCommitHash check + createBranch two checks (1st call)
                 200, 201, 201 // getBranchCommitHash check + createBranch two checks (2nd call)
@@ -131,11 +139,11 @@ class BitbucketClientValidationTest {
 
         // When: Create branch with valid names
         assertDoesNotThrow(() -> {
-            bitbucketClient.createBranch("feature/new-feature", "main");
+            bitbucketClient.createBranch(operationContext, BranchName.of("feature/new-feature"), BranchName.of("main"));
         });
 
         assertDoesNotThrow(() -> {
-            bitbucketClient.createBranch("bugfix-123", "develop");
+            bitbucketClient.createBranch(operationContext, BranchName.of("bugfix-123"), BranchName.of("develop"));
         });
     }
 
@@ -143,7 +151,7 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_null_files_in_commit_files() {
         // When/Then: Verify exception is thrown
         assertThrows(Exception.class, () -> {
-            bitbucketClient.commitFiles("branch", null, "message");
+            bitbucketClient.commitFiles(operationContext, BranchName.of("branch"), null, "message");
         });
     }
 
@@ -157,7 +165,8 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: Commit empty files list
-        String result = bitbucketClient.commitFiles("branch", emptyFiles, "Empty commit");
+        String result = bitbucketClient.commitFiles(operationContext, BranchName.of("branch"), emptyFiles,
+                "Empty commit");
 
         // Then: Should succeed
         assertEquals("success", result);
@@ -167,7 +176,8 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_null_title_in_create_pull_request() {
         // When/Then: Verify exception is thrown
         assertThrows(Exception.class, () -> {
-            bitbucketClient.createPullRequest(null, "description", "source", "dest");
+            bitbucketClient.createPullRequest(operationContext, null, "description", BranchName.of("source"),
+                    BranchName.of("dest"));
         });
     }
 
@@ -175,7 +185,7 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_null_source_branch_in_create_pull_request() {
         // When/Then: Verify exception is thrown
         assertThrows(Exception.class, () -> {
-            bitbucketClient.createPullRequest("title", "description", null, "dest");
+            bitbucketClient.createPullRequest(operationContext, "title", "description", null, BranchName.of("dest"));
         });
     }
 
@@ -183,7 +193,7 @@ class BitbucketClientValidationTest {
     void should_throw_exception_for_null_destination_branch_in_create_pull_request() {
         // When/Then: Verify exception is thrown
         assertThrows(Exception.class, () -> {
-            bitbucketClient.createPullRequest("title", "description", "source", null);
+            bitbucketClient.createPullRequest(operationContext, "title", "description", BranchName.of("source"), null);
         });
     }
 
@@ -208,8 +218,8 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: Create PR with null description
-        com.aidriven.core.source.SourceControlClient.PullRequestResult result = bitbucketClient.createPullRequest(
-                "title", null, "source", "dest");
+        SourceControlProvider.PullRequestResult result = bitbucketClient.createPullRequest(
+                operationContext, "title", null, BranchName.of("source"), BranchName.of("dest"));
 
         // Then: Should succeed
         assertNotNull(result);
@@ -220,13 +230,8 @@ class BitbucketClientValidationTest {
     void should_initialize_from_secrets() {
         SecretsService secretsService = mock(SecretsService.class);
         String secretArn = "test-arn";
-        Map<String, Object> secretJson = Map.of(
-                "workspace", "test-ws",
-                "repoSlug", "test-repo",
-                "username", "test-user",
-                "appPassword", "test-pass");
-
-        when(secretsService.getSecretJson(secretArn)).thenReturn(secretJson);
+        when(secretsService.getSecretAs(eq(secretArn), eq(BitbucketClient.BitbucketSecret.class)))
+                .thenReturn(new BitbucketClient.BitbucketSecret("test-ws", "test-repo", "test-user", "test-pass"));
 
         BitbucketClient client = BitbucketClient.fromSecrets(secretsService, secretArn);
 
@@ -237,29 +242,24 @@ class BitbucketClientValidationTest {
     void should_throw_when_secrets_missing_required_key() {
         SecretsService secretsService = mock(SecretsService.class);
         String secretArn = "test-arn";
-        Map<String, Object> incompleteJson = Map.of(
-                "workspace", "test-ws",
-                "repoSlug", "test-repo"
-        // username missing
-        );
+        when(secretsService.getSecretAs(eq(secretArn), eq(BitbucketClient.BitbucketSecret.class)))
+                .thenReturn(new BitbucketClient.BitbucketSecret("test-ws", "test-repo", null, null));
 
-        when(secretsService.getSecretJson(secretArn)).thenReturn(incompleteJson);
-
-        RuntimeException ex = assertThrows(RuntimeException.class,
+        ConfigurationException ex = assertThrows(ConfigurationException.class,
                 () -> BitbucketClient.fromSecrets(secretsService, secretArn));
 
-        assertTrue(ex.getCause().getMessage().contains("Missing required key 'username'"));
+        assertTrue(ex.getMessage().contains("missing required fields"));
     }
 
     @Test
     void should_url_encode_workspace_and_repo_in_commit_files() throws Exception {
         // Given: A client with workspace/repo that contain special characters
         BitbucketClient specialClient = new BitbucketClient(
+                "my workspace",
+                "my repo",
                 "Basic auth",
                 mockHttpClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
-                "my workspace",
-                "my repo");
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         List<AgentResult.GeneratedFile> files = List.of();
         when(mockResponse.statusCode()).thenReturn(201);
@@ -268,7 +268,7 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: commitFiles is called
-        specialClient.commitFiles("branch", files, "test commit");
+        specialClient.commitFiles(operationContext, BranchName.of("branch"), files, "test commit");
 
         // Then: The URL should contain encoded workspace and repo
         ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
@@ -282,11 +282,11 @@ class BitbucketClientValidationTest {
     void should_url_encode_workspace_and_repo_in_create_pull_request() throws Exception {
         // Given: A client with workspace/repo that contain special characters
         BitbucketClient specialClient = new BitbucketClient(
+                "my workspace",
+                "my repo",
                 "Basic auth",
                 mockHttpClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
-                "my workspace",
-                "my repo");
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         String prResponse = """
                 {
@@ -304,7 +304,8 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: createPullRequest is called
-        specialClient.createPullRequest("title", "desc", "source", "dest");
+        specialClient.createPullRequest(operationContext, "title", "desc", BranchName.of("source"),
+                BranchName.of("dest"));
 
         // Then: The URL should contain encoded workspace and repo
         ArgumentCaptor<HttpRequest> captor = ArgumentCaptor.forClass(HttpRequest.class);
@@ -316,7 +317,8 @@ class BitbucketClientValidationTest {
 
     @Test
     void should_skip_nodes_with_missing_type_in_get_file_tree() throws Exception {
-        // Given: Response with a node missing the "type" field (no directories to avoid recursion)
+        // Given: Response with a node missing the "type" field (no directories to avoid
+        // recursion)
         String responseJson = """
                 {
                     "values": [
@@ -331,9 +333,10 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: getFileTree is called
-        List<String> files = bitbucketClient.getFileTree("main", null);
+        List<String> files = bitbucketClient.getFileTree(operationContext, BranchName.of("main"), null);
 
-        // Then: Only the valid commit_file node should be included; the node without type is skipped
+        // Then: Only the valid commit_file node should be included; the node without
+        // type is skipped
         assertEquals(1, files.size());
         assertEquals("src/App.java", files.get(0));
     }
@@ -355,7 +358,7 @@ class BitbucketClientValidationTest {
                 .thenReturn(mockResponse);
 
         // When: getFileTree is called
-        List<String> files = bitbucketClient.getFileTree("main", null);
+        List<String> files = bitbucketClient.getFileTree(operationContext, BranchName.of("main"), null);
 
         // Then: Only the valid node should be included
         assertEquals(1, files.size());

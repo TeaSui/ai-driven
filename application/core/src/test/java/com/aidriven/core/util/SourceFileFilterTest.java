@@ -33,7 +33,7 @@ class SourceFileFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {".git", "node_modules", "build", "target", "dist", ".gradle", "__pycache__"})
+    @ValueSource(strings = { ".git", "node_modules", "build", "target", "dist", ".gradle", "__pycache__" })
     void should_exclude_build_and_dependency_directories(String dirName) {
         Path file = Path.of("/repo/" + dirName + "/some/File.java");
 
@@ -41,7 +41,7 @@ class SourceFileFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {".class", ".jar", ".zip", ".png", ".jpg", ".pdf", ".exe", ".dll"})
+    @ValueSource(strings = { ".class", ".jar", ".zip", ".png", ".jpg", ".pdf", ".exe", ".dll" })
     void should_exclude_binary_extensions(String ext) {
         Path file = Path.of("/repo/src/file" + ext);
 
@@ -49,7 +49,7 @@ class SourceFileFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"package-lock.json", "yarn.lock", "gradlew", "gradlew.bat", "go.sum"})
+    @ValueSource(strings = { "package-lock.json", "yarn.lock", "gradlew", "gradlew.bat", "go.sum" })
     void should_exclude_lock_and_generated_files(String filename) {
         Path file = Path.of("/repo/" + filename);
 
@@ -64,6 +64,31 @@ class SourceFileFilterTest {
     @Test
     void should_exclude_ds_store() {
         assertFalse(SourceFileFilter.isIncluded(Path.of("/repo/.DS_Store")));
+    }
+
+    @Test
+    void should_exclude_build_directory_at_root_relative() {
+        assertFalse(SourceFileFilter.isIncluded(Path.of("build/some/File.java")));
+    }
+
+    @Test
+    void should_exclude_build_directory_nested_relative() {
+        assertFalse(SourceFileFilter.isIncluded(Path.of("src/module/build/File.java")));
+    }
+
+    @Test
+    void should_not_exclude_file_named_build_in_non_excluded_dir() {
+        assertTrue(SourceFileFilter.isIncluded(Path.of("src/some/build.txt")));
+    }
+
+    @Test
+    void should_not_exclude_dir_containing_build_in_name() {
+        assertTrue(SourceFileFilter.isIncluded(Path.of("src/mybuild/File.java")));
+    }
+
+    @Test
+    void should_handle_absolute_paths_robustly() {
+        assertFalse(SourceFileFilter.isIncluded(Path.of("/opt/app/build/File.java")));
     }
 
     // --- isBinaryContent ---

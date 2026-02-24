@@ -7,21 +7,38 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Hybrid classifier for Jira comment intents.
- * <p>
- * Phase 1-2: Rule-based fast path (deterministic, zero latency).
+ * Hybrid classifier for comment intents.
+ *
+ * <p>Phase 1-2: Rule-based fast path (deterministic, zero latency).
  * Phase 3+: Optional LLM fallback for ambiguous cases (behind feature flag).
+ *
+ * <p>The @mention keyword is configurable via {@link #CommentIntentClassifier(String)}
+ * so teams can use @ai, @bot, @assistant, or any other keyword without code changes.
  */
 @Slf4j
 public class CommentIntentClassifier {
 
-    // Matches literal "@ai" at any position in the text (not just start-of-string)
-    private static final Pattern AI_MENTION_PATTERN = Pattern.compile(
-            "@ai\\b", Pattern.CASE_INSENSITIVE);
-
     // Matches Jira Cloud ADF mention format: [~accountId:xxx]
+    // Note: This is used for stripping mentions, not for detecting bot mentions
     private static final Pattern JIRA_MENTION_PATTERN = Pattern.compile(
             "\\[~accountId:[^\\]]+\\]");
+
+    // Bot signature patterns - if comment contains these, it's from the bot
+    // Used for self-loop prevention when author detection fails
+    private static final Set<String> BOT_SIGNATURE_PATTERNS = Set.of(
+            // Acknowledgment patterns
+            "🤖 processing your request",
+            "working on it — this comment will be updated",
+            // Response footer patterns
+            "_🤖 ai agent",
+            "| tools:",
+            "| tokens:",
+            // Error patterns
+            "🤖 ❌ *error processing request*",
+            // Quote patterns from formatAsReply (might trigger on bot quotes)
+            "{quote}🤖",
+            "{quote}\\{quote}"
+    );
 
     private static final Set<String> APPROVAL_KEYWORDS = Set.of(
             "lgtm", "approved", "approve", "proceed", "go ahead", "ship it",
@@ -43,28 +60,57 @@ public class CommentIntentClassifier {
             "can you explain", "could you explain", "is there", "are there",
             "do you", "does this", "will this");
 
+    /** Pattern built from the configured mention keyword. */
+    private final Pattern mentionPattern;
+
     private final AiClient aiClient; // nullable — only used if LLM fallback is enabled
     private final boolean useLlmFallback;
 
-    /** Default constructor: rule-based only, no LLM fallback. */
+    /** Default constructor: rule-based only, responds to @ai. */
     public CommentIntentClassifier() {
-        this(null, false);
+        this("ai", null, false);
     }
 
     /**
+     * Constructor with a configurable mention keyword.
+     *
+     * @param mentionKeyword keyword without the @-sign (e.g. "ai", "bot", "assistant")
+     */
+    public CommentIntentClassifier(String mentionKeyword) {
+        this(mentionKeyword, null, false);
+    }
+
+    /**
+     * Full constructor.
+     *
      * @param aiClient       AI client for LLM classification fallback (nullable)
      * @param useLlmFallback Whether to use Claude for ambiguous cases
      */
     public CommentIntentClassifier(AiClient aiClient, boolean useLlmFallback) {
+        this("ai", aiClient, useLlmFallback);
+    }
+
+    /**
+     * Full constructor with configurable keyword and optional LLM fallback.
+     *
+     * @param mentionKeyword keyword without the @-sign
+     * @param aiClient       AI client for LLM classification fallback (nullable)
+     * @param useLlmFallback Whether to use Claude for ambiguous cases
+     */
+    public CommentIntentClassifier(String mentionKeyword, AiClient aiClient, boolean useLlmFallback) {
+        String kw = (mentionKeyword != null && !mentionKeyword.isBlank())
+                ? Pattern.quote(mentionKeyword.strip().toLowerCase())
+                : "ai";
+        this.mentionPattern = Pattern.compile("@" + kw + "\\b", Pattern.CASE_INSENSITIVE);
         this.aiClient = aiClient;
         this.useLlmFallback = useLlmFallback && aiClient != null;
     }
 
     /**
-     * Classifies a Jira comment's intent.
+     * Classifies a comment's intent.
      *
-     * @param commentBody Raw comment text from Jira
-     * @param authorIsBot Whether the comment was posted by the bot account
+     * @param commentBody  Raw comment text from Jira or GitHub
+     * @param authorIsBot  Whether the comment was posted by the bot account
      * @return The classified intent
      */
     public CommentIntent classify(String commentBody, boolean authorIsBot) {
@@ -78,12 +124,23 @@ public class CommentIntentClassifier {
         }
 
         String trimmed = commentBody.strip();
+        String lowerBody = trimmed.toLowerCase();
 
-        // Must contain @ai mention (literal or via Jira ADF accountId format)
-        boolean hasLiteralMention = AI_MENTION_PATTERN.matcher(trimmed).find();
-        boolean hasJiraMention = JIRA_MENTION_PATTERN.matcher(trimmed).find();
+        // Self-loop prevention: check for bot signature patterns in comment body
+        // This catches cases where authorIsBot detection fails
+        for (String signature : BOT_SIGNATURE_PATTERNS) {
+            if (lowerBody.contains(signature)) {
+                log.debug("Ignoring comment with bot signature: {}", signature);
+                return CommentIntent.IRRELEVANT;
+            }
+        }
 
-        if (!hasLiteralMention && !hasJiraMention) {
+        // Only respond to LITERAL @keyword mentions (e.g., @ai)
+        // DO NOT respond to generic Jira ADF mentions [~accountId:xxx]
+        // because those are user-to-user mentions, not bot commands
+        boolean hasLiteralMention = mentionPattern.matcher(trimmed).find();
+
+        if (!hasLiteralMention) {
             return CommentIntent.IRRELEVANT;
         }
 
@@ -93,7 +150,6 @@ public class CommentIntentClassifier {
         for (String keyword : REJECTION_KEYWORDS) {
             if (body.contains(keyword)) {
                 log.info("Classified as APPROVAL (rejection) via keyword: {}", keyword);
-                // Rejection is handled through the approval flow (orchestrator checks content)
                 return CommentIntent.APPROVAL;
             }
         }
@@ -106,7 +162,7 @@ public class CommentIntentClassifier {
             }
         }
 
-        // 3. Check for feedback patterns (criticism or correction of AI's previous work)
+        // 3. Check for feedback patterns
         for (String keyword : FEEDBACK_KEYWORDS) {
             if (body.contains(keyword)) {
                 log.info("Classified as HUMAN_FEEDBACK via keyword: {}", keyword);
@@ -128,13 +184,12 @@ public class CommentIntentClassifier {
         return CommentIntent.AI_COMMAND;
     }
 
-    /** Strips the @ai mention and Jira accountId mentions from a comment body. */
+    /** Strips the @mention keyword and Jira accountId mentions from a comment body. */
     public String stripMention(String commentBody) {
-        if (commentBody == null)
-            return "";
+        if (commentBody == null) return "";
         String stripped = commentBody.strip();
         stripped = JIRA_MENTION_PATTERN.matcher(stripped).replaceAll("").strip();
-        stripped = AI_MENTION_PATTERN.matcher(stripped).replaceFirst("").strip();
+        stripped = mentionPattern.matcher(stripped).replaceFirst("").strip();
         return stripped;
     }
 }

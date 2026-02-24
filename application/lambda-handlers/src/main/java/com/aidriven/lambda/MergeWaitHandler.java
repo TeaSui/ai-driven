@@ -27,6 +27,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import com.aidriven.spi.model.OperationContext;
 
 /**
  * Lambda handler for managing the wait-for-merge step in the workflow.
@@ -98,10 +99,13 @@ public class MergeWaitHandler implements RequestHandler<Map<String, Object>, Map
 
         log.info("Registering task token for PR: {} (ticket: {})", prUrl, ticketKey);
 
+        OperationContext tenantContext = extractTenantContext(input);
+
         Map<String, AttributeValue> item = new HashMap<>();
         item.put("PK", AttributeValue.builder().s(TOKEN_PK_PREFIX + prUrl).build());
         item.put("SK", AttributeValue.builder().s(TOKEN_SK).build());
         item.put("token", AttributeValue.builder().s(token).build());
+        item.put("tenantId", AttributeValue.builder().s(tenantContext.getTenantId()).build());
         item.put("ticketId", AttributeValue.builder().s(ticketId).build());
         item.put("ticketKey", AttributeValue.builder().s(ticketKey).build());
         item.put("prUrl", AttributeValue.builder().s(prUrl).build());
@@ -152,6 +156,7 @@ public class MergeWaitHandler implements RequestHandler<Map<String, Object>, Map
         String token = item.get("token").s();
         String ticketId = item.get("ticketId").s();
         String ticketKey = item.get("ticketKey").s();
+        String tenantId = item.get("tenantId") != null ? item.get("tenantId").s() : "default";
 
         // Resume Step Functions workflow
         log.info("Resuming workflow for ticket: {} with token for PR: {}", ticketKey, prUrl);
@@ -168,7 +173,7 @@ public class MergeWaitHandler implements RequestHandler<Map<String, Object>, Map
                 .build());
 
         // Update ticket state
-        ticketStateRepository.save(TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.DONE));
+        ticketStateRepository.save(TicketState.forTicket(tenantId, ticketId, ticketKey, ProcessingStatus.DONE));
 
         // Clean up token from DynamoDB
         dynamoDbClient.deleteItem(DeleteItemRequest.builder()
@@ -224,5 +229,21 @@ public class MergeWaitHandler implements RequestHandler<Map<String, Object>, Map
         } catch (Exception e) {
             return false;
         }
+    }
+
+    private OperationContext extractTenantContext(Map<String, Object> input) {
+        if (!input.containsKey("context") || !(input.get("context") instanceof Map)) {
+            return OperationContext.builder().tenantId("default").build();
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> context = (Map<String, Object>) input.get("context");
+        String tenantId = (String) context.getOrDefault("tenantId", "default");
+        String userId = (String) context.getOrDefault("userId", "system");
+        @SuppressWarnings("unchecked")
+        Map<String, String> metadata = (Map<String, String>) context.getOrDefault("metadata", Map.of());
+        return OperationContext.builder()
+                .tenantId(tenantId)
+                .userId(userId)
+                .build();
     }
 }

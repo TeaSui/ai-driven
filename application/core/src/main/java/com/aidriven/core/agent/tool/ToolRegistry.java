@@ -1,10 +1,10 @@
 package com.aidriven.core.agent.tool;
 
+import com.aidriven.spi.model.OperationContext;
 import com.aidriven.core.model.TicketInfo;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Aggregates all registered {@link ToolProvider}s and routes tool calls
@@ -24,6 +24,10 @@ public class ToolRegistry {
     private final Map<String, ToolProvider> providers = new LinkedHashMap<>();
 
     public void register(ToolProvider provider) {
+        if (provider == null) {
+            log.warn("Attempted to register null ToolProvider");
+            return;
+        }
         providers.put(provider.namespace(), provider);
         log.info("Registered tool provider: {} ({} tools)",
                 provider.namespace(), provider.toolDefinitions().size());
@@ -51,7 +55,7 @@ public class ToolRegistry {
      * Route a tool call to the correct provider by namespace prefix, with output
      * truncation.
      */
-    public ToolResult execute(ToolCall call) {
+    public ToolResult execute(OperationContext context, ToolCall call) {
         String namespace = extractNamespace(call.name());
         ToolProvider provider = providers.get(namespace);
         if (provider == null) {
@@ -61,7 +65,7 @@ public class ToolRegistry {
 
         log.info("Executing tool: {} (provider: {})", call.name(), namespace);
         try {
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(context, call);
             return truncateIfNeeded(result, provider.maxOutputChars());
         } catch (Exception e) {
             log.error("Tool execution failed: {} - {}", call.name(), e.getMessage(), e);

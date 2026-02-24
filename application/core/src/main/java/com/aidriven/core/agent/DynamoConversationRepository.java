@@ -34,32 +34,38 @@ public class DynamoConversationRepository implements ConversationRepository {
     }
 
     @Override
-    public List<ConversationMessage> getConversation(String ticketKey) {
-        String pk = ConversationMessage.createPk(ticketKey);
+    public List<ConversationMessage> getConversation(String tenantId, String ticketKey) {
+        String pk = ConversationMessage.createPk(tenantId, ticketKey);
 
-        return table.query(r -> r
+        List<ConversationMessage> recentMessages = table.query(r -> r
                 .queryConditional(QueryConditional.sortBeginsWith(Key.builder()
                         .partitionValue(pk)
                         .sortValue("MSG#")
                         .build()))
-                .scanIndexForward(true) // Chronological order (oldest first)
-        ).items().stream().collect(Collectors.toList());
+                .scanIndexForward(false) // Newest first to get latest context
+                .limit(100) // Limit per page to save RCUs
+        ).items().stream()
+                .limit(100) // Hard limit to prevent unbounded pagination
+                .collect(Collectors.toList());
+
+        java.util.Collections.reverse(recentMessages); // Restore chronological order
+        return recentMessages;
     }
 
     @Override
-    public int getTotalTokens(String ticketKey) {
+    public int getTotalTokens(String tenantId, String ticketKey) {
         // Note: In a high-scale scenario, we might want to maintain a separate counter
         // or use a GSI with projection, but for agent conversations (typically < 50-100
         // items),
         // querying and summing is acceptable.
-        return getConversation(ticketKey).stream()
+        return getConversation(tenantId, ticketKey).stream()
                 .mapToInt(ConversationMessage::getTokenCount)
                 .sum();
     }
 
     @Override
-    public void deleteConversation(String ticketKey) {
-        List<ConversationMessage> messages = getConversation(ticketKey);
+    public void deleteConversation(String tenantId, String ticketKey) {
+        List<ConversationMessage> messages = getConversation(tenantId, ticketKey);
 
         for (ConversationMessage msg : messages) {
             table.deleteItem(Key.builder()

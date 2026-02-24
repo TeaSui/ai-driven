@@ -28,39 +28,33 @@ public class IdempotencyServiceTest {
 
     @Test
     public void testIsDuplicate_Found() {
-        when(repository.get(anyString(), anyString())).thenReturn(Optional.of(TicketState.builder().build()));
-        
-        assertTrue(service.isDuplicate("TICKET-1", "EVENT-1"));
-        verify(repository).get(eq("TICKET#TICKET-1"), eq("IDEMPOTENCY#EVENT-1"));
+        when(repository.get(anyString(), anyString()))
+                .thenReturn(Optional.of(TicketState.builder().pk("pk").sk("sk").ticketKey("TICKET-1").build()));
+
+        assertTrue(service.isDuplicate("test-tenant", "TICKET-1", "PROJ-1", "EVENT-1"));
+        verify(repository).get(eq("TICKET#test-tenant#TICKET-1"), eq("IDEMPOTENCY#EVENT-1"));
     }
 
     @Test
     public void testIsDuplicate_NotFound() {
         when(repository.get(anyString(), anyString())).thenReturn(Optional.empty());
-        
-        assertFalse(service.isDuplicate("TICKET-1", "EVENT-1"));
-    }
 
-    @Test
-    public void testRecordProcessed() {
-        when(repository.saveIfNotExists(any(TicketState.class))).thenReturn(true);
-        service.recordProcessed("TICKET-1", "EVENT-1");
-        verify(repository).saveIfNotExists(any(TicketState.class));
+        assertFalse(service.isDuplicate("test-tenant", "TICKET-1", "PROJ-1", "EVENT-1"));
     }
 
     @Test
     public void testCheckAndRecord_New() {
         when(repository.saveIfNotExists(any(TicketState.class))).thenReturn(true);
-        
-        assertTrue(service.checkAndRecord("TICKET-1", "EVENT-1"));
+
+        assertTrue(service.checkAndRecord("test-tenant", "TICKET-1", "PROJ-1", "EVENT-1"));
         verify(repository).saveIfNotExists(any(TicketState.class));
     }
 
     @Test
     public void testCheckAndRecord_Duplicate() {
         when(repository.saveIfNotExists(any(TicketState.class))).thenReturn(false);
-        
-        assertFalse(service.checkAndRecord("TICKET-1", "EVENT-1"));
+
+        assertFalse(service.checkAndRecord("test-tenant", "TICKET-1", "PROJ-1", "EVENT-1"));
         verify(repository).saveIfNotExists(any(TicketState.class));
     }
 }

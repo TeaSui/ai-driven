@@ -1,21 +1,22 @@
 package com.aidriven.core.context;
 
 import com.aidriven.core.model.TicketInfo;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
 
 /**
  * Strategy interface for building code context.
- * Implementations define different ways to gather relevant code files for a
- * ticket.
+ * Updated for multi-tenancy via OperationContext.
  */
 public interface ContextStrategy {
 
     /**
      * Builds a context string for the given ticket.
      * 
-     * @param ticket Information about the Jira ticket (key, summary, description)
-     * @param branch The git branch to fetch context from
-     * @return A markdown-formatted string containing the code context, or null if
-     *         the strategy fails/skips.
+     * @param context Security context for the tenant
+     * @param ticket  Information about the Jira ticket
+     * @param branch  The git branch to fetch context from
+     * @return A markdown-formatted string or null if strategy fails.
      */
-    String buildContext(TicketInfo ticket, String branch);
+    String buildContext(OperationContext context, TicketInfo ticket, BranchName branch);
 }

@@ -1,52 +1,46 @@
 package com.aidriven.lambda;
 
+import com.aidriven.claude.ClaudeClient;
 import com.aidriven.core.agent.AgentOrchestrator;
 import com.aidriven.core.agent.CommentIntentClassifier;
 import com.aidriven.core.agent.ConversationWindowManager;
 import com.aidriven.core.agent.CostTracker;
 import com.aidriven.core.agent.JiraCommentFormatter;
 import com.aidriven.core.agent.ProgressTracker;
-import com.aidriven.core.agent.guardrail.ApprovalStore;
+import com.aidriven.core.agent.WorkflowContextProvider;
 import com.aidriven.core.agent.guardrail.GuardedToolRegistry;
 import com.aidriven.core.agent.model.AgentRequest;
 import com.aidriven.core.agent.model.AgentResponse;
 import com.aidriven.core.agent.model.CommentIntent;
-import com.aidriven.core.agent.tool.ToolRegistry;
-import com.aidriven.core.agent.tool.ToolResult;
 import com.aidriven.core.config.AgentConfig;
-import com.aidriven.mcp.McpBridgeToolProvider;
-import com.aidriven.tool.tracker.IssueTrackerToolProvider;
-import com.aidriven.tool.source.SourceControlToolProvider;
-import com.aidriven.tool.context.CodeContextToolProvider;
-import com.aidriven.tool.context.ContextService;
 import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.service.IdempotencyService;
-import com.aidriven.core.source.Platform;
-import com.aidriven.core.source.PlatformResolver;
-import com.aidriven.core.source.RepositoryResolver;
 import com.aidriven.core.source.SourceControlClient;
 import com.aidriven.jira.JiraClient;
-import com.aidriven.claude.ClaudeClient;
+import com.aidriven.lambda.agent.ToolRegistryBuilder;
+import com.aidriven.lambda.approval.ApprovalHandler;
 import com.aidriven.lambda.factory.ServiceFactory;
+import com.aidriven.lambda.model.AgentTask;
+import com.aidriven.spi.model.OperationContext;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import com.aidriven.lambda.platform.GitHubPlatformStrategy;
+import com.aidriven.lambda.platform.JiraPlatformStrategy;
+import com.aidriven.lambda.platform.PlatformStrategy;
+import com.aidriven.lambda.platform.PlatformStrategyRegistry;
+import com.aidriven.lambda.source.SourceControlClientResolver;
 
 /**
  * Consumes agent tasks from SQS FIFO queue and executes the agent orchestrator.
- *
- * <p>
- * Phase 3: Added intent classification, guardrails, approval handling, and cost
- * tracking.
- * </p>
- * <p>
- * Phase 4: Added MCP bridge tool providers for external integrations.
- * </p>
  */
 @Slf4j
 public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
@@ -57,31 +51,49 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
     private final IdempotencyService idempotencyService;
     private final JiraCommentFormatter formatter;
     private final CommentIntentClassifier intentClassifier;
+    private final ApprovalHandler approvalHandler;
+    private final SourceControlClientResolver clientResolver;
+    private final PlatformStrategyRegistry platformStrategyRegistry;
+    private final ToolRegistryBuilder toolRegistryBuilder;
 
     public AgentProcessorHandler() {
         this.serviceFactory = ServiceFactory.getInstance();
         this.objectMapper = serviceFactory.getObjectMapper();
         this.jiraClient = serviceFactory.getJiraClient();
         this.idempotencyService = serviceFactory.getIdempotencyService();
-        this.formatter = new JiraCommentFormatter();
+        this.formatter = serviceFactory.getJiraCommentFormatter();
+        this.approvalHandler = new ApprovalHandler(serviceFactory, jiraClient, formatter);
+        this.clientResolver = new SourceControlClientResolver(this.serviceFactory);
+        this.platformStrategyRegistry = new PlatformStrategyRegistry()
+                .register(new JiraPlatformStrategy(this.jiraClient, this.formatter))
+                .register(new GitHubPlatformStrategy());
 
         AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();
         this.intentClassifier = agentConfig.classifierUseLlm()
-                ? new CommentIntentClassifier(serviceFactory.getClaudeClient(), true)
-                : new CommentIntentClassifier();
+                ? new CommentIntentClassifier(agentConfig.effectiveMentionKeyword(),
+                        serviceFactory.getClaudeClient(), true)
+                : new CommentIntentClassifier(agentConfig.effectiveMentionKeyword());
+        this.toolRegistryBuilder = new ToolRegistryBuilder(serviceFactory, jiraClient);
     }
 
     // For testing
     public AgentProcessorHandler(ServiceFactory serviceFactory,
             ObjectMapper objectMapper,
             JiraClient jiraClient,
-            IdempotencyService idempotencyService) {
+            IdempotencyService idempotencyService,
+            ApprovalHandler approvalHandler) {
         this.serviceFactory = serviceFactory;
         this.objectMapper = objectMapper;
         this.jiraClient = jiraClient;
         this.idempotencyService = idempotencyService;
-        this.formatter = new JiraCommentFormatter();
+        this.formatter = serviceFactory.getJiraCommentFormatter();
+        this.clientResolver = new SourceControlClientResolver(serviceFactory);
+        this.platformStrategyRegistry = new PlatformStrategyRegistry()
+                .register(new JiraPlatformStrategy(jiraClient, this.formatter))
+                .register(new GitHubPlatformStrategy());
         this.intentClassifier = new CommentIntentClassifier();
+        this.approvalHandler = approvalHandler;
+        this.toolRegistryBuilder = new ToolRegistryBuilder(serviceFactory, jiraClient);
     }
 
     @Override
@@ -91,209 +103,165 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
                 processMessage(message);
             } catch (Exception e) {
                 log.error("Failed to process SQS message {}: {}", message.getMessageId(), e.getMessage(), e);
+                // In SQS Lambda, throwing ensures retry if not using batch failure reporting
                 throw new RuntimeException("Failed to process message", e);
+            } finally {
+                MDC.clear();
             }
         }
         return null;
     }
 
     private void processMessage(SQSEvent.SQSMessage message) throws Exception {
-        JsonNode body = objectMapper.readTree(message.getBody());
-        String ticketKey = body.get("ticketKey").asText();
-        String ackCommentId = body.get("ackCommentId").asText();
-        String commentBody = body.get("commentBody").asText();
-        String commentAuthor = body.get("commentAuthor").asText();
+        AgentTask task = objectMapper.readValue(message.getBody(), AgentTask.class);
+
+        String ticketKey = task.getTicketKey();
+        String ackCommentId = task.getAckCommentId();
+        OperationContext contextObj = task.getContext();
+        String platform = task.getPlatform();
 
         log.info("Processing agent task for ticket={} (ack={})", ticketKey, ackCommentId);
 
-        // Check idempotency
-        if (!idempotencyService.checkAndRecord(ticketKey, ackCommentId)) {
-            log.warn("Duplicate event detected via idempotency check: ticket={}, ack={}", ticketKey, ackCommentId);
-            return;
+        if (task.getCorrelationId() != null) {
+            MDC.put("correlationId", task.getCorrelationId());
         }
 
-        try {
-            // Classify intent
-            CommentIntent intent = intentClassifier.classify(commentBody, false);
-            log.info("Classified intent for ticket={}: {}", ticketKey, intent);
+        // Resolve source control client once — reused in both the happy path and error
+        // handler.
+        // Resolving again inside the catch block would trigger a redundant, potentially
+        // failing Jira API call.
+        SourceControlClient scClient = resolveSourceControlClient(task);
 
-            // Handle APPROVAL intent specially — execute pending gated action
-            if (intent == CommentIntent.APPROVAL) {
-                handleApproval(ticketKey, ackCommentId, commentBody, commentAuthor);
+        try {
+            // Check idempotency
+            if (!idempotencyService.checkAndRecord(contextObj.tenantId(), ticketKey, ticketKey, ackCommentId)) {
+                log.warn("Duplicate event detected via idempotency check: ticket={}, ack={}", ticketKey, ackCommentId);
                 return;
             }
 
-            // Fresh fetch of ticket info
-            TicketInfo ticket = jiraClient.getTicket(ticketKey);
-            SourceControlClient scClient = resolveSourceControlClient(ticket);
+            // Check rate limits to prevent abuse / runaways
+            idempotencyService.checkRateLimit(contextObj.tenantId());
 
-            // Tools setup
-            ToolRegistry toolRegistry = new ToolRegistry();
-            toolRegistry.register(new SourceControlToolProvider(scClient));
-            toolRegistry.register(new IssueTrackerToolProvider(jiraClient));
+            // Classify intent
+            String rawCommentBody = task.getRawCommentBody() != null ? task.getRawCommentBody() : task.getCommentBody();
+            CommentIntent intent = intentClassifier.classify(rawCommentBody, false);
+            log.info("Classified intent for ticket={}: {}", ticketKey, intent);
 
-            ContextService contextService = serviceFactory.createContextService(scClient);
-            toolRegistry.register(new CodeContextToolProvider(contextService));
-
-            // Register MCP tool providers (Phase 4)
-            for (McpBridgeToolProvider mcpProvider : serviceFactory.getMcpToolProviders()) {
-                toolRegistry.register(mcpProvider);
+            // Handle APPROVAL intent specially
+            if (intent == CommentIntent.APPROVAL) {
+                approvalHandler.handle(task, scClient);
+                return;
             }
 
-            // Wrap with guardrails (Phase 3)
-            GuardedToolRegistry guardedToolRegistry = serviceFactory.createGuardedToolRegistry(toolRegistry);
+            PlatformStrategy platformStrategy = platformStrategyRegistry.get(platform);
+            ProgressTracker progressTracker = platformStrategy.createProgressTracker(task, scClient);
 
-            // Progress tracker implementation via Jira comments
-            ProgressTracker progressTracker = createProgressTracker(ticketKey);
+            TicketInfo ticket;
+            if ("GITHUB".equalsIgnoreCase(platform)) {
+                ticket = TicketInfo.builder()
+                        .ticketKey(ticketKey)
+                        .summary("GitHub PR #" + ticketKey)
+                        .status("OPEN")
+                        .description("GitHub Pull Request. Review comments context.")
+                        .labels(List.of())
+                        .build();
+            } else {
+                ticket = jiraClient.getTicket(contextObj, ticketKey);
+            }
 
-            // Build orchestrator with Phase 3+ features
+            // Build guarded tool registry via ToolRegistryBuilder (SRP: extraction from
+            // handler)
+            GuardedToolRegistry guardedToolRegistry = toolRegistryBuilder.buildGuarded(scClient);
+
+            // Orchestrator dependencies
             ClaudeClient claudeClient = serviceFactory.getClaudeClient();
             ConversationWindowManager windowManager = serviceFactory.getConversationWindowManager();
             CostTracker costTracker = serviceFactory.getCostTracker();
             AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();
+            WorkflowContextProvider workflowContextProvider = serviceFactory.getWorkflowContextProvider();
 
-            AgentOrchestrator orchestrator = new AgentOrchestrator(
-                    claudeClient, toolRegistry, guardedToolRegistry,
-                    progressTracker, windowManager, costTracker,
-                    agentConfig.maxTurns());
+            log.info("Starting agent orchestrator for ticket={}", ticketKey);
+            AgentOrchestrator orchestrator = AgentOrchestrator.builder()
+                    .aiClient(claudeClient)
+                    .windowManager(windowManager)
+                    .costTracker(costTracker)
+                    .agentConfig(agentConfig)
+                    .guardedToolRegistry(guardedToolRegistry)
+                    .progressTracker(progressTracker)
+                    .workflowContextProvider(workflowContextProvider)
+                    .build();
 
-            AgentRequest request = new AgentRequest(ticketKey, commentBody, commentAuthor, ticket, ackCommentId);
-            AgentResponse response = orchestrator.process(request, intent);
+            Map<String, String> prContext = new HashMap<>();
+            if (task.getDiffHunk() != null)
+                prContext.put("diffHunk", task.getDiffHunk());
+            if (task.getFilePath() != null)
+                prContext.put("filePath", task.getFilePath());
+            if (task.getCommitId() != null)
+                prContext.put("commitId", task.getCommitId());
 
-            // Update the ack comment in-place with the final response
-            String formattedResponse = formatter.format(
-                    response.text(), response.toolsUsed(), response.tokenCount());
+            AgentRequest agentRequest = new AgentRequest(
+                    ticketKey,
+                    platform,
+                    task.getCommentBody(),
+                    task.getCommentAuthor(),
+                    ticket,
+                    progressTracker != null ? ackCommentId : null,
+                    contextObj,
+                    prContext);
 
-            postResponse(ticketKey, ackCommentId, formattedResponse);
+            AgentResponse response = orchestrator.process(agentRequest, intent);
+
+            // Final response dispatch — each strategy decides how to deliver the response
+            String finalText;
+            if (task.getParentCommentExcerpt() != null || task.getParentCommentAuthorAccountId() != null) {
+                finalText = formatter.formatAsReply(
+                        response.text(),
+                        task.getParentCommentExcerpt(),
+                        task.getParentCommentAuthorAccountId(),
+                        response.toolsUsed(),
+                        response.tokenCount());
+            } else {
+                finalText = formatter.format(
+                        response.text(),
+                        response.toolsUsed(),
+                        response.tokenCount(),
+                        task.getCommentAuthorAccountId());
+            }
+            platformStrategy.postFinalResponse(task, scClient, finalText);
+
             log.info("Agent task completed for ticket={} with {} turns, intent={}", ticketKey, response.turnCount(),
                     intent);
 
         } catch (Exception e) {
             log.error("Error during agent execution for ticket={}", ticketKey, e);
-            String errorComment = formatter.formatError(e.getMessage());
-            postResponse(ticketKey, ackCommentId, errorComment);
+            String safeError = sanitizeError(e.getMessage());
+            try {
+                // Reuse already-resolved scClient — no second Jira API call.
+                PlatformStrategy platformStrategy = platformStrategyRegistry.get(platform);
+                ProgressTracker tracker = platformStrategy.createProgressTracker(task, scClient);
+                tracker.fail(ackCommentId, safeError);
+            } catch (Exception inner) {
+                log.error("Failed to report error for ticket={}: {}", ticketKey, inner.getMessage());
+            }
             throw e;
         }
     }
 
-    /**
-     * Handles APPROVAL intent: finds pending approval and executes the gated
-     * action.
-     */
-    private void handleApproval(String ticketKey, String ackCommentId, String commentBody,
-            String commentAuthor) throws Exception {
-        ApprovalStore approvalStore = serviceFactory.getApprovalStore();
-        var pendingOpt = approvalStore.getLatestPending(ticketKey);
-
-        if (pendingOpt.isEmpty()) {
-            String msg = "No pending approval found for this ticket. " +
-                    "There may be no action awaiting approval, or it may have expired.";
-            postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(), 0));
-            return;
-        }
-
-        var pending = pendingOpt.get();
-
-        // Check if this is an approval or rejection
-        String lower = commentBody.toLowerCase().trim();
-        if (lower.contains("reject") || lower.contains("cancel") || lower.contains("deny")) {
-            approvalStore.consumeApproval(ticketKey, pending.sk());
-            String msg = "Rejected: " + pending.approvalPrompt() + "\nThe action has been cancelled.";
-            postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(), 0));
-            log.info("Approval rejected for ticket={} tool={}", ticketKey, pending.toolName());
-            return;
-        }
-
-        // Execute the approved action
-        log.info("Executing approved action for ticket={}: tool={}", ticketKey, pending.toolName());
-        TicketInfo ticket = jiraClient.getTicket(ticketKey);
-        SourceControlClient scClient = resolveSourceControlClient(ticket);
-
-        ToolRegistry toolRegistry = new ToolRegistry();
-        toolRegistry.register(new SourceControlToolProvider(scClient));
-        toolRegistry.register(new IssueTrackerToolProvider(jiraClient));
-
-        ContextService contextService = serviceFactory.createContextService(scClient);
-        toolRegistry.register(new CodeContextToolProvider(contextService));
-
-        // Register MCP providers
-        for (McpBridgeToolProvider mcpProvider : serviceFactory.getMcpToolProviders()) {
-            toolRegistry.register(mcpProvider);
-        }
-
-        GuardedToolRegistry guardedToolRegistry = serviceFactory.createGuardedToolRegistry(toolRegistry);
-        ToolResult result = guardedToolRegistry.executeApproved(ticketKey, pending);
-
-        String msg = result.isError()
-                ? "Approved action failed: " + result.content()
-                : "Approved and executed: " + pending.toolName() + "\n\n" + result.content();
-        postResponse(ticketKey, ackCommentId, formatter.format(msg, List.of(pending.toolName()), 0));
+    private String sanitizeError(String message) {
+        if (message == null)
+            return "Unknown error occurred";
+        // Basic sanitization — remove potentially sensitive path fragments or excessive
+        // detail
+        return message.replaceAll("/Users/[^/]+/", "/path/to/user/")
+                .replaceAll("(?i)token=[^&\\s]+", "token=REDACTED");
     }
 
-    private ProgressTracker createProgressTracker(String ticketKey) {
-        return new ProgressTracker() {
-            @Override
-            public void updateProgress(String commentId, List<ToolResult> results) {
-                log.info("Progress update for {}: {} tools executed", commentId, results.size());
-            }
-
-            @Override
-            public void complete(String commentId, String finalResponse) {
-                // Handled by orchestrator return value
-            }
-
-            @Override
-            public void fail(String commentId, String errorMessage) {
-                try {
-                    jiraClient.addComment(ticketKey, "Agent failed: " + errorMessage);
-                } catch (Exception e) {
-                    log.error("Failed to post failure comment", e);
-                }
-            }
-        };
-    }
-
-    /**
-     * Posts a response to Jira, preferring editComment with fallback to addComment.
-     */
-    private void postResponse(String ticketKey, String ackCommentId, String formattedResponse) {
-        try {
-            jiraClient.editComment(ticketKey, ackCommentId, formattedResponse);
-            log.info("Updated ack comment {} for ticket={}", ackCommentId, ticketKey);
-        } catch (UnsupportedOperationException e) {
-            log.warn("editComment not supported, posting new comment for ticket={}", ticketKey);
-            try {
-                jiraClient.addComment(ticketKey, formattedResponse);
-            } catch (Exception ex) {
-                log.error("Failed to post fallback comment for ticket={}", ticketKey, ex);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to edit ack comment, posting new comment for ticket={}", ticketKey);
-            try {
-                jiraClient.addComment(ticketKey, formattedResponse);
-            } catch (Exception ex) {
-                log.error("Failed to post fallback comment for ticket={}", ticketKey, ex);
-            }
+    private SourceControlClient resolveSourceControlClient(AgentTask task) throws Exception {
+        if ("GITHUB".equalsIgnoreCase(task.getPlatform())) {
+            return clientResolver.resolve("GITHUB", task.getRepoOwner(), task.getRepoSlug());
         }
-    }
-
-    private SourceControlClient resolveSourceControlClient(TicketInfo ticket) throws Exception {
-        Platform platform = PlatformResolver.resolve(
-                ticket.getLabels(), null, serviceFactory.getAppConfig().getDefaultPlatform());
-        RepositoryResolver.ResolvedRepository repo = RepositoryResolver.resolve(
-                ticket.getLabels(), null,
-                serviceFactory.getAppConfig().getDefaultWorkspace(),
-                serviceFactory.getAppConfig().getDefaultRepo(),
-                serviceFactory.getAppConfig().getDefaultPlatform());
-
-        String owner = repo != null ? repo.owner() : null;
-        String slug = repo != null ? repo.repo() : null;
-
-        return switch (platform) {
-            case GITHUB -> serviceFactory.getGitHubClient(owner, slug);
-            case BITBUCKET -> serviceFactory.getBitbucketClient(
-                    owner != null ? owner : serviceFactory.getAppConfig().getDefaultWorkspace(),
-                    slug != null ? slug : serviceFactory.getAppConfig().getDefaultRepo());
-        };
+        // For JIRA, resolve from ticket labels
+        TicketInfo ticket = jiraClient.getTicket(task.getContext(), task.getTicketKey());
+        return clientResolver.resolveFromLabels(ticket.getLabels());
     }
 }

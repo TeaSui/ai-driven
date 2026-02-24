@@ -1,6 +1,6 @@
 # impl-12: Cost Controls (4.1)
 
-**Status:** 🔲 To Do  
+**Status:** DONE
 **Priority:** 4.1  
 **Impact:** Prevent unexpected Claude API costs with billing alarms and budget limits
 
@@ -11,6 +11,7 @@
 - CloudWatch billing alarms for Claude API spend
 - Monthly budget limits with automatic workflow disabling
 - Per-ticket cost tracking (tokens used, API calls made)
+- **Auto model/context fallback** based on context token size estimation
 
 ## Proposed Changes
 
@@ -23,6 +24,12 @@
   | `estimatedCostUsd` | Double | Estimated cost based on model pricing |
 - [ ] Update `ClaudeInvokeHandler` to parse and store token usage from Claude response
 - [ ] Calculate cost based on model pricing table
+
+### Auto-Fallback & Token Thresholds
+- [ ] Add `COST_AWARE_MODE` env var
+- [ ] In `ClaudeInvokeHandler`, if cost aware mode is enabled, pre-calculate token length before invoking model
+- [ ] If estimated input tokens > limits, automatically downgrade from `FULL_REPO` to `INCREMENTAL` or downgrade model (e.g. from Opus to Sonnet)
+- [ ] Add warning to Jira comment when auto-fallback is triggered
 
 ### Monthly Budget Tracking
 - [ ] Create `BudgetTracker` utility that sums costs from DynamoDB (GSI by month)

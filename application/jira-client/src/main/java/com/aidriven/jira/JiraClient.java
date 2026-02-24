@@ -1,9 +1,13 @@
 package com.aidriven.jira;
 
 import com.aidriven.core.model.TicketInfo;
+import com.aidriven.core.exception.ConfigurationException;
 import com.aidriven.core.service.SecretsService;
 import com.aidriven.core.tracker.IssueTrackerClient;
 import com.aidriven.core.util.HttpResponseHandler;
+import com.aidriven.core.resilience.CircuitBreaker;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.provider.IssueTrackerProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AccessLevel;
@@ -18,10 +22,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -30,25 +30,26 @@ import java.util.Objects;
 
 /**
  * Client for interacting with Jira Cloud REST API.
- * Implements {@link IssueTrackerClient} for platform-agnostic issue tracking.
+ * Implements both IssueTrackerClient (internal) and IssueTrackerProvider (SPI).
  */
 @Slf4j
-@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-public class JiraClient implements IssueTrackerClient {
+@RequiredArgsConstructor(access = AccessLevel.PACKAGE)
+public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
 
     private final String baseUrl;
     private final @NonNull String authHeader;
     private final @NonNull HttpClient httpClient;
     private final @NonNull ObjectMapper objectMapper;
+    private CircuitBreaker circuitBreaker;
 
-    // Constructor for backward compatibility (pre-encoding authHeader)
+    /** Configuration POJO for Jira */
+    public record JiraSecret(String baseUrl, String email, String apiToken) {
+    }
+
     public JiraClient(String baseUrl, String email, String apiToken) {
-        Objects.requireNonNull(baseUrl, "baseUrl must not be null");
-        Objects.requireNonNull(email, "email must not be null");
-        Objects.requireNonNull(apiToken, "apiToken must not be null");
-
         this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(60))
                 .build();
         this.objectMapper = new ObjectMapper();
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -56,308 +57,266 @@ public class JiraClient implements IssueTrackerClient {
                 .encodeToString((email + ":" + apiToken).getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * Creates a JiraClient from secrets.
-     */
+    public JiraClient withCircuitBreaker(CircuitBreaker breaker) {
+        this.circuitBreaker = breaker;
+        return this;
+    }
+
     public static JiraClient fromSecrets(SecretsService secretsManager, String secretArn) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> secrets = secretsManager.getSecretJson(secretArn);
-
-            String baseUrl = getRequiredSecret(secrets, "baseUrl");
-            String apiToken = getRequiredSecret(secrets, "apiToken");
-            String userEmail = getRequiredSecret(secrets, "email");
-
-            String auth = userEmail + ":" + apiToken;
-            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
-
-            return new JiraClient(baseUrl, "Basic " + encodedAuth, HttpClient.newHttpClient(), mapper);
+            JiraSecret secret = secretsManager.getSecretAs(secretArn, JiraSecret.class);
+            if (secret == null || secret.baseUrl() == null || secret.email() == null || secret.apiToken() == null) {
+                throw new ConfigurationException(
+                        "JiraClient: secret '" + secretArn + "' is missing required fields (baseUrl, email, apiToken)");
+            }
+            return new JiraClient(secret.baseUrl(), secret.email(), secret.apiToken());
+        } catch (ConfigurationException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize JiraClient from secrets", e);
+            throw new ConfigurationException("JiraClient init failed for secret: " + secretArn, e);
         }
     }
 
-    private static String getRequiredSecret(Map<String, Object> secrets, String key) {
-        Object val = secrets.get(key);
-        if (val == null) {
-            throw new IllegalArgumentException("Missing required key '" + key + "' in Jira secret");
-        }
-        return val.toString();
+    @Override
+    public String getName() {
+        return "jira";
     }
 
-    /**
-     * Fetches a ticket by its key (e.g., "PROJ-123").
-     */
-    public TicketInfo getTicket(String ticketKey) throws Exception {
+    @Override
+    public TicketInfo getTicket(OperationContext context, String ticketKey) throws Exception {
+        validateOperationContext(context);
         validateTicketKey(ticketKey);
-        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey);
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Jira", "getTicket",
+                circuitBreaker);
         HttpResponseHandler.checkResponse(response, "Jira", "getTicket " + ticketKey);
-
-        JsonNode json = objectMapper.readTree(response.body());
-        return parseTicket(json);
+        return parseTicket(objectMapper.readTree(response.body()));
     }
 
-    /**
-     * Updates the status of a ticket by transitioning to a new status.
-     */
-    public void transitionTicket(String ticketKey, String transitionId) throws Exception {
-        validateTicketKey(ticketKey);
-        Objects.requireNonNull(transitionId, "transitionId must not be null");
-        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/transitions";
-
-        String body = objectMapper.writeValueAsString(
-                java.util.Map.of("transition", java.util.Map.of("id", transitionId)));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 204 No Content is expected for successful transitions
-        if (response.statusCode() != 204 && response.statusCode() != 200) {
-            HttpResponseHandler.checkResponse(response, "Jira", "transitionTicket " + ticketKey);
-        }
-
-        log.info("Transitioned ticket {} to status with transition ID {}", ticketKey, transitionId);
+    private void validateOperationContext(OperationContext context) {
+        Objects.requireNonNull(context, "OperationContext must not be null");
     }
-
-    /**
-     * Updates the status of a ticket by finding and executing the transition to the
-     * target status.
-     * This is a convenience method that automatically looks up the transition ID.
-     *
-     * @param ticketKey        The ticket key (e.g., "PROJ-123")
-     * @param targetStatusName The name of the status to transition to (e.g., "In
-     *                         Review", "Done")
-     * @throws IllegalStateException if no transition to the target status is
-     *                               available
-     */
-    public void updateStatus(String ticketKey, String targetStatusName) throws Exception {
-        validateTicketKey(ticketKey);
-        Objects.requireNonNull(targetStatusName, "targetStatusName must not be null");
-
-        List<Transition> transitions = getTransitions(ticketKey);
-        Transition targetTransition = transitions.stream()
-                .filter(t -> t.toStatus().equalsIgnoreCase(targetStatusName))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        String.format("Transition to '%s' not available for ticket %s. Available transitions: %s",
-                                targetStatusName, ticketKey,
-                                transitions.stream().map(Transition::toStatus).toList())));
-
-        transitionTicket(ticketKey, targetTransition.id());
-        log.info("Updated ticket {} status to {}", ticketKey, targetStatusName);
-    }
-
-    /**
-     * Gets available transitions for a ticket.
-     */
-    public List<Transition> getTransitions(String ticketKey) throws Exception {
-        validateTicketKey(ticketKey);
-        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/transitions";
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        HttpResponseHandler.checkResponse(response, "Jira", "getTransitions " + ticketKey);
-
-        JsonNode json = objectMapper.readTree(response.body());
-        List<Transition> transitions = new ArrayList<>();
-
-        for (JsonNode t : json.get("transitions")) {
-            transitions.add(new Transition(
-                    t.get("id").asText(),
-                    t.get("name").asText(),
-                    t.get("to").get("name").asText()));
-        }
-
-        return transitions;
-    }
-
-    /**
-     * Adds a comment to a ticket.
-     *
-     * @return The ID of the created comment.
-     */
-    @Override
-    public String addComment(String ticketKey, String comment) throws Exception {
-        validateTicketKey(ticketKey);
-        Objects.requireNonNull(comment, "comment must not be null");
-        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/comment";
-
-        String body = objectMapper.writeValueAsString(java.util.Map.of(
-                "body", java.util.Map.of(
-                        "type", "doc",
-                        "version", 1,
-                        "content", List.of(java.util.Map.of(
-                                "type", "paragraph",
-                                "content", List.of(java.util.Map.of(
-                                        "type", "text",
-                                        "text", comment)))))));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 201 Created is expected for new comments
-        if (response.statusCode() != 201 && response.statusCode() != 200) {
-            HttpResponseHandler.checkResponse(response, "Jira", "addComment " + ticketKey);
-        }
-
-        JsonNode json = objectMapper.readTree(response.body());
-        String commentId = json.get("id").asText();
-        log.info("Added comment {} to ticket {}", commentId, ticketKey);
-        return commentId;
-    }
-
-    /**
-     * Edits an existing comment on a ticket (replaces content in-place).
-     * Uses PUT /rest/api/3/issue/{issueKey}/comment/{commentId}
-     */
-    @Override
-    public void editComment(String ticketKey, String commentId, String newBody) throws Exception {
-        validateTicketKey(ticketKey);
-        Objects.requireNonNull(commentId, "commentId must not be null");
-        Objects.requireNonNull(newBody, "newBody must not be null");
-
-        String url = baseUrl + "/rest/api/3/issue/" + encodePathSegment(ticketKey) + "/comment/" + commentId;
-
-        String body = objectMapper.writeValueAsString(java.util.Map.of(
-                "body", java.util.Map.of(
-                        "type", "doc",
-                        "version", 1,
-                        "content", List.of(java.util.Map.of(
-                                "type", "paragraph",
-                                "content", List.of(java.util.Map.of(
-                                        "type", "text",
-                                        "text", newBody)))))));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Content-Type", "application/json")
-                .PUT(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            HttpResponseHandler.checkResponse(response, "Jira", "editComment " + ticketKey + "/" + commentId);
-        }
-        log.info("Edited comment {} on ticket {}", commentId, ticketKey);
-    }
-
-    private TicketInfo parseTicket(JsonNode json) {
-        JsonNode fields = json.get("fields");
-
-        List<String> labels = new ArrayList<>();
-        if (fields.has("labels")) {
-            for (JsonNode label : fields.get("labels")) {
-                labels.add(label.asText());
-            }
-        }
-
-        return TicketInfo.builder()
-                .ticketId(json.get("id").asText())
-                .ticketKey(json.get("key").asText())
-                .projectKey(extractProjectKey(json.get("key").asText()))
-                .summary(fields.has("summary") ? fields.get("summary").asText() : "")
-                .description(extractDescription(fields.get("description")))
-                .labels(labels)
-                .status(fields.has("status") ? fields.get("status").get("name").asText() : "")
-                .priority(fields.has("priority") && !fields.get("priority").isNull()
-                        ? fields.get("priority").get("name").asText()
-                        : "")
-                .createdAt(fields.has("created") ? parseJiraDate(fields.get("created").asText()) : Instant.now())
-                .updatedAt(fields.has("updated") ? parseJiraDate(fields.get("updated").asText()) : Instant.now())
-                .build();
-    }
-
-    private String extractProjectKey(String ticketKey) {
-        if (ticketKey == null || !ticketKey.contains("-")) {
-            return ticketKey != null ? ticketKey : "";
-        }
-        return ticketKey.split("-")[0];
-    }
-
-    private String extractDescription(JsonNode description) {
-        if (description == null || description.isNull()) {
-            return "";
-        }
-        // For Atlassian Document Format (ADF), extract text content
-        StringBuilder sb = new StringBuilder();
-        extractTextFromAdf(description, sb);
-        return sb.toString().trim();
-    }
-
-    private void extractTextFromAdf(JsonNode node, StringBuilder sb) {
-        if (node == null)
-            return;
-
-        if (node.has("text")) {
-            sb.append(node.get("text").asText());
-        }
-
-        if (node.has("content")) {
-            for (JsonNode child : node.get("content")) {
-                extractTextFromAdf(child, sb);
-            }
-        }
-    }
-
-    private Instant parseJiraDate(String dateStr) {
-        if (dateStr == null || dateStr.isEmpty()) {
-            return Instant.now();
-        }
-        try {
-            return Instant.parse(dateStr);
-        } catch (DateTimeParseException e) {
-            try {
-                return OffsetDateTime.parse(dateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ"))
-                        .toInstant();
-            } catch (DateTimeParseException e2) {
-                log.warn("Failed to parse date: {}", dateStr);
-                return Instant.now();
-            }
-        }
-    }
-
-    public record Transition(String id, String name, String toStatus) {
-    }
-
-    private static final java.util.regex.Pattern TICKET_KEY_PATTERN = java.util.regex.Pattern
-            .compile("^[A-Z][A-Z0-9]+-\\d+$");
 
     private void validateTicketKey(String ticketKey) {
         Objects.requireNonNull(ticketKey, "ticketKey must not be null");
-        if (!TICKET_KEY_PATTERN.matcher(ticketKey).matches()) {
+        if (ticketKey.isBlank())
+            throw new IllegalArgumentException("ticketKey must not be blank");
+        // Jira keys typically follow PROJ-123 format.
+        // We relax this to avoid crashing on GitHub PR numbers (e.g., "14")
+        // during routing/fallback. If it's not a valid format, Jira API will return
+        // 404/400 anyway.
+        if (ticketKey.matches("^\\d+$")) {
+            log.warn("Ticket key '{}' looks like a number (possibly GitHub PR). This might fail Jira API calls.",
+                    ticketKey);
+            return;
+        }
+
+        if (!ticketKey.contains("-") || ticketKey.startsWith("-") || ticketKey.endsWith("-")
+                || !ticketKey.equals(ticketKey.toUpperCase())) {
             throw new IllegalArgumentException("Invalid ticket key format: " + ticketKey);
         }
     }
 
-    private String encodePathSegment(String segment) {
-        return URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20");
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getTicketDetails(OperationContext context, String ticketKey) {
+        try {
+            validateOperationContext(context);
+            validateTicketKey(ticketKey);
+            String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey);
+            HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                    () -> httpClient.send(buildGetRequest(url), HttpResponse.BodyHandlers.ofString()), "Jira",
+                    "getTicketDetails", circuitBreaker);
+            HttpResponseHandler.checkResponse(response, "Jira", "getTicketDetails");
+            return objectMapper.readValue(response.body(), Map.class);
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
+                throw (RuntimeException) e;
+            throw new RuntimeException("Jira getTicketDetails failed", e);
+        }
+    }
+
+    @Override
+    public void postComment(OperationContext context, String ticketKey, String body) {
+        try {
+            validateOperationContext(context);
+            validateTicketKey(ticketKey);
+            addComment(context, ticketKey, body);
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
+                throw (RuntimeException) e;
+            throw new RuntimeException("Jira addComment failed", e);
+        }
+    }
+
+    @Override
+    public String addComment(OperationContext context, String ticketKey, String comment) throws Exception {
+        validateOperationContext(context);
+        validateTicketKey(ticketKey);
+        Objects.requireNonNull(comment, "comment must not be null");
+        String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey) + "/comment";
+        String body = objectMapper.writeValueAsString(Map.of("body", Map.of("type", "doc", "version", 1,
+                "content", List.of(Map.of("type", "paragraph", "content",
+                        List.of(Map.of("type", "text", "text", comment)))))));
+        HttpRequest request = buildPostRequest(url, body);
+        HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Jira", "addComment",
+                circuitBreaker);
+        HttpResponseHandler.checkResponse(response, "Jira", "addComment");
+        JsonNode json = objectMapper.readTree(response.body());
+        if (!json.has("id")) {
+            throw new RuntimeException("Jira addComment failed, response: " + response.body());
+        }
+        return json.get("id").asText();
+    }
+
+    @Override
+    public void editComment(OperationContext context, String ticketKey, String commentId, String newBody)
+            throws Exception {
+        validateOperationContext(context);
+        validateTicketKey(ticketKey);
+        Objects.requireNonNull(newBody, "newBody must not be null");
+        String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey) + "/comment/" + commentId;
+        String body = objectMapper.writeValueAsString(Map.of("body", Map.of("type", "doc", "version", 1,
+                "content", List.of(Map.of("type", "paragraph", "content",
+                        List.of(Map.of("type", "text", "text", newBody)))))));
+        HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                () -> httpClient.send(buildPutRequest(url, body), HttpResponse.BodyHandlers.ofString()), "Jira",
+                "editComment", circuitBreaker);
+        HttpResponseHandler.checkResponse(response, "Jira", "editComment");
+    }
+
+    @Override
+    public void updateLabels(OperationContext context, String ticketKey, List<String> add, List<String> remove) {
+        try {
+            validateOperationContext(context);
+            validateTicketKey(ticketKey);
+            String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey);
+            List<Map<String, Object>> ops = new ArrayList<>();
+            for (String l : add)
+                ops.add(Map.of("add", l));
+            for (String l : remove)
+                ops.add(Map.of("remove", l));
+            String body = objectMapper.writeValueAsString(Map.of("update", Map.of("labels", ops)));
+            HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                    () -> httpClient.send(buildPutRequest(url, body), HttpResponse.BodyHandlers.ofString()), "Jira",
+                    "updateLabels", circuitBreaker);
+            HttpResponseHandler.checkResponse(response, "Jira", "updateLabels");
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
+                throw (RuntimeException) e;
+            throw new RuntimeException("Jira updateLabels failed", e);
+        }
+    }
+
+    @Override
+    public List<Transition> getTransitions(OperationContext context, String ticketKey) throws Exception {
+        validateOperationContext(context);
+        validateTicketKey(ticketKey);
+        String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey) + "/transitions";
+        HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                () -> httpClient.send(buildGetRequest(url), HttpResponse.BodyHandlers.ofString()), "Jira",
+                "getTransitions", circuitBreaker);
+        HttpResponseHandler.checkResponse(response, "Jira", "getTransitions");
+        JsonNode json = objectMapper.readTree(response.body());
+        List<Transition> transitions = new ArrayList<>();
+        if (json.has("transitions")) {
+            for (JsonNode t : json.get("transitions")) {
+                transitions.add(new Transition(t.get("id").asText(), t.get("to").get("name").asText()));
+            }
+        }
+        return transitions;
+    }
+
+    @Override
+    public void updateStatus(OperationContext context, String ticketKey, String statusName) {
+        try {
+            validateOperationContext(context);
+            validateTicketKey(ticketKey);
+            Objects.requireNonNull(statusName, "statusName must not be null");
+            updateStatus_internal(context, ticketKey, statusName);
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException || e instanceof NullPointerException
+                    || e instanceof IllegalStateException || e instanceof RuntimeException)
+                throw (RuntimeException) e;
+            throw new RuntimeException("Jira updateStatus failed", e);
+        }
+    }
+
+    private void updateStatus_internal(OperationContext context, String ticketKey, String statusName) throws Exception {
+        List<Transition> transitions = getTransitions(context, ticketKey);
+        String transitionId = null;
+        for (Transition t : transitions) {
+            if (t.toStatus().equalsIgnoreCase(statusName)) {
+                transitionId = t.id();
+                break;
+            }
+        }
+        if (transitionId == null) {
+            throw new IllegalStateException(
+                    String.format("Transition to '%s' not available for ticket %s", statusName, ticketKey));
+        }
+        transitionTicket(context, ticketKey, transitionId);
+    }
+
+    @Override
+    public void transitionTicket(OperationContext context, String ticketKey, String transitionId) throws Exception {
+        validateOperationContext(context);
+        validateTicketKey(ticketKey);
+        String url = baseUrl + "/rest/api/3/issue/" + encode(ticketKey) + "/transitions";
+        String body = objectMapper.writeValueAsString(Map.of("transition", Map.of("id", transitionId)));
+        HttpResponse<String> response = HttpResponseHandler.sendWithCircuitBreaker(
+                () -> httpClient.send(buildPostRequest(url, body), HttpResponse.BodyHandlers.ofString()), "Jira",
+                "transitionTicket", circuitBreaker);
+        HttpResponseHandler.checkResponse(response, "Jira", "transitionTicket");
+    }
+
+    // --- Helpers ---
+    private HttpRequest buildGetRequest(String url) {
+        return HttpRequest.newBuilder().uri(URI.create(url)).header("Authorization", authHeader)
+                .header("Accept", "application/json").GET().build();
+    }
+
+    private HttpRequest buildPostRequest(String url, String body) {
+        return HttpRequest.newBuilder().uri(URI.create(url)).header("Authorization", authHeader)
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+    }
+
+    private HttpRequest buildPutRequest(String url, String body) {
+        return HttpRequest.newBuilder().uri(URI.create(url)).header("Authorization", authHeader)
+                .header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(body)).build();
+    }
+
+    private String encode(String val) {
+        return URLEncoder.encode(val, StandardCharsets.UTF_8);
+    }
+
+    private TicketInfo parseTicket(JsonNode json) {
+        JsonNode fields = json.get("fields");
+        List<String> labels = new java.util.ArrayList<>();
+        if (fields.has("labels") && fields.get("labels").isArray()) {
+            for (JsonNode l : fields.get("labels")) {
+                labels.add(l.asText());
+            }
+        }
+
+        String priority = fields.has("priority") && !fields.get("priority").isNull()
+                ? fields.get("priority").path("name").asText("")
+                : "";
+
+        return TicketInfo.builder()
+                .ticketKey(json.get("key").asText())
+                .summary(fields.get("summary").asText())
+                .status(fields.has("status") && !fields.get("status").isNull()
+                        ? fields.get("status").get("name").asText()
+                        : "")
+                .description(fields.has("description") && !fields.get("description").isNull()
+                        ? fields.get("description").toString()
+                        : "")
+                .labels(labels)
+                .priority(priority)
+                .build();
     }
 }

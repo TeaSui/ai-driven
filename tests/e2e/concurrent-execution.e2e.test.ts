@@ -1,4 +1,4 @@
-import { createTestTicket, addLabelToTicket, cleanupTestData } from '../utils/test-helpers';
+import { createTestTicket, addLabelToTicket, cleanupTestData, getTicket } from '../utils/test-helpers';
 
 /**
  * E2E Test: Concurrent Execution Handling
@@ -47,10 +47,11 @@ describe('E2E: Concurrent Execution Handling', () => {
         console.log('✅ Added labels to all tickets');
 
         // Verify each ticket has independent execution
-        tickets.forEach(ticket => {
-            expect(ticket.ticketKey).toBeDefined();
-            expect(ticket.labels).toContain('ai-generate');
-        });
+        for (const ticket of tickets) {
+            const updatedTicket = await getTicket(ticket.ticketKey);
+            expect(updatedTicket.ticketKey).toBeDefined();
+            expect(updatedTicket.labels).toContain('ai-generate');
+        }
 
         // Each execution should be independent
         const uniqueTickets = new Set(tickets.map(t => t.ticketKey));

@@ -13,6 +13,10 @@ import com.aidriven.core.source.SourceControlClient;
 import com.aidriven.core.util.JsonPathExtractor;
 import com.aidriven.jira.JiraClient;
 import com.aidriven.lambda.factory.ServiceFactory;
+import com.aidriven.lambda.source.SourceControlClientResolver;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.provider.SourceControlProvider;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -37,9 +41,11 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
     private final ObjectMapper objectMapper;
     private final TicketStateRepository ticketStateRepository;
     private final JiraClient jiraClient;
+    private final com.aidriven.core.agent.ConversationRepository conversationRepository;
     private final SourceControlClient testSourceControlClient;
     private final String branchPrefix;
     private final ServiceFactory serviceFactory;
+    private final SourceControlClientResolver clientResolver;
 
     /** No-arg constructor required by AWS Lambda runtime. */
     public PrCreatorHandler() {
@@ -51,20 +57,25 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
         this.objectMapper = factory.getObjectMapper();
         this.ticketStateRepository = factory.getTicketStateRepository();
         this.jiraClient = factory.getJiraClient();
+        this.conversationRepository = factory.getConversationRepository();
         this.branchPrefix = factory.getAppConfig().getBranchPrefix();
         this.testSourceControlClient = null;
+        this.clientResolver = new SourceControlClientResolver(factory);
     }
 
     /** Constructor for testing. */
     public PrCreatorHandler(ObjectMapper objectMapper, TicketStateRepository ticketStateRepository,
-            JiraClient jiraClient, ServiceFactory factory, SourceControlClient testSourceControlClient,
+            JiraClient jiraClient, com.aidriven.core.agent.ConversationRepository conversationRepository,
+            ServiceFactory factory, SourceControlClient testSourceControlClient,
             String branchPrefix) {
         this.objectMapper = objectMapper;
         this.ticketStateRepository = ticketStateRepository;
         this.jiraClient = jiraClient;
+        this.conversationRepository = conversationRepository;
         this.serviceFactory = factory;
         this.testSourceControlClient = testSourceControlClient;
         this.branchPrefix = branchPrefix;
+        this.clientResolver = new SourceControlClientResolver(factory);
     }
 
     @Override
@@ -99,26 +110,60 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
                 return createBaseOutput(ticketId, ticketKey, false, dryRun, "No files generated");
             }
 
+            OperationContext opContext = extractOperationContext(input);
             SourceControlClient client = resolveSourceControlClient(input, ticketKey);
-            String defaultBranch = getDefaultBranch(client, ticketKey);
-            String featureBranch = branchPrefix + ticketKey.toLowerCase();
+            BranchName defaultBranch = client.getDefaultBranch(opContext);
+            BranchName featureBranch = BranchName.of(branchPrefix + ticketKey.toLowerCase());
 
-            createFeatureBranch(client, featureBranch, defaultBranch, ticketKey);
-            commitChanges(client, featureBranch, files, (String) input.get("commitMessage"), ticketKey);
+            if (!createFeatureBranch(opContext, client, featureBranch, defaultBranch, ticketKey)) {
+                log.info("Stopping session for ticket {} because branch {} already exists", ticketKey, featureBranch);
 
-            SourceControlClient.PullRequestResult prResult = createPullRequest(
-                    client, ticketKey, agentType, featureBranch, defaultBranch,
-                    (String) input.get("prTitle"), (String) input.get("prDescription"), files.size());
+                // Check if we already posted this warning to avoid duplicates
+                String pk = TicketState.createPk(opContext.tenantId(), ticketId);
+                String sk = TicketState.createCurrentStateSk();
+                boolean alreadyWarned = ticketStateRepository.get(pk, sk)
+                        .map(state -> ProcessingStatus.FAILED.getValue().equals(state.getStatus())
+                                && state.getErrorMessage() != null
+                                && state.getErrorMessage().contains("already exists"))
+                        .orElse(false);
 
-            updateTicketState(ticketId, ticketKey, agentType, prResult, featureBranch);
-            updateJira(ticketKey, prResult.url());
+                if (!alreadyWarned) {
+                    String message = String
+                            .format("Branch '%s' already exists. To avoid overwriting manual work, the AI has stopped. "
+                                    +
+                                    "Delete the branch or remove the trigger label if you want to abort.",
+                                    featureBranch.value());
+                    jiraClient.postComment(opContext, ticketKey, "[AI WARN] " + message);
+
+                    // Save state as FAILED with this error so we don't repeat
+                    ticketStateRepository.save(
+                            TicketState.forTicket(opContext.tenantId(), ticketId, ticketKey,
+                                    ProcessingStatus.FAILED)
+                                    .withError("Branch already exists: " + featureBranch.value()));
+                }
+
+                return createBaseOutput(ticketId, ticketKey, false, dryRun, "Branch already exists");
+            }
+
+            commitChanges(opContext, client, featureBranch, files, (String) input.get("commitMessage"), ticketKey);
+
+            String prTitle = buildPrTitle(ticketKey, (String) input.get("prTitle"));
+            String prDescription = buildPrDescription(ticketKey, agentType, files.size(),
+                    (String) input.get("prDescription"));
+            SourceControlProvider.PullRequestResult prResult = client.createPullRequest(
+                    opContext, prTitle, prDescription, featureBranch, defaultBranch);
+
+            updateTicketState(opContext.tenantId(), ticketId, ticketKey, agentType, prResult, featureBranch.value());
+            updateJira(opContext, ticketKey, prResult.url());
+            persistConversationContext(opContext, ticketKey, prResult, agentType);
 
             log.info("Successfully created PR for ticket {}: {}", ticketKey, prResult.url());
-            return createSuccessOutput(ticketId, ticketKey, dryRun, prResult.url(), featureBranch,
+            return createSuccessOutput(ticketId, ticketKey, dryRun, prResult.url(), featureBranch.value(),
                     input.get("platform"));
 
         } catch (Exception e) {
-            return handleError(ticketId, ticketKey, agentType, e);
+            OperationContext opContext = extractOperationContext(input);
+            return handleError(opContext.tenantId(), ticketId, ticketKey, agentType, e);
         } finally {
             // Context cleared by Powertools
         }
@@ -137,77 +182,55 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
         if (this.testSourceControlClient != null) {
             return this.testSourceControlClient;
         }
-
         String platformStr = (String) input.get("platform");
         String repoOwner = (String) input.get("repoOwner");
         String repoSlug = (String) input.get("repoSlug");
-
-        if ("GITHUB".equalsIgnoreCase(platformStr)) {
-            log.info("Using GitHub client for ticket {} (resolved repo={}/{})", ticketKey, repoOwner, repoSlug);
-            return serviceFactory.getGitHubClient(repoOwner, repoSlug);
-        } else {
-            log.info("Using Bitbucket client for ticket {} (repo={}/{})", ticketKey, repoOwner, repoSlug);
-            return serviceFactory.getBitbucketClient(repoOwner, repoSlug);
-        }
+        log.info("Resolving source control client for ticket {} (platform={}, repo={}/{})",
+                ticketKey, platformStr, repoOwner, repoSlug);
+        return clientResolver.resolve(platformStr, repoOwner, repoSlug);
     }
 
-    private String getDefaultBranch(SourceControlClient client, String ticketKey) throws Exception {
-        try {
-            return client.getDefaultBranch();
-        } catch (HttpClientException | JsonPathExtractor.JsonPathException e) {
-            throw new RuntimeException(String.format("Failed to get default branch for ticket %s: %s",
-                    ticketKey, e.getMessage()), e);
-        }
-    }
-
-    private void createFeatureBranch(SourceControlClient client, String branch, String base, String ticketKey)
+    private boolean createFeatureBranch(OperationContext context, SourceControlClient client, BranchName branch,
+            BranchName base,
+            String ticketKey)
             throws Exception {
         try {
-            client.createBranch(branch, base);
+            client.createBranch(context, branch, base);
+            return true;
         } catch (ConflictException e) {
-            log.warn("Branch {} already exists (409), continuing with existing branch", branch);
+            log.warn("Branch {} already exists (409)", branch.value());
+            return false;
         } catch (HttpClientException e) {
             String body = e.getResponseBody() != null ? e.getResponseBody().toLowerCase() : "";
-            if (e.getStatusCode() == 400
-                    && (body.contains("already exists") || body.contains("branch with that name"))) {
-                log.warn("Branch {} already exists (400), continuing with existing branch", branch);
+            int status = e.getStatusCode();
+            if (status == 422 && body.contains("already exists")) {
+                log.warn("Branch {} already exists (422 github)", branch.value());
+                return false;
+            } else if (status == 400 && (body.contains("already exists") || body.contains("branch with that name"))) {
+                log.warn("Branch {} already exists (400 bitbucket)", branch.value());
+                return false;
             } else {
-                log.error("createBranch failed for ticket {}: HTTP {} - Body: {}", ticketKey, e.getStatusCode(),
+                log.error("createBranch failed for ticket {}: HTTP {} - Body: {}", ticketKey, status,
                         e.getResponseBody());
                 throw new RuntimeException(String.format("Failed to create branch '%s' for ticket %s: HTTP %d - %s",
-                        branch, ticketKey, e.getStatusCode(), e.getResponseBody()), e);
+                        branch.value(), ticketKey, status, e.getResponseBody()), e);
             }
         }
     }
 
-    private void commitChanges(SourceControlClient client, String branch, List<AgentResult.GeneratedFile> files,
+    private void commitChanges(OperationContext context, SourceControlClient client, BranchName branch,
+            List<AgentResult.GeneratedFile> files,
             String message, String ticketKey) throws Exception {
         String sanitizedMessage = Objects.toString(message, "AI-generated code fixes");
         try {
-            client.commitFiles(branch, files, sanitizedMessage);
+            client.commitFiles(context, branch, files, sanitizedMessage);
         } catch (HttpClientException e) {
             log.error("commitFiles failed for ticket {}: HTTP {} - Body: {}", ticketKey, e.getStatusCode(),
                     e.getResponseBody());
             throw new RuntimeException(
                     String.format("Failed to commit %d files to branch '%s' for ticket %s: HTTP %d - %s",
-                            files.size(), branch, ticketKey, e.getStatusCode(), e.getResponseBody()),
+                            files.size(), branch.value(), ticketKey, e.getStatusCode(), e.getResponseBody()),
                     e);
-        }
-    }
-
-    private SourceControlClient.PullRequestResult createPullRequest(SourceControlClient client, String ticketKey,
-            String agentType, String branch, String base, String title, String description, int fileCount)
-            throws Exception {
-
-        String fullTitle = buildPrTitle(ticketKey, title);
-        String fullDescription = buildPrDescription(ticketKey, agentType, fileCount, description);
-
-        try {
-            return client.createPullRequest(fullTitle, fullDescription, branch, base);
-        } catch (HttpClientException | JsonPathExtractor.JsonPathException e) {
-            log.error("createPullRequest failed for ticket {}: {}", ticketKey, e.getMessage());
-            throw new RuntimeException(String.format("Failed to create PR for branch '%s' (ticket %s): %s",
-                    branch, ticketKey, e.getMessage()), e);
         }
     }
 
@@ -221,39 +244,51 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
 
     private String buildPrDescription(String ticketKey, String agentType, int fileCount, String description) {
         String baseDescription = Objects.toString(description, "Auto-generated code changes.");
+
+        String footer = String.format(
+                "---\n\n" +
+                        "🤖 This pull request was generated by AI (model: %s)\n" +
+                        "Ticket: %s | Generated: %s",
+                agentType, ticketKey, java.time.Instant.now().toString());
+
+        if (baseDescription.contains("🤖 This pull request was generated by AI")) {
+            return baseDescription; // Footer already present
+        }
+
         return String.format(
                 "## Auto-generated by AI-Driven System\n\n" +
                         "**Ticket:** %s\n" +
                         "**Generated by:** %s\n" +
                         "**Files changed:** %d\n\n" +
-                        "---\n\n%s",
-                ticketKey, agentType, fileCount, baseDescription);
+                        "%s\n\n%s",
+                ticketKey, agentType, fileCount, baseDescription, footer);
     }
 
-    private void updateTicketState(String ticketId, String ticketKey, String agentType,
-            SourceControlClient.PullRequestResult prResult, String branch) {
+    private void updateTicketState(String tenantId, String ticketId, String ticketKey, String agentType,
+            SourceControlProvider.PullRequestResult prResult, String branch) {
         ticketStateRepository.save(
-                TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.IN_REVIEW)
+                TicketState.forTicket(tenantId, ticketId, ticketKey, ProcessingStatus.IN_REVIEW)
                         .withAgentType(agentType)
                         .withPrDetails(prResult.url(), branch));
     }
 
-    private void updateJira(String ticketKey, String prUrl) {
+    private void updateJira(OperationContext context, String ticketKey, String prUrl) {
         try {
-            var transitions = jiraClient.getTransitions(ticketKey);
+            var transitions = jiraClient.getTransitions(context, ticketKey);
             transitions.stream()
                     .filter(t -> t.toStatus().equalsIgnoreCase("In Review")
                             || t.toStatus().equalsIgnoreCase("Code Review"))
                     .findFirst()
                     .ifPresent(t -> {
                         try {
-                            jiraClient.transitionTicket(ticketKey, t.id());
+                            jiraClient.transitionTicket(context, ticketKey, t.id());
                         } catch (Exception e) {
                             log.warn("Failed to transition ticket {} to In Review", ticketKey, e);
                         }
                     });
 
-            jiraClient.addComment(ticketKey, String.format("AI-Driven System created a Pull Request: %s", prUrl));
+            jiraClient.postComment(context, ticketKey,
+                    String.format("AI-Driven System created a Pull Request: %s", prUrl));
         } catch (Exception e) {
             log.warn("Failed to update Jira for ticket {}", ticketKey, e);
         }
@@ -281,7 +316,8 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
         return out;
     }
 
-    private Map<String, Object> handleError(String ticketId, String ticketKey, String agentType, Exception e) {
+    private Map<String, Object> handleError(String tenantId, String ticketId, String ticketKey, String agentType,
+            Exception e) {
         String message = e.getMessage();
         Throwable root = e;
         while (root.getCause() != null)
@@ -292,7 +328,7 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
         log.error("Failed to create PR for ticket: {} - {}", ticketKey, message, e);
 
         ticketStateRepository.save(
-                TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.FAILED)
+                TicketState.forTicket(tenantId, ticketId, ticketKey, ProcessingStatus.FAILED)
                         .withAgentType(agentType)
                         .withError(message));
 
@@ -302,8 +338,10 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
     private Map<String, Object> handleDryRun(String ticketId, String ticketKey, String agentType,
             Map<String, Object> input) {
         log.info("Dry-run mode: Skipping PR creation for ticket: {}", ticketKey);
+        OperationContext opContext = extractOperationContext(input);
         ticketStateRepository.save(
-                TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.TEST_COMPLETED).withAgentType(agentType));
+                TicketState.forTicket(opContext.tenantId(), ticketId, ticketKey, ProcessingStatus.TEST_COMPLETED)
+                        .withAgentType(agentType));
 
         try {
             int fileCount = parseFiles(input).size();
@@ -320,11 +358,59 @@ public class PrCreatorHandler implements RequestHandler<Map<String, Object>, Map
                     agentType.toUpperCase(), branchPrefix, ticketKey.toLowerCase(),
                     Objects.toString(input.get("commitMessage"), "N/A"),
                     Objects.toString(input.get("prTitle"), "N/A"), fileCount);
-            jiraClient.addComment(ticketKey, comment);
+            jiraClient.postComment(opContext, ticketKey, comment);
         } catch (Exception e) {
             log.warn("Failed to add dry-run comment to Jira for ticket {}", ticketKey, e);
         }
 
         return createBaseOutput(ticketId, ticketKey, false, true, "Dry-run mode");
+    }
+
+    private void persistConversationContext(OperationContext context, String ticketKey,
+            SourceControlProvider.PullRequestResult prResult, String agentType) {
+        try {
+            String summary = String.format(
+                    "I have automatically created a Pull Request for ticket %s.\n\n" +
+                            "**PR URL:** %s\n" +
+                            "**Branch:** %s\n" +
+                            "**Status:** Generated code and pushed changes.",
+                    ticketKey, prResult.url(), prResult.url()); // prResult doesn't have branch easily here but it's
+                                                                // in the URL usually
+
+            // Construct Claude-compatible content blocks
+            List<Map<String, String>> blocks = List.of(Map.of("type", "text", "text", summary));
+            String contentJson = objectMapper.writeValueAsString(blocks);
+
+            com.aidriven.core.agent.model.ConversationMessage msg = com.aidriven.core.agent.model.ConversationMessage
+                    .builder()
+                    .pk(com.aidriven.core.agent.model.ConversationMessage.createPk(context.tenantId(), ticketKey))
+                    .sk(com.aidriven.core.agent.model.ConversationMessage.createSk(java.time.Instant.now(), 0))
+                    .role("assistant")
+                    .author("ai-agent-" + agentType)
+                    .contentJson(contentJson)
+                    .timestamp(java.time.Instant.now())
+                    .ttl(com.aidriven.core.agent.model.ConversationMessage.defaultTtl())
+                    .build();
+
+            conversationRepository.save(msg);
+            log.info("Persisted PR creation context to conversation history for {}", ticketKey);
+        } catch (Exception e) {
+            log.warn("Failed to persist conversation context for {}: {}", ticketKey, e.getMessage());
+        }
+    }
+
+    private OperationContext extractOperationContext(Map<String, Object> input) {
+        if (!input.containsKey("context") || !(input.get("context") instanceof Map)) {
+            return OperationContext.builder().tenantId("default").build();
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> context = (Map<String, Object>) input.get("context");
+        String tenantId = (String) context.getOrDefault("tenantId", "default");
+        String userId = (String) context.getOrDefault("userId", "system");
+
+        return OperationContext.builder()
+                .tenantId(tenantId)
+                .userId(userId)
+                .build();
     }
 }

@@ -70,6 +70,20 @@ public class SecretsServiceImpl implements SecretsService {
     }
 
     /**
+     * Retrieves a secret and parses it directly into the specified class.
+     */
+    @Override
+    public <T> T getSecretAs(String secretArn, Class<T> clazz) {
+        try {
+            String secretString = getSecret(secretArn);
+            return objectMapper.readValue(secretString, clazz);
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse secret to {} for {}: {}", clazz.getSimpleName(), secretArn, e.getMessage());
+            throw new RuntimeException("Failed to parse secret JSON to POJO", e);
+        }
+    }
+
+    /**
      * Gets a specific field from a JSON secret.
      */
     public String getSecretField(String secretArn, String fieldName) {

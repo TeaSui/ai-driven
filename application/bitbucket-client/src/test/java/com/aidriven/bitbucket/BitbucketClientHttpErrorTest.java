@@ -1,6 +1,8 @@
 package com.aidriven.bitbucket;
 
 import com.aidriven.core.exception.*;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.model.BranchName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -29,16 +31,18 @@ class BitbucketClientHttpErrorTest {
     private HttpResponse<String> mockResponse;
 
     private BitbucketClient bitbucketClient;
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         bitbucketClient = new BitbucketClient(
+                "workspace",
+                "repo",
                 "Basic auth",
                 mockHttpClient,
-                new com.fasterxml.jackson.databind.ObjectMapper(),
-                "workspace",
-                "repo");
+                new com.fasterxml.jackson.databind.ObjectMapper());
+        operationContext = OperationContext.builder().tenantId("test-tenant").userId("test-user").build();
     }
 
     @Test
@@ -52,7 +56,7 @@ class BitbucketClientHttpErrorTest {
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
             // This will call getBranchCommitHash internally which will fail
-            bitbucketClient.createBranch("feature", "main");
+            bitbucketClient.createBranch(operationContext, BranchName.of("feature"), BranchName.of("main"));
         });
 
         assertEquals(401, exception.getStatusCode());
@@ -68,7 +72,7 @@ class BitbucketClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            bitbucketClient.getDefaultBranch();
+            bitbucketClient.getDefaultBranch(operationContext);
         });
 
         assertEquals(403, exception.getStatusCode());
@@ -84,7 +88,8 @@ class BitbucketClientHttpErrorTest {
 
         // When/Then: Verify NotFoundException is thrown
         NotFoundException exception = assertThrows(NotFoundException.class, () -> {
-            bitbucketClient.createBranch("feature", "nonexistent-branch");
+            bitbucketClient.createBranch(operationContext, BranchName.of("feature"),
+                    BranchName.of("nonexistent-branch"));
         });
 
         assertEquals(404, exception.getStatusCode());
@@ -109,7 +114,7 @@ class BitbucketClientHttpErrorTest {
 
         // When/Then: Verify ConflictException (extends HttpClientException) is thrown
         ConflictException exception = assertThrows(ConflictException.class, () -> {
-            bitbucketClient.createBranch("existing-branch", "main");
+            bitbucketClient.createBranch(operationContext, BranchName.of("existing-branch"), BranchName.of("main"));
         });
 
         assertEquals(409, exception.getStatusCode());
@@ -129,7 +134,7 @@ class BitbucketClientHttpErrorTest {
 
         // When/Then: Verify RateLimitException is thrown
         RateLimitException exception = assertThrows(RateLimitException.class, () -> {
-            bitbucketClient.getDefaultBranch();
+            bitbucketClient.getDefaultBranch(operationContext);
         });
 
         assertEquals(429, exception.getStatusCode());
@@ -146,7 +151,7 @@ class BitbucketClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            bitbucketClient.getDefaultBranch();
+            bitbucketClient.getDefaultBranch(operationContext);
         });
 
         assertEquals(503, exception.getStatusCode());

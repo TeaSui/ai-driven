@@ -10,7 +10,8 @@ import java.util.stream.Stream;
 
 /**
  * Shared utility for filtering source files from repository archives.
- * Used by both BitbucketFetchHandler (linear workflow) and ContextService (legacy workflow).
+ * Used by both BitbucketFetchHandler (linear workflow) and ContextService
+ * (legacy workflow).
  */
 public final class SourceFileFilter {
 
@@ -61,8 +62,23 @@ public final class SourceFileFilter {
     public static boolean isIncluded(Path file) {
         String fullPath = file.toString().replace('\\', '/');
 
+        String checkPath = fullPath.startsWith("/") ? fullPath : "/" + fullPath;
+        if (Files.isDirectory(file)) {
+            checkPath = checkPath.endsWith("/") ? checkPath : checkPath + "/";
+        } else {
+            // For files, we want to check if any parent directory is excluded
+            Path parent = file.getFileName() != null ? file.getParent() : null;
+            if (parent != null) {
+                String parentPath = parent.toString().replace('\\', '/');
+                checkPath = parentPath.startsWith("/") ? parentPath : "/" + parentPath;
+                checkPath = checkPath.endsWith("/") ? checkPath : checkPath + "/";
+            } else {
+                checkPath = "/";
+            }
+        }
+
         for (String excluded : EXCLUDED_DIRS) {
-            if (fullPath.contains("/" + excluded + "/")) {
+            if (checkPath.contains("/" + excluded + "/")) {
                 return false;
             }
         }

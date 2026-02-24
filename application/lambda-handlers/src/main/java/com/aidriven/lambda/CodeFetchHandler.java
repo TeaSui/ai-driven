@@ -19,6 +19,9 @@ import com.aidriven.core.util.SourceFileFilter;
 
 import com.aidriven.tool.context.ContextService;
 import com.aidriven.lambda.factory.ServiceFactory;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.model.TicketKey;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -72,55 +75,57 @@ public class CodeFetchHandler implements RequestHandler<Map<String, Object>, Map
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     @Logging(logEvent = true)
     @Tracing
     public Map<String, Object> handleRequest(Map<String, Object> input, Context context) {
         String ticketId = (String) input.get("ticketId");
-        String ticketKey = (String) input.get("ticketKey");
+        String ticketKeyStr = (String) input.get("ticketKey");
         String platform = (String) input.get("platform");
         String repoOwner = (String) input.get("repoOwner");
         String repoSlug = (String) input.get("repoSlug");
 
-        LoggingUtils.appendKey("ticketKey", ticketKey);
+        LoggingUtils.appendKey("ticketKey", ticketKeyStr);
         LoggingUtils.appendKey("correlationId", context.getAwsRequestId());
 
         log.info("CodeFetchHandler processing ticket: {}, platform: {}, repo: {}/{}",
-                ticketKey, platform, repoOwner, repoSlug);
+                ticketKeyStr, platform, repoOwner, repoSlug);
 
         Path repoDir = null;
+        OperationContext contextObj = extractContext(input);
         try {
-            TicketInfo ticket = parseTicketInfo(ticketId, ticketKey, input);
-            ticketStateRepository.save(TicketState.forTicket(ticketId, ticketKey, ProcessingStatus.ANALYZING));
+            TicketKey ticketKey = ticketKeyStr != null ? TicketKey.of(ticketKeyStr) : null;
+            TicketInfo ticket = parseTicketInfo(ticketId, ticketKeyStr, input);
+            ticketStateRepository.save(TicketState.forTicket(contextObj.tenantId(), ticketId, ticketKeyStr,
+                    ProcessingStatus.ANALYZING));
 
             log.info("CodeFetchHandler for ticket {}: platform={}, repo={}/{}",
                     ticketKey, platform, repoOwner, repoSlug);
             SourceControlClient client = resolveSourceControlClient(platform, repoOwner, repoSlug);
             ContextService dynamicContextService = serviceFactory.createContextService(client);
 
-            String defaultBranch = client.getDefaultBranch();
-            log.info("Using default branch: {}, context mode: {}", defaultBranch, config.contextMode());
+            BranchName defaultBranch = client.getDefaultBranch(contextObj);
+            log.info("Using default branch: {}, context mode: {}", defaultBranch.name(), config.contextMode());
 
             // Strategy 1: Attempt strategy-based fetch via ContextService
-            String contextDoc = dynamicContextService.buildContext(ticket, defaultBranch);
+            String contextDoc = dynamicContextService.buildContext(contextObj, ticket, defaultBranch);
             if (contextDoc != null) {
-                return buildSuccessOutput(input, ticketKey, contextDoc, config.contextMode(), -1, -1);
+                return buildSuccessOutput(input, ticketKeyStr, contextDoc, config.contextMode(), -1, -1);
             }
 
             // Strategy 2: Fallback to full repo download
             log.info("ContextService returned null, attempting legacy full repo download");
-            repoDir = client.downloadArchive(defaultBranch, Path.of("/tmp"));
+            repoDir = client.downloadArchive(contextObj, defaultBranch, Path.of("/tmp"));
 
             List<String> fileTree = buildFileTree(repoDir);
             List<FileEntry> sourceFiles = collectSourceFiles(repoDir);
             String fullRepoContext = buildFullRepoContextDoc(ticket, fileTree, sourceFiles);
 
-            return buildSuccessOutput(input, ticketKey, fullRepoContext, "FULL_REPO", sourceFiles.size(),
+            return buildSuccessOutput(input, ticketKeyStr, fullRepoContext, "FULL_REPO", sourceFiles.size(),
                     fileTree.size());
 
         } catch (Exception e) {
-            log.error("CodeFetchHandler failed for ticket: {}", ticketKey, e);
-            return buildErrorOutput(input, ticketId, ticketKey, e);
+            log.error("CodeFetchHandler failed for ticket: {}", ticketKeyStr, e);
+            return buildErrorOutput(input, ticketId, ticketKeyStr, e);
         } finally {
             cleanup(repoDir);
             // Context cleared by Powertools
@@ -203,7 +208,7 @@ public class CodeFetchHandler implements RequestHandler<Map<String, Object>, Map
         try (Stream<Path> stream = Files.walk(repoDir)) {
             List<Path> allFiles = stream
                     .filter(Files::isRegularFile)
-                    .filter(SourceFileFilter::isIncluded)
+                    .filter(p -> SourceFileFilter.isIncluded(repoDir.relativize(p)))
                     .sorted()
                     .toList();
 
@@ -302,5 +307,24 @@ public class CodeFetchHandler implements RequestHandler<Map<String, Object>, Map
         } catch (IOException e) {
             log.warn("Failed to delete directory {}: {}", dir, e.getMessage());
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private OperationContext extractContext(Map<String, Object> input) {
+        if (!input.containsKey("context") || !(input.get("context") instanceof Map)) {
+            return OperationContext.builder().tenantId("default").build();
+        }
+        Map<String, Object> context = (Map<String, Object>) input.get("context");
+        String tenantId = (String) context.getOrDefault("tenantId", "default");
+        String userId = (String) context.getOrDefault("userId", "system");
+        String ticketKey = (String) input.get("ticketKey");
+        String correlationId = (String) context.getOrDefault("correlationId", java.util.UUID.randomUUID().toString());
+
+        return OperationContext.builder()
+                .tenantId(tenantId)
+                .userId(userId)
+                .ticketKey(TicketKey.of(ticketKey))
+                .correlationId(correlationId)
+                .build();
     }
 }

@@ -16,4 +16,9 @@ public interface SecretsService {
      * Retrieves a secret and parses it as a Map of key-value pairs.
      */
     Map<String, Object> getSecretJson(String secretArn);
+
+    /**
+     * Retrieves a secret and parses it directly into the specified class.
+     */
+    <T> T getSecretAs(String secretArn, Class<T> clazz);
 }

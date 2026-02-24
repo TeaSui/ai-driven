@@ -9,10 +9,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class TicketStateTest {
 
     @Test
-    void should_create_pk_with_ticket_prefix() {
-        String pk = TicketState.createPk("12345");
-
-        assertEquals("TICKET#12345", pk);
+    void createPk_formatsCorrectly() {
+        assertEquals("TICKET#acme#123", TicketState.createPk("acme", "123"));
     }
 
     @Test

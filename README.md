@@ -1,79 +1,59 @@
 # AI-Driven Development System
 
-> **Current Status:**
-> **Completed:** Priority 1 (Reliability), Priority 2 (AI Quality)
-> **In Progress:** Priority 3 (Platform Expansion) — GitHub support, multi-repo
-> **Next:** Priority 5 (Conversational Agent Mode)
-> **Roadmap:** [docs/next-phase-roadmap.md](docs/next-phase-roadmap.md)
+> **Engineering Strategy & Vision:** [docs/STRATEGY.md](docs/STRATEGY.md)
 
 An intelligent automation platform that transforms Jira tickets into production-ready code through AI-powered agents. The system operates in two modes:
 
-**Pipeline Mode** — Automated end-to-end: a Jira label triggers code generation, PR creation, and merge wait. Deterministic, single-shot workflow via AWS Step Functions.
+**Pipeline Mode** — Automated end-to-end: adding `ai-generate` label to a Jira ticket triggers code generation, PR creation, and merge wait. Deterministic workflow via AWS Step Functions. Supports GitHub and Bitbucket. Use `repo:owner/slug` label to target a specific repository.
 
-**Agent Mode** (planned) — Interactive: developers chat with AI via Jira comments. The AI dynamically selects tools (source control, monitoring, messaging) to investigate issues, write fixes, open PRs, and coordinate with the team. Multi-turn, multi-actor conversations. See [impl-15](docs/impl/impl-15-agent-mode.md).
+**Agent Mode** — Interactive: add `ai-agent` label to a Jira ticket, then developers chat with the AI using `@ai` in comments. Works in both Jira tickets and GitHub PR comments. The AI dynamically selects tools, has full conversation history, and understands context from any prior `ai-generate` run on the same ticket.
 
 ## Architecture
 
-### Pipeline Mode (Current)
+```mermaid
+graph TD
+    A[Jira<br>(Tracker)] -->|webhooks| Core[AI-Driven Development System]
+    B[Bitbucket<br>(Source)] -->|REST API| Core
+    C[GitHub<br>(Source)] -->|REST API| Core
+    D[Slack<br>(Comms)] -->|REST API| Core
 
-```
-Developer adds label "ai-generate" to Jira ticket
-        │
-        ▼
-Jira Webhook → API Gateway → JiraWebhookHandler (Lambda)
-        │
-        ▼
-    Step Functions Linear Workflow:
-        │
-        ├── 1. FetchTicket    — Get ticket details from Jira
-        ├── 2. FetchCode      — Download repo → store context in S3
-        ├── 3. ClaudeInvoke   — Read S3 context → call Claude API → parse response
-        ├── 4. CreatePR       — Create branch, commit files, open PR
-        └── 5. WaitForMerge   — Task-token callback (up to 7 days)
-                                    │
-                                    ▼
-                          Developer reviews & merges PR
-                                    │
-                                    ▼
-                  Source Control Webhook → MergeWaitHandler → Workflow Complete
-```
+    subgraph Core
+        direction TB
+        P[Pipeline Mode<br>Step Functions] --> SF[SQS FIFO<br>Orchestrator]
+        AM[Agent Mode] --> SF
+        SI[Shared Infrastructure<br>DynamoDB • S3 • Secrets Mgr<br>CloudWatch • X-Ray] --> SF
 
-### Agent Mode (Planned — [impl-15](docs/impl/impl-15-agent-mode.md))
+        subgraph Domain Clients
+            SCC[SourceControlClient]
+            ITC[IssueTrackerClient]
+            CC[ClaudeClient]
+            MC[MonitoringClient]
+            MsgC[MessagingClient]
+            DC[DataClient]
+        end
+    end
 
-```
-Developer comments "@ai investigate the root cause" on Jira ticket
-        │
-        ▼
-Jira Comment Webhook → AgentWebhookHandler (Lambda)
-        │
-        ▼
-    AgentOrchestrator:
-        │
-        ├── Load conversation history (DynamoDB)
-        ├── Classify comment intent
-        ├── Call Claude with ToolProvider definitions
-        ├── Execute tool calls via ToolRegistry → ToolProviders
-        └── Post response as Jira comment
-                │
-                ▼
-    Developer replies → next turn (loop)
+    Core --> Claude[Claude AI<br>(Anthropic API)]
 ```
 
 ### Technology Stack
 
-| Component         | Technology                     |
-|-------------------|--------------------------------|
-| Issue Tracking    | Jira Cloud (label + comment triggers) |
-| Source Control    | Bitbucket Cloud, GitHub (REST APIs) |
-| AI Engine         | Claude AI (direct API, `claude-opus-4-6`) |
-| Orchestration     | AWS Step Functions (pipeline), Lambda (agent) |
-| Code Context      | AWS S3 (14-day lifecycle)      |
-| State Management  | AWS DynamoDB (single-table)    |
-| Compute           | AWS Lambda (Java 21)           |
-| API Gateway       | AWS API Gateway                |
-| Secrets           | AWS Secrets Manager            |
-| Infrastructure    | AWS CDK (TypeScript)           |
-| Observability     | CloudWatch Dashboards + AWS X-Ray |
+Built on AWS-native services for scalability, security, and observability, with Claude AI as the core intelligence engine.
+
+| Component         | Technology                                                                 |
+|-------------------|----------------------------------------------------------------------------|
+| Issue Tracking    | Jira Cloud (label + comment triggers)                                      |
+| Source Control    | Bitbucket Cloud, GitHub (REST APIs)                                        |
+| AI Engine         | Claude AI — claude-sonnet-4-6 (default), claude-opus-4-6 (complex/high-precision tasks) |
+| Orchestration     | AWS Step Functions (pipeline), Lambda (agent)                              |
+| Code Context      | AWS S3 (KMS Encrypted, 30-day lifecycle)                                   |
+| State Management  | AWS DynamoDB (single-table)                                                |
+| Long-Term Memory  | Amazon OpenSearch Serverless (RAG)                                         |
+| Compute           | AWS Lambda (Java 21) & ECS Fargate (long-running agents)                   |
+| API Gateway       | AWS API Gateway                                                            |
+| Secrets           | AWS Secrets Manager                                                        |
+| Infrastructure    | AWS CDK (TypeScript)                                                       |
+| Observability     | CloudWatch Dashboards + AWS X-Ray + custom cost/token/usage metrics       |
 
 ## Project Structure
 
@@ -81,8 +61,8 @@ Jira Comment Webhook → AgentWebhookHandler (Lambda)
 ai-driven/
   application/                    # Java 21 Gradle multi-module
     core/                         # Shared models, interfaces, config, agent framework
-      agent/                      # AgentOrchestrator, CommentIntentClassifier (planned)
-      agent/tool/                 # ToolProvider, ToolRegistry, *ToolProvider impls (planned)
+      agent/                      # AgentOrchestrator, CommentIntentClassifier
+      agent/tool/                 # ToolProvider, ToolRegistry, *ToolProvider impls
       source/                     # SourceControlClient interface, PlatformResolver
       tracker/                    # IssueTrackerClient interface
       context/                    # ContextStrategy interface
@@ -90,13 +70,15 @@ ai-driven/
     bitbucket-client/             # SourceControlClient → Bitbucket REST API
     github-client/                # SourceControlClient → GitHub REST API
     claude-client/                # Claude AI client (auto-continuation + tool use)
+    mcp-bridge/                   # ToolProvider → MCP client integration
+    mcp-server-github/            # Headless MCP GitHub tools (Push, PR, Search)
+    mcp-server-jira/              # Headless MCP Jira tools (Transitions, Labels)
     lambda-handlers/              # Lambda entry points + ServiceFactory + fat JAR
   infrastructure/                 # AWS CDK (TypeScript)
     lib/ai-driven-stack.ts        # Full stack definition
   docs/                           # Documentation + implementation specs
-    impl/                         # Numbered implementation documents (impl-01 to impl-15)
-    architecture.md               # System architecture overview
-    next-phase-roadmap.md         # Progress tracker with checkboxes
+    impl/                         # Numbered implementation documents (impl-01 to impl-20)
+    STRATEGY.md                   # System architecture, vision, and roadmap
   tests/                          # E2E / integration tests (TypeScript)
 ```
 
@@ -150,37 +132,85 @@ All Lambda handlers share these configurable values (with sensible defaults):
 | `MAX_TOTAL_CONTEXT_CHARS` | `3000000` | Total context cap (~3MB) |
 | `MAX_FILE_SIZE_BYTES` | `500000` | Skip files > 500KB |
 | `MAX_CONTEXT_FOR_CLAUDE` | `700000` | Max chars sent to Claude |
-| `CLAUDE_MODEL` | `claude-opus-4-6` | Claude model identifier |
+| `CLAUDE_MODEL` | `claude-sonnet-4-6` | Claude model identifier |
+| `CLAUDE_MODEL_FALLBACK` | `claude-opus-4-6` | Optional fallback model for very hard tasks |
 | `CLAUDE_MAX_TOKENS` | `32768` | Max output tokens per request |
 | `CLAUDE_TEMPERATURE` | `0.2` | Model temperature |
 | `MERGE_WAIT_TIMEOUT_DAYS` | `7` | PR merge wait timeout |
 | `DEFAULT_PLATFORM` | `BITBUCKET` | Default source control platform |
-| `CONTEXT_MODE` | `FULL_REPO` | Context strategy (`FULL_REPO` or `INCREMENTAL`) |
+| `CONTEXT_MODE` | `INCREMENTAL` | Context strategy (`FULL_REPO` or `INCREMENTAL`) |
 
 ## Jira Labels
 
-| Label         | Effect                                    |
-|---------------|-------------------------------------------|
-| `ai-generate` | Triggers the AI code generation pipeline  |
-| `ai-agent`    | Enables agent mode (comment-based interaction) |
-| `ai-test`     | Enables dry-run mode (skips PR creation)  |
-| `platform:github` | Route to GitHub (default: Bitbucket) |
-| `platform:bitbucket` | Explicit Bitbucket routing |
-| `repo:owner/name` | Override target repository |
-| `tool:monitoring` | Enable monitoring tools in agent mode |
-| `tool:messaging` | Enable messaging tools in agent mode |
-| `tool:data` | Enable data tools in agent mode |
-| `full-repo` | Force full repository context |
-| `smart-context` | Force incremental/smart context |
+| Label               | Effect |
+|---------------------|--------|
+| `ai-generate`       | Triggers the AI code generation pipeline (creates a PR) |
+| `ai-agent`          | Opts the ticket into agent mode — the AI will respond to `@ai` comments |
+| `ai-test`           | Dry-run: generates code but skips PR creation, posts a summary comment instead |
+| `platform:github`   | Route to GitHub (default: Bitbucket) |
+| `platform:bitbucket`| Explicit Bitbucket routing |
+| `repo:owner/name`   | Override target repository (e.g. `repo:TeaSui/ai-driven`) |
+| `tool:monitoring`   | Enable monitoring tools in agent mode |
+| `tool:messaging`    | Enable messaging tools in agent mode |
+| `tool:data`         | Enable data tools in agent mode |
+| `full-repo`         | Override: Force full repository context (expensive) |
+| `smart-context`     | Default: Incremental/smart context. **Recommended** for most repositories (cost-effective & higher quality) |
+
+> **Note:** Combining `ai-generate` and `ai-agent` on the same ticket gives the agent full context of what code was generated and which PR was created. The agent can then answer questions about the implementation, request changes, or open follow-up PRs.
+
+## Webhook Configuration
+
+Two Jira webhooks and one GitHub webhook are required:
+
+| Webhook | URL Path | Jira Events | Purpose |
+|---------|----------|-------------|---------|
+| Jira Pipeline | `/jira-webhook` | `issue_updated` | Triggers pipeline on label change |
+| Jira Agent | `/agent-webhook` | `comment_created` | Routes `@ai` comments to agent |
+| GitHub Agent | `/agent-webhook` | `issue_comment`, `pull_request_review_comment` | Routes `@ai` in PR comments to agent |
+
+The GitHub webhook must be configured with a secret stored in Secrets Manager at the ARN referenced by `GITHUB_AGENT_WEBHOOK_SECRET_ARN`. HMAC-SHA256 verification is enforced automatically. The Jira webhook requires a pre-shared token configured in the URL and stored in Secrets Manager at `JIRA_WEBHOOK_SECRET_ARN` for constant-time cryptographic validation.
+
+## Cost Awareness
+
+Using Claude models (especially Opus) with large contexts can become **expensive** at scale.
+
+- Prefer `claude-sonnet-4-6` (default) for most tasks — performance near Opus but much cheaper.
+- Use `INCREMENTAL` / `smart-context` mode by default.
+- Monitor token usage & $/ticket via CloudWatch custom metrics.
+- Consider adding `COST_AWARE_MODE` env var later to auto-downgrade model on high-token estimates.
+
+## Recent Implementations (Feb 2026)
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| SQS FIFO Deduplication | ✅ Done | Webhook events deduplicated at infrastructure level via SQS FIFO |
+| Context Sharing | ✅ Done | Agent mode receives context from prior `ai-generate` runs (PR URL, branch) |
+| Jira Reply Format | ✅ Done | AI responses quote parent comment and @mention original author |
+| AST-based Outline | ✅ Done | `view_file_outline` tool extracts class/method signatures (Java via javaparser) |
+| Grep Search | ✅ Done | `search_grep` tool for pattern matching across files |
+| CloudWatch Observability | ✅ Done | `query_logs` and `query_metrics` tools for live telemetry |
+| EMF Metrics | ✅ Done | Agent publishes turns, tokens, latency, errors to CloudWatch |
+| Multi-Agent Design | 🎯 Spike | Architecture designed; implementation deferred until metrics show need |
+
+## Known Limitations & Near-term Roadmap
+
+| Area                  | Current Limitation                               | Planned Improvement                                  |
+|-----------------------|--------------------------------------------------|------------------------------------------------------|
+| Agent runtime         | Lambda 15-min timeout for complex sessions       | ECS Fargate support                                  |
+| Context scale         | Full-repo mode expensive & low quality           | Incremental/RAG context is now default               |
+| Cost control          | Manual model & context selection                 | Auto model/context fallback + per-ticket cost estimation & alerts    |
+| Memory                | Per-ticket only                                  | Cross-ticket memory via OpenSearch Serverless        |
+| Agent architecture    | Single long chain                                | Multi-agent swarm (design complete, coding deferred) |
 
 ## Documentation
 
-- [Architecture Overview](docs/architecture.md)
-- [Detailed Workflow Design](docs/README.md)
-- [Next Phase Roadmap](docs/next-phase-roadmap.md)
-- [Implementation Documents](docs/impl/) (impl-01 to impl-15)
+- **[Engineering Strategy & Vision](docs/STRATEGY.md)** — Core principles, architecture, 2026 roadmap, and security finding.
+- **[Architecture Decision Records](docs/adr/README.md)** — Formal log of all accepted system design patterns (ADR-001 through ADR-011).
+- **Implementation Documents** (docs/impl/):
+  - [impl-18: AST-based IDE Context](docs/impl/impl-18-ide-context-ast.md) — File outline & grep tools
+  - [impl-19: CloudWatch Observability](docs/impl/impl-19-deep-integrations.md) — Logs & metrics tools
+  - [impl-20: Multi-Agent Swarm](docs/impl/impl-20-multi-agent-swarm.md) — Future architecture design
 - [Test Cases](tests/test-cases.md)
-- [Test Coverage Analysis](tests/test-coverage-gap-analysis.md)
 - [Application README](application/README.md)
 - [Infrastructure README](infrastructure/README.md)
 

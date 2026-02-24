@@ -4,6 +4,9 @@ import com.aidriven.core.config.FetchConfig;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.ContextStorageService;
 import com.aidriven.core.source.SourceControlClient;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.core.model.TicketInfo;
 import com.aidriven.tool.context.ContextService;
 import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
@@ -85,8 +88,9 @@ class CodeFetchHandlerTest {
     void should_pass_through_platform_in_output() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -101,8 +105,9 @@ class CodeFetchHandlerTest {
     void should_pass_through_bitbucket_platform() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -117,8 +122,9 @@ class CodeFetchHandlerTest {
     void should_not_include_platform_when_absent_in_input() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -135,8 +141,9 @@ class CodeFetchHandlerTest {
     void should_pass_through_repo_info_in_output() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -153,8 +160,9 @@ class CodeFetchHandlerTest {
     void should_not_include_repo_info_when_absent() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -172,8 +180,9 @@ class CodeFetchHandlerTest {
     void should_fetch_code_and_store_in_s3() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("context/PROJ-1/123.txt");
 
         Map<String, Object> input = buildValidInput();
@@ -196,8 +205,9 @@ class CodeFetchHandlerTest {
                 config,
                 ticketStateRepository, contextStorageService, serviceFactory, sourceControlClient);
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(contextService.buildContext(any(), anyString())).thenReturn("content");
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(contextService.buildContext(any(OperationContext.class), any(TicketInfo.class), any(BranchName.class)))
+                .thenReturn("content");
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("incremental-key");
 
         Map<String, Object> input = buildValidInput();
@@ -210,7 +220,7 @@ class CodeFetchHandlerTest {
         assertEquals("claude-haiku-4-5", result.get("resolvedModel"));
 
         // Verify full repo download was NOT called
-        verify(sourceControlClient, never()).downloadArchive(anyString(), any());
+        verify(sourceControlClient, never()).downloadArchive(any(), any(BranchName.class), any());
     }
 
     @Test
@@ -223,9 +233,12 @@ class CodeFetchHandlerTest {
 
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(contextService.buildContext(any(), anyString())).thenReturn(null);
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any(OperationContext.class))).thenReturn(BranchName.of("main"));
+        when(contextService.buildContext(any(OperationContext.class), any(TicketInfo.class), eq(BranchName.of("main"))))
+                .thenReturn(null);
+        when(sourceControlClient.downloadArchive(any(OperationContext.class), eq(BranchName.of("main")),
+                any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("full-repo-key");
 
         Map<String, Object> input = buildValidInput();
@@ -236,15 +249,16 @@ class CodeFetchHandlerTest {
         assertEquals("full-repo-key", result.get("codeContextS3Key"));
 
         // Verify full repo download WAS called
-        verify(sourceControlClient).downloadArchive(eq("main"), any());
+        verify(sourceControlClient).downloadArchive(any(), eq(BranchName.of("main")), any());
     }
 
     @Test
     void should_pass_through_resolved_model_in_full_repo_mode() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(eq("main"), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -257,7 +271,7 @@ class CodeFetchHandlerTest {
 
     @Test
     void should_handle_source_control_error_gracefully() throws Exception {
-        when(sourceControlClient.getDefaultBranch()).thenThrow(new RuntimeException("Connection refused"));
+        when(sourceControlClient.getDefaultBranch(any())).thenThrow(new RuntimeException("Connection refused"));
 
         Map<String, Object> input = buildValidInput();
 
@@ -273,8 +287,9 @@ class CodeFetchHandlerTest {
     void should_pass_through_input_fields() throws Exception {
         Path repoDir = createMockRepo();
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(anyString(), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -308,8 +323,9 @@ class CodeFetchHandlerTest {
         Files.createDirectories(srcDir);
         Files.writeString(srcDir.resolve("App.java"), "public class App {}");
 
-        when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-        when(sourceControlClient.downloadArchive(anyString(), any(Path.class))).thenReturn(repoDir);
+        when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
+        when(sourceControlClient.downloadArchive(any(), eq(BranchName.of("main")), any(Path.class)))
+                .thenReturn(repoDir);
         when(contextStorageService.storeContext(anyString(), anyString())).thenReturn("key");
 
         Map<String, Object> input = buildValidInput();
@@ -324,7 +340,7 @@ class CodeFetchHandlerTest {
 
     @Test
     void should_pass_through_platform_and_repo_on_error() throws Exception {
-        when(sourceControlClient.getDefaultBranch()).thenThrow(new RuntimeException("Connection refused"));
+        when(sourceControlClient.getDefaultBranch(any())).thenThrow(new RuntimeException("Connection refused"));
 
         Map<String, Object> input = buildValidInput();
         input.put("platform", "GITHUB");
@@ -362,6 +378,8 @@ class CodeFetchHandlerTest {
 
     private Map<String, Object> buildValidInput() {
         Map<String, Object> input = new HashMap<>();
+        input.put("tenantId", "tenant-1");
+        input.put("projectKey", "PROJ");
         input.put("ticketId", "12345");
         input.put("ticketKey", "PROJ-1");
         input.put("summary", "Test summary");

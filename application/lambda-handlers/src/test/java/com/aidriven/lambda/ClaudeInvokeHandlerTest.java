@@ -1,10 +1,12 @@
 package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.cost.BudgetTracker;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.ContextStorageService;
 import com.aidriven.core.repository.GenerationMetricsRepository;
 import com.aidriven.core.util.JsonRepairService;
+import com.aidriven.core.audit.AuditService;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +43,12 @@ class ClaudeInvokeHandlerTest {
     @Mock
     private JsonRepairService jsonRepairService;
 
+    @Mock
+    private AuditService auditService;
+
+    @Mock
+    private BudgetTracker budgetTracker;
+
     private ClaudeInvokeHandler handler;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -49,7 +57,8 @@ class ClaudeInvokeHandlerTest {
         MockitoAnnotations.openMocks(this);
         handler = new ClaudeInvokeHandler(
                 objectMapper, ticketStateRepository, metricsRepository,
-                contextStorageService, claudeClient, jsonRepairService, 700_000, "v1");
+                contextStorageService, auditService, claudeClient, jsonRepairService,
+                700_000, "v1", true, 100.0, 200_000, budgetTracker);
     }
 
     @Test
@@ -77,7 +86,7 @@ class ClaudeInvokeHandlerTest {
         assertNotNull(result.get("files"));
 
         verify(claudeClient).chat(anyString(), anyString());
-        verify(ticketStateRepository, times(1)).save(any());
+        verify(ticketStateRepository, atLeastOnce()).save(any());
     }
 
     @Test

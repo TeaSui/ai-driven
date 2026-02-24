@@ -1,8 +1,8 @@
 package com.aidriven.github;
 
-import com.aidriven.core.model.AgentResult;
-import com.aidriven.core.service.SecretsService;
-import com.aidriven.core.source.SourceControlClient;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.provider.SourceControlProvider;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,8 +14,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
-import java.util.Map;
 
+import com.aidriven.core.service.SecretsService;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -30,12 +30,13 @@ class GitHubClientTest {
     private HttpResponse<String> mockResponse;
 
     private GitHubClient client;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        client = new GitHubClient("Bearer test-token", mockHttpClient, objectMapper, "test-owner", "test-repo");
+        client = new GitHubClient("test-owner", "test-repo", "Bearer test-token", mockHttpClient, new ObjectMapper());
+        operationContext = OperationContext.builder().tenantId("test-tenant").userId("test-user").build();
     }
 
     @Nested
@@ -47,8 +48,8 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            String result = client.getDefaultBranch();
-            assertEquals("main", result);
+            BranchName result = client.getDefaultBranch(operationContext);
+            assertEquals("main", result.name());
         }
     }
 
@@ -67,13 +68,13 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            SourceControlClient.PullRequestResult result = client.createPullRequest(
-                    "Test PR", "Description", "feature-branch", "main");
+            SourceControlProvider.PullRequestResult result = client.createPullRequest(
+                    operationContext, "title", "description", BranchName.of("source"), BranchName.of("dest"));
 
             assertNotNull(result);
             assertEquals("42", result.id());
             assertEquals("https://github.com/test-owner/test-repo/pull/42", result.url());
-            assertEquals("feature-branch", result.branchName());
+            assertEquals("source", result.branch().name());
         }
 
         @Test
@@ -89,8 +90,8 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            SourceControlClient.PullRequestResult result = client.createPullRequest(
-                    "title", null, "source", "dest");
+            SourceControlProvider.PullRequestResult result = client.createPullRequest(
+                    operationContext, "title", null, BranchName.of("source"), BranchName.of("dest"));
 
             assertNotNull(result);
             assertEquals("1", result.id());
@@ -116,7 +117,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            List<String> result = client.getFileTree("main", null);
+            List<String> result = client.getFileTree(operationContext, BranchName.of("main"), null);
 
             assertEquals(2, result.size());
             assertTrue(result.contains("src/Main.java"));
@@ -139,7 +140,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            List<String> result = client.getFileTree("main", "src");
+            List<String> result = client.getFileTree(operationContext, BranchName.of("main"), "src");
 
             assertEquals(1, result.size());
             assertEquals("src/Main.java", result.get(0));
@@ -152,7 +153,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            List<String> result = client.getFileTree("main", null);
+            List<String> result = client.getFileTree(operationContext, BranchName.of("main"), null);
 
             assertTrue(result.isEmpty());
         }
@@ -176,7 +177,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            List<String> result = client.searchFiles("UserService");
+            List<String> result = client.searchFiles(operationContext, "UserService");
 
             assertEquals(2, result.size());
             assertTrue(result.contains("src/UserService.java"));
@@ -189,7 +190,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            List<String> result = client.searchFiles("query");
+            List<String> result = client.searchFiles(operationContext, "query");
 
             assertTrue(result.isEmpty());
         }
@@ -210,7 +211,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            String result = client.getFileContent("main", "src/Main.java");
+            String result = client.getFileContent(operationContext, BranchName.of("main"), "src/Main.java");
 
             assertEquals("public class Main {}", result);
         }
@@ -222,7 +223,7 @@ class GitHubClientTest {
             when(mockHttpClient.send(any(HttpRequest.class), eq(HttpResponse.BodyHandlers.ofString())))
                     .thenReturn(mockResponse);
 
-            String result = client.getFileContent("main", "nonexistent.java");
+            String result = client.getFileContent(operationContext, BranchName.of("main"), "nonexistent.java");
 
             assertNull(result);
         }
@@ -233,10 +234,8 @@ class GitHubClientTest {
         @Test
         void should_create_client_from_secrets() {
             SecretsService secretsService = mock(SecretsService.class);
-            when(secretsService.getSecretJson("arn")).thenReturn(Map.of(
-                    "owner", "my-org",
-                    "repo", "my-repo",
-                    "token", "ghp_test123"));
+            when(secretsService.getSecretAs("arn", GitHubClient.GitHubSecret.class)).thenReturn(
+                    new GitHubClient.GitHubSecret("my-org", "my-repo", "ghp_test123"));
 
             GitHubClient result = GitHubClient.fromSecrets(secretsService, "arn");
             assertNotNull(result);
@@ -245,11 +244,10 @@ class GitHubClientTest {
         @Test
         void should_throw_on_missing_token() {
             SecretsService secretsService = mock(SecretsService.class);
-            when(secretsService.getSecretJson("arn")).thenReturn(Map.of(
-                    "owner", "my-org",
-                    "repo", "my-repo"));
+            when(secretsService.getSecretAs("arn", GitHubClient.GitHubSecret.class)).thenReturn(
+                    new GitHubClient.GitHubSecret("my-org", "my-repo", null));
 
-            assertThrows(RuntimeException.class,
+            assertThrows(com.aidriven.core.exception.ConfigurationException.class,
                     () -> GitHubClient.fromSecrets(secretsService, "arn"));
         }
     }

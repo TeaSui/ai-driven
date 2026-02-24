@@ -1,31 +1,32 @@
 package com.aidriven.lambda;
 
 import com.aidriven.bitbucket.BitbucketClient;
+import com.aidriven.core.exception.HttpClientException;
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.source.SourceControlClient;
 import com.aidriven.github.GitHubClient;
 import com.aidriven.jira.JiraClient;
+import com.aidriven.core.source.RepositoryWriter;
 import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.provider.SourceControlProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.util.List;
-import java.util.Map;
 import java.util.HashMap;
-import java.util.Optional;
-
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -47,6 +48,9 @@ class PrCreatorHandlerTest {
         private ServiceFactory serviceFactory;
 
         @Mock
+        private com.aidriven.core.agent.ConversationRepository conversationRepository;
+
+        @Mock
         private GitHubClient gitHubClient;
 
         @Mock
@@ -60,7 +64,7 @@ class PrCreatorHandlerTest {
                 MockitoAnnotations.openMocks(this);
                 handler = new PrCreatorHandler(
                                 objectMapper, ticketStateRepository,
-                                jiraClient, serviceFactory, sourceControlClient, "ai/");
+                                jiraClient, conversationRepository, serviceFactory, sourceControlClient, "ai/");
         }
 
         // ======== Input Validation ========
@@ -107,26 +111,35 @@ class PrCreatorHandlerTest {
 
         @Test
         void should_create_pr_successfully() throws Exception {
-                when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-                when(sourceControlClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
+                when(sourceControlClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
                                 .thenReturn(
-                                                new SourceControlClient.PullRequestResult("1",
-                                                                "https://bitbucket.org/repo/pr/1", "ai/proj-1"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                                                new SourceControlProvider.PullRequestResult("1",
+                                                                "https://bitbucket.org/repo/pr/1",
+                                                                BranchName.of("ai/proj-1"),
+                                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 // Mock factory behavior
                 when(serviceFactory.getGitHubClient(any(), any())).thenReturn(gitHubClient);
                 when(serviceFactory.getBitbucketClient(any(), any())).thenReturn(bitbucketClient);
 
                 // Ensure the base client mocks behave correctly
-                when(gitHubClient.getDefaultBranch()).thenReturn("main");
-                when(bitbucketClient.getDefaultBranch()).thenReturn("main");
-                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1",
-                                                "https://github.com/repo/pr/1", "ai/proj-1"));
-                when(bitbucketClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1",
-                                                "https://bitbucket.org/repo/pr/1", "ai/proj-1"));
+                when(gitHubClient.getDefaultBranch(any(OperationContext.class))).thenReturn(BranchName.of("main"));
+                when(bitbucketClient.getDefaultBranch(any(OperationContext.class))).thenReturn(BranchName.of("main"));
+                when(gitHubClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult(
+                                                "1",
+                                                "https://github.com/repo/pr/1", BranchName.of("ai/proj-1"), "Title"));
+                when(bitbucketClient.createPullRequest(any(OperationContext.class), anyString(),
+                                anyString(), any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult(
+                                                "1",
+                                                "https://bitbucket.org/repo/pr/1", BranchName.of("ai/proj-1"),
+                                                "Title"));
 
                 List<AgentResult.GeneratedFile> files = List.of(
                                 AgentResult.GeneratedFile.builder()
@@ -150,8 +163,10 @@ class PrCreatorHandlerTest {
                 assertEquals(true, result.get("prCreated"));
                 assertEquals("https://bitbucket.org/repo/pr/1", result.get("prUrl"));
                 assertEquals("ai/proj-1", result.get("branchName"));
-                verify(sourceControlClient).createBranch("ai/proj-1", "main");
-                verify(sourceControlClient).commitFiles(eq("ai/proj-1"), any(), eq("feat: add main"));
+                verify(sourceControlClient).createBranch(any(OperationContext.class), eq(BranchName.of("ai/proj-1")),
+                                eq(BranchName.of("main")));
+                verify(sourceControlClient).commitFiles(any(OperationContext.class), eq(BranchName.of("ai/proj-1")),
+                                any(), eq("feat: add main"));
         }
 
         @Test
@@ -169,15 +184,12 @@ class PrCreatorHandlerTest {
         }
 
         @Test
-        void should_continue_when_branch_already_exists() throws Exception {
-                when(sourceControlClient.getDefaultBranch()).thenReturn("main");
+        void should_warn_and_stop_when_branch_already_exists() throws Exception {
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
                 doThrow(new com.aidriven.core.exception.ConflictException("Branch exists", "{}"))
-                                .when(sourceControlClient).createBranch(anyString(), anyString());
-                when(sourceControlClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(
-                                                new SourceControlClient.PullRequestResult("2",
-                                                                "https://bitbucket.org/repo/pr/2", "ai/proj-2"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                                .when(sourceControlClient).createBranch(any(OperationContext.class),
+                                                any(BranchName.class), any(BranchName.class));
 
                 List<AgentResult.GeneratedFile> files = List.of(
                                 AgentResult.GeneratedFile.builder()
@@ -194,8 +206,39 @@ class PrCreatorHandlerTest {
 
                 Map<String, Object> result = handler.handleRequest(input, lambdaContext);
 
-                assertEquals(true, result.get("prCreated"));
-                verify(sourceControlClient).commitFiles(anyString(), any(), any());
+                assertEquals(false, result.get("prCreated"));
+                assertEquals("Branch already exists", result.get("reason"));
+                verify(jiraClient).postComment(any(), eq("PROJ-2"), contains("already exists"));
+                verify(sourceControlClient, never()).commitFiles(any(), any(BranchName.class), any(), any());
+        }
+
+        @Test
+        void should_warn_and_stop_when_github_branch_already_exists() throws Exception {
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
+                doThrow(new HttpClientException(422, "Reference already exists",
+                                "{\"message\":\"Reference already exists\"}"))
+                                .when(sourceControlClient).createBranch(any(OperationContext.class),
+                                                any(BranchName.class), any(BranchName.class));
+
+                List<AgentResult.GeneratedFile> files = List.of(
+                                AgentResult.GeneratedFile.builder()
+                                                .path("src/App.java")
+                                                .content("class App {}")
+                                                .operation(AgentResult.FileOperation.CREATE)
+                                                .build());
+
+                Map<String, Object> input = new HashMap<>();
+                input.put("ticketId", "12345");
+                input.put("ticketKey", "PROJ-3");
+                input.put("success", true);
+                input.put("files", objectMapper.writeValueAsString(files));
+                input.put("platform", "GITHUB");
+
+                Map<String, Object> result = handler.handleRequest(input, lambdaContext);
+
+                assertEquals(false, result.get("prCreated"));
+                verify(jiraClient).postComment(any(), eq("PROJ-3"), contains("already exists"));
         }
 
         @Test
@@ -228,12 +271,14 @@ class PrCreatorHandlerTest {
 
         @Test
         void should_pass_through_platform_in_output() throws Exception {
-                when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-                when(sourceControlClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1",
-                                                "https://github.com/org/repo/pull/1",
-                                                "ai/proj-1"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
+                when(sourceControlClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult("1",
+                                                "https://github.com/org/repo/pull/1", BranchName.of("ai/proj-1"),
+                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 List<AgentResult.GeneratedFile> files = List.of(
                                 AgentResult.GeneratedFile.builder()
@@ -260,10 +305,14 @@ class PrCreatorHandlerTest {
 
         @Test
         void should_not_duplicate_ticket_key_in_title() throws Exception {
-                when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-                when(sourceControlClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1", "url", "branch"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
+                when(sourceControlClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult("1", "url",
+                                                BranchName.of("branch"),
+                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 Map<String, Object> input = new HashMap<>();
                 input.put("ticketId", "12345");
@@ -276,15 +325,20 @@ class PrCreatorHandlerTest {
 
                 // Verify title starts with [AI] and NO second CRM-85:
                 verify(sourceControlClient).createPullRequest(
-                                eq("[AI] CRM-85: Fix duplicate title"), anyString(), anyString(), anyString());
+                                any(OperationContext.class), eq("[AI] CRM-85: Fix duplicate title"), anyString(),
+                                any(BranchName.class), any(BranchName.class));
         }
 
         @Test
         void should_prepend_ticket_key_if_missing_in_title() throws Exception {
-                when(sourceControlClient.getDefaultBranch()).thenReturn("main");
-                when(sourceControlClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1", "url", "branch"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                when(sourceControlClient.getDefaultBranch(any(OperationContext.class)))
+                                .thenReturn(BranchName.of("main"));
+                when(sourceControlClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult("1", "url",
+                                                BranchName.of("branch"),
+                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 Map<String, Object> input = new HashMap<>();
                 input.put("ticketId", "12345");
@@ -297,13 +351,15 @@ class PrCreatorHandlerTest {
 
                 // Verify title starts with [AI] CRM-85:
                 verify(sourceControlClient).createPullRequest(
-                                eq("[AI] CRM-85: Fix duplicate title"), anyString(), anyString(), anyString());
+                                any(OperationContext.class), eq("[AI] CRM-85: Fix duplicate title"), anyString(),
+                                any(BranchName.class), any(BranchName.class));
         }
 
         @Test
         void should_fail_if_repo_metadata_missing() throws Exception {
                 // Re-initialize handler WITHOUT a testSourceControlClient
-                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, serviceFactory, null,
+                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, conversationRepository,
+                                serviceFactory, null,
                                 "ai/");
 
                 // Prepare input MISSING repoOwner/repoSlug
@@ -316,11 +372,14 @@ class PrCreatorHandlerTest {
 
                 // Mock factory behavior - return default client when arguments are null/empty
                 when(serviceFactory.getGitHubClient(null, null)).thenReturn(gitHubClient);
-                when(gitHubClient.getDefaultBranch()).thenReturn("main");
-                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1",
-                                                "https://github.com/TeaSui/claude-automation/pull/1", "main"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                when(gitHubClient.getDefaultBranch(any(OperationContext.class))).thenReturn(BranchName.of("main"));
+                when(gitHubClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult("1",
+                                                "https://github.com/TeaSui/claude-automation/pull/1",
+                                                BranchName.of("main"),
+                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 handler.handleRequest(input, lambdaContext);
 
@@ -330,7 +389,8 @@ class PrCreatorHandlerTest {
 
         @Test
         void should_use_correct_platform_from_input() throws Exception {
-                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, serviceFactory, null,
+                handler = new PrCreatorHandler(objectMapper, ticketStateRepository, jiraClient, conversationRepository,
+                                serviceFactory, null,
                                 "ai/");
 
                 Map<String, Object> input = new HashMap<>();
@@ -343,11 +403,14 @@ class PrCreatorHandlerTest {
                 input.put("files", "[{\"path\":\"test.txt\",\"content\":\"v\",\"operation\":\"CREATE\"}]");
 
                 when(serviceFactory.getGitHubClient("TeaSui", "emergency-location-service")).thenReturn(gitHubClient);
-                when(gitHubClient.getDefaultBranch()).thenReturn("main");
-                when(gitHubClient.createPullRequest(anyString(), anyString(), anyString(), anyString()))
-                                .thenReturn(new SourceControlClient.PullRequestResult("1",
-                                                "https://github.com/TeaSui/emergency-location-service/pull/1", "main"));
-                when(jiraClient.getTransitions(anyString())).thenReturn(List.of());
+                when(gitHubClient.getDefaultBranch(any(OperationContext.class))).thenReturn(BranchName.of("main"));
+                when(gitHubClient.createPullRequest(any(OperationContext.class), anyString(), anyString(),
+                                any(BranchName.class), any(BranchName.class)))
+                                .thenReturn(new SourceControlProvider.PullRequestResult("1",
+                                                "https://github.com/TeaSui/emergency-location-service/pull/1",
+                                                BranchName.of("main"),
+                                                "Title"));
+                when(jiraClient.getTransitions(any(OperationContext.class), anyString())).thenReturn(List.of());
 
                 handler.handleRequest(input, lambdaContext);
 

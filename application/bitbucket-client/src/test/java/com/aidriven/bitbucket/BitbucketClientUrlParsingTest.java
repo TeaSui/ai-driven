@@ -97,8 +97,8 @@ class BitbucketClientUrlParsingTest {
             BitbucketClient.parseRepoUrl(invalidUrl);
         });
 
-        assertTrue(exception.getMessage().contains("Unrecognized Bitbucket URL format") ||
-                   exception.getMessage().contains("URL"));
+        assertTrue(exception.getMessage().contains("Invalid repository URL") ||
+                exception.getMessage().contains("URL"));
     }
 
     @Test
@@ -116,7 +116,7 @@ class BitbucketClientUrlParsingTest {
             BitbucketClient.parseRepoUrl("");
         });
 
-        assertTrue(exception.getMessage().contains("URL must not be empty"));
+        assertTrue(exception.getMessage().contains("url must not be blank"));
     }
 
     @Test
@@ -129,29 +129,7 @@ class BitbucketClientUrlParsingTest {
             BitbucketClient.parseRepoUrl(url);
         });
 
-        assertTrue(exception.getMessage().contains("Could not extract workspace and repo"));
+        assertTrue(exception.getMessage().contains("Invalid repo URL format"));
     }
 
-    @Test
-    void should_create_client_from_valid_repo_url() {
-        // Given: Valid repo URL
-        String url = "https://bitbucket.org/myworkspace/myrepo.git";
-
-        // When: Create client from URL
-        BitbucketClient client = BitbucketClient.fromRepoUrl(url, "username", "password");
-
-        // Then: Verify client is created successfully
-        assertNotNull(client);
-    }
-
-    @Test
-    void should_throw_exception_when_creating_client_with_invalid_url() {
-        // Given: Invalid URL
-        String url = "invalid-url";
-
-        // When/Then: Verify exception is thrown
-        assertThrows(IllegalArgumentException.class, () -> {
-            BitbucketClient.fromRepoUrl(url, "username", "password");
-        });
-    }
 }

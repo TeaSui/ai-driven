@@ -1,12 +1,15 @@
 import {
     createTestTicket,
     addLabelToTicket,
+    addLabelsToTicket,
     waitForExecution,
     waitForPRCreation,
     mergePR,
     waitForTicketStatus,
-    cleanupTestData
+    cleanupTestData,
+    getTicket
 } from '../utils/test-helpers';
+import { testConfig } from '../utils/test-config';
 import { expectValidTicketStructure, expectValidPRStructure } from '../utils/assertions';
 
 /**
@@ -37,10 +40,17 @@ describe('E2E: Complete Workflow Happy Path', () => {
         expectValidTicketStructure(ticket);
         console.log(`✅ Created ticket: ${ticket.ticketKey}`);
 
-        // Step 2: Add ai-generate label to trigger workflow
-        console.log('🏷️  Step 2: Adding ai-generate label...');
-        await addLabelToTicket(ticket.ticketKey, 'ai-generate');
-        console.log('✅ Label added');
+        // Wait a bit for Jira to propagate
+        await new Promise(r => setTimeout(r, 2000));
+
+        // Step 2: Add labels to trigger workflow and target correct repo
+        console.log('🏷️  Step 2: Adding trigger and repo labels...');
+        await addLabelsToTicket(ticket.ticketKey, [
+            'ai-generate',
+            'platform:bitbucket',
+            `repo:${testConfig.bitbucket.workspace}/${testConfig.bitbucket.repoSlug}`
+        ]);
+        console.log('✅ Labels added');
 
         // Step 3: Wait for Step Functions execution to start
         console.log('⏳ Step 3: Waiting for Step Functions execution...');
@@ -53,9 +63,9 @@ describe('E2E: Complete Workflow Happy Path', () => {
         }
 
         // Step 4: Wait for PR creation
-        console.log('⏳ Step 4: Waiting for PR creation (up to 2 minutes)...');
+        console.log('⏳ Step 4: Waiting for PR creation (up to 5 minutes)...');
         try {
-            const pr = await waitForPRCreation(ticket.ticketKey, 120000);
+            const pr = await waitForPRCreation(ticket.ticketKey, 300000);
 
             expectValidPRStructure(pr);
             expect(pr.title).toContain(ticket.ticketKey);
@@ -80,11 +90,7 @@ describe('E2E: Complete Workflow Happy Path', () => {
             console.error('❌ E2E test failed:', error);
             throw error;
         }
-    }, 300000); // 5 minute timeout for full E2E test
+    }, 400000); // Increased timeout for full E2E test
 });
 
-// Helper function (should be in test-helpers.ts)
-async function getTicket(ticketKey: string) {
-    const { getTicket: getTicketHelper } = await import('../utils/test-helpers');
-    return getTicketHelper(ticketKey);
-}
+

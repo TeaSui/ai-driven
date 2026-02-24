@@ -18,7 +18,7 @@ import java.time.Instant;
  * <p>
  * Key schema:
  * <ul>
- * <li>PK: AGENT#{ticketKey} (e.g., AGENT#ONC-10001)</li>
+ * <li>PK: CONV#{tenantId}#{ticketKey} (e.g., CONV#acme#ONC-10001)</li>
  * <li>SK: MSG#{timestamp}#{sequence} (e.g.,
  * MSG#2026-02-15T10:30:00.000Z#001)</li>
  * </ul>
@@ -74,8 +74,8 @@ public class ConversationMessage {
     // --- Key factory methods ---
 
     /** Creates partition key for agent conversations. */
-    public static String createPk(String ticketKey) {
-        return "AGENT#" + ticketKey;
+    public static String createPk(String tenantId, String ticketKey) {
+        return "CONV#" + tenantId + "#" + ticketKey;
     }
 
     /** Creates sort key with timestamp and sequence for ordering. */

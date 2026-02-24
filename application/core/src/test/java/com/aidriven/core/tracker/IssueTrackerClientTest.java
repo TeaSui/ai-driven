@@ -1,6 +1,7 @@
 package com.aidriven.core.tracker;
 
 import com.aidriven.core.model.TicketInfo;
+import com.aidriven.spi.model.OperationContext;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -14,35 +15,40 @@ class IssueTrackerClientTest {
 
     @Test
     void interface_should_declare_getTicket_method() throws NoSuchMethodException {
-        Method method = IssueTrackerClient.class.getMethod("getTicket", String.class);
+        Method method = IssueTrackerClient.class.getMethod("getTicket", OperationContext.class, String.class);
         assertEquals(TicketInfo.class, method.getReturnType());
     }
 
     @Test
     void interface_should_declare_addComment_method() throws NoSuchMethodException {
-        Method method = IssueTrackerClient.class.getMethod("addComment", String.class, String.class);
+        Method method = IssueTrackerClient.class.getMethod("addComment", OperationContext.class, String.class,
+                String.class);
         assertEquals(String.class, method.getReturnType());
     }
 
     @Test
     void interface_should_declare_transitionTicket_method() throws NoSuchMethodException {
-        Method method = IssueTrackerClient.class.getMethod("transitionTicket", String.class, String.class);
+        Method method = IssueTrackerClient.class.getMethod("transitionTicket", OperationContext.class, String.class,
+                String.class);
         assertEquals(void.class, method.getReturnType());
     }
 
     @Test
     void interface_should_declare_updateStatus_method() throws NoSuchMethodException {
-        Method method = IssueTrackerClient.class.getMethod("updateStatus", String.class, String.class);
+        Method method = IssueTrackerClient.class.getMethod("updateStatus", OperationContext.class, String.class,
+                String.class);
         assertEquals(void.class, method.getReturnType());
     }
 
     @Test
-    void interface_should_have_exactly_five_methods() {
+    void interface_should_have_consistent_method_count() {
         Set<String> methods = Arrays.stream(IssueTrackerClient.class.getDeclaredMethods())
                 .map(Method::getName)
                 .collect(Collectors.toSet());
 
-        assertEquals(Set.of("getTicket", "addComment", "editComment", "transitionTicket", "updateStatus"), methods);
+        assertEquals(
+                Set.of("getTicket", "addComment", "editComment", "transitionTicket", "updateStatus", "getTransitions"),
+                methods);
     }
 
 }

@@ -10,11 +10,35 @@ dependencies {
     api 'software.amazon.awssdk:secretsmanager'
     api 'software.amazon.awssdk:sqs'
     api 'software.amazon.awssdk:s3'
+    api 'software.amazon.awssdk:cloudwatch'
+    api 'software.amazon.awssdk:cloudwatchlogs'
 
     // Jackson for JSON
     api "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
     api "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${project.property('jacksonVersion')}"
+    api "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:${project.property('jacksonVersion')}"
 
     // Jayway JsonPath
     api "com.jayway.jsonpath:json-path:${project.property('jsonPathVersion')}"
+
+    // SPI
+    api project(':spi')
+
+    // HTML Sanitization
+    api 'org.jsoup:jsoup:1.17.2'
+
+    // AST Parsing
+    api 'com.github.javaparser:javaparser-core:3.25.8'
+
+    // Caching
+    api 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+
+    // Testing
+    testImplementation "org.junit.jupiter:junit-jupiter-api:${project.property('junitVersion')}"
+    testImplementation "org.junit.jupiter:junit-jupiter-params:${project.property('junitVersion')}"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${project.property('junitVersion')}"
+    testImplementation "org.assertj:assertj-core:${project.property('assertjVersion')}"
+    testImplementation "org.mockito:mockito-core:${project.property('mockitoVersion')}"
+    testImplementation "org.mockito:mockito-junit-jupiter:${project.property('mockitoVersion')}"
 }
+

@@ -1,6 +1,7 @@
 package com.aidriven.jira;
 
 import com.aidriven.core.exception.*;
+import com.aidriven.spi.model.OperationContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -29,12 +30,14 @@ class JiraClientHttpErrorTest {
     private HttpResponse<String> mockResponse;
 
     private JiraClient jiraClient;
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         // Use reflection to inject the mock HttpClient
         jiraClient = new JiraClient("https://test.atlassian.net", "test@test.com", "token");
+        operationContext = OperationContext.builder().tenantId("test-tenant").build();
         try {
             var field = JiraClient.class.getDeclaredField("httpClient");
             field.setAccessible(true);
@@ -54,7 +57,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            jiraClient.getTicket("PROJ-123");
+            jiraClient.getTicket(operationContext, "PROJ-123");
         });
 
         assertTrue(exception.getMessage().contains("Authentication failed"));
@@ -71,7 +74,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            jiraClient.getTicket("PROJ-123");
+            jiraClient.getTicket(operationContext, "PROJ-123");
         });
 
         assertTrue(exception.getMessage().contains("Access denied"));
@@ -88,7 +91,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify NotFoundException is thrown
         NotFoundException exception = assertThrows(NotFoundException.class, () -> {
-            jiraClient.getTicket("PROJ-999");
+            jiraClient.getTicket(operationContext, "PROJ-999");
         });
 
         assertTrue(exception.getMessage().contains("Resource not found"));
@@ -108,7 +111,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify RateLimitException is thrown
         RateLimitException exception = assertThrows(RateLimitException.class, () -> {
-            jiraClient.getTicket("PROJ-123");
+            jiraClient.getTicket(operationContext, "PROJ-123");
         });
 
         assertTrue(exception.getMessage().contains("Rate limit exceeded"));
@@ -126,7 +129,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            jiraClient.getTicket("PROJ-123");
+            jiraClient.getTicket(operationContext, "PROJ-123");
         });
 
         assertTrue(exception.getMessage().contains("Server error"));
@@ -143,7 +146,7 @@ class JiraClientHttpErrorTest {
 
         // When/Then: Verify HttpClientException is thrown
         HttpClientException exception = assertThrows(HttpClientException.class, () -> {
-            jiraClient.getTicket("PROJ-123");
+            jiraClient.getTicket(operationContext, "PROJ-123");
         });
 
         assertTrue(exception.getMessage().contains("temporarily unavailable"));

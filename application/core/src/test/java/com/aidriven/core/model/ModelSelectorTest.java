@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ModelSelectorTest {
 
-    private static final String DEFAULT_MODEL = "claude-opus-4-6";
+    private static final String DEFAULT_MODEL = "claude-sonnet-4-6";
 
     @Test
     void shouldReturnDefaultWhenLabelsNull() {
@@ -29,12 +29,13 @@ class ModelSelectorTest {
 
     @Test
     void shouldResolveSonnetLabel() {
-        assertEquals("claude-sonnet-4-5",
+        assertEquals("claude-sonnet-4-6",
                 ModelSelector.resolve(List.of("ai-model:sonnet"), DEFAULT_MODEL));
     }
 
     @Test
     void shouldResolveOpusLabel() {
+        // ADR-012: Opus version must match README (claude-opus-4-6, not 4-5)
         assertEquals("claude-opus-4-6",
                 ModelSelector.resolve(List.of("ai-model:opus"), DEFAULT_MODEL));
     }
@@ -53,7 +54,7 @@ class ModelSelectorTest {
 
     @Test
     void shouldBeCaseInsensitive() {
-        assertEquals("claude-sonnet-4-5",
+        assertEquals("claude-sonnet-4-6",
                 ModelSelector.resolve(List.of("AI-MODEL:SONNET"), DEFAULT_MODEL));
     }
 

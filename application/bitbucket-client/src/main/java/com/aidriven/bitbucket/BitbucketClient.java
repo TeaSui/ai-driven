@@ -1,11 +1,15 @@
 package com.aidriven.bitbucket;
 
+import com.aidriven.core.exception.ConfigurationException;
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.service.SecretsService;
+import com.aidriven.core.source.RepositoryReader;
 import com.aidriven.core.source.SourceControlClient;
-
 import com.aidriven.core.util.HttpResponseHandler;
-import com.aidriven.core.util.JsonPathExtractor;
+import com.aidriven.spi.model.BranchName;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.provider.SourceControlProvider;
+import com.aidriven.spi.provider.SourceControlProvider.RepoFile;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AccessLevel;
@@ -14,174 +18,161 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
-
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Client for interacting with Bitbucket Cloud REST API.
+ * Implements both SourceControlClient (internal) and SourceControlProvider
+ * (SPI).
  */
 @Slf4j
 @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
-public class BitbucketClient implements SourceControlClient {
+public class BitbucketClient implements SourceControlClient, SourceControlProvider {
 
-    private static final String API_BASE = "https://api.bitbucket.org/2.0";
-
+    private final String API_BASE = "https://api.bitbucket.org/2.0";
+    private final @NonNull String workspace;
+    private final @NonNull String repoSlug;
     private final @NonNull String authHeader;
     private final @NonNull HttpClient httpClient;
     private final @NonNull ObjectMapper objectMapper;
-    private final @NonNull String workspace;
-    private final @NonNull String repoSlug;
+
+    /** Configuration POJO for Bitbucket */
+    public record BitbucketSecret(String workspace, String repoSlug, String username, String appPassword) {
+    }
+
+    public BitbucketClient(String workspace, String repoSlug, String username, String appPassword) {
+        this.workspace = workspace;
+        this.repoSlug = repoSlug;
+        this.httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(60))
+                .build();
+        this.objectMapper = new ObjectMapper();
+        this.authHeader = "Basic " + Base64.getEncoder()
+                .encodeToString((username + ":" + appPassword).getBytes(StandardCharsets.UTF_8));
+    }
 
     public static BitbucketClient fromSecrets(SecretsService secretsManager, String secretArn) {
         try {
-            Map<String, Object> secrets = secretsManager.getSecretJson(secretArn);
-
-            String workspace = getRequiredSecret(secrets, "workspace");
-            String repoSlug = getRequiredSecret(secrets, "repoSlug");
-            String username = getRequiredSecret(secrets, "username");
-            String appPassword = getRequiredSecret(secrets, "appPassword");
-
-            String auth = username + ":" + appPassword;
-            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
-            String authHeader = "Basic " + encodedAuth;
-
-            HttpClient httpClient = HttpClient.newBuilder()
-                    .connectTimeout(Duration.ofSeconds(30))
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
-            ObjectMapper objectMapper = new ObjectMapper();
-
-            return new BitbucketClient(authHeader, httpClient, objectMapper, workspace,
-                    repoSlug);
+            BitbucketSecret secret = secretsManager.getSecretAs(secretArn, BitbucketSecret.class);
+            if (secret == null || secret.workspace() == null || secret.repoSlug() == null || secret.username() == null
+                    || secret.appPassword() == null) {
+                throw new ConfigurationException("BitbucketClient: secret '" + secretArn
+                        + "' is missing required fields (workspace, repoSlug, username, appPassword)");
+            }
+            return new BitbucketClient(secret.workspace(), secret.repoSlug(), secret.username(), secret.appPassword());
+        } catch (ConfigurationException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to create BitbucketClient from secrets", e);
+            throw new ConfigurationException("BitbucketClient init failed for secret: " + secretArn, e);
         }
     }
 
-    /**
-     * Returns a new BitbucketClient instance for a different repository using the
-     * same credentials.
-     */
-    public BitbucketClient withRepository(@NonNull String workspace, @NonNull String repoSlug) {
-        return new BitbucketClient(authHeader, httpClient, objectMapper, workspace, repoSlug);
+    public BitbucketClient withRepository(String workspace, String repoSlug) {
+        return new BitbucketClient(workspace, repoSlug, authHeader, httpClient, objectMapper);
     }
 
-    private static String getRequiredSecret(Map<String, Object> secrets, String key) {
-        Object val = secrets.get(key);
-        if (val == null) {
-            throw new IllegalArgumentException("Missing required key '" + key + "' in Bitbucket secret");
-        }
-        return val.toString();
-    }
-
-    /**
-     * Creates a new branch from the default branch.
-     */
     @Override
-    public void createBranch(String branchName, String fromBranch) throws Exception {
-        validateBranchName(branchName);
-        validateBranchName(fromBranch);
-
-        // First, get the commit hash of the source branch
-        String commitHash = getBranchCommitHash(fromBranch);
-
-        String url = String.format("%s/repositories/%s/%s/refs/branches",
-                API_BASE, encode(workspace), encode(repoSlug));
-
-        String body = objectMapper.writeValueAsString(Map.of(
-                "name", branchName,
-                "target", Map.of("hash", commitHash)));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 201 Created is expected for new branches
-        if (response.statusCode() != 201 && response.statusCode() != 200) {
-            HttpResponseHandler.checkResponse(response, "Bitbucket", "createBranch " + branchName);
-        }
-
-        log.info("Created branch: {} from {} ({})", branchName, fromBranch, commitHash);
+    public String getName() {
+        return "bitbucket";
     }
 
-    /**
-     * Gets the latest commit hash of a branch.
-     */
-    private String getBranchCommitHash(String branchName) throws Exception {
-        String url = String.format("%s/repositories/%s/%s/refs/branches/%s",
-                API_BASE, encode(workspace), encode(repoSlug), encode(branchName));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        HttpResponseHandler.checkResponse(response, "Bitbucket", "getBranchCommitHash " + branchName);
-
-        JsonNode json = objectMapper.readTree(response.body());
-        return JsonPathExtractor.getRequiredString(json, "Bitbucket branch", "target", "hash");
-    }
-
-    /**
-     * Commits files to a branch.
-     */
     @Override
-    public String commitFiles(String branchName, List<AgentResult.GeneratedFile> files, String commitMessage)
+    public boolean supports(String repositoryUri) {
+        return repositoryUri != null && repositoryUri.toLowerCase().contains("bitbucket.org")
+                && repositoryUri.contains("/" + workspace + "/" + repoSlug);
+    }
+
+    // --- RepositoryReader / SourceControlClient / SourceControlProvider ---
+
+    @Override
+    public BranchName getDefaultBranch(OperationContext context) throws Exception {
+        String url = String.format("%s/repositories/%s/%s", API_BASE, encode(workspace), encode(repoSlug));
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "getDefaultBranch");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "getDefaultBranch");
+        return BranchName.of(objectMapper.readTree(response.body()).get("mainbranch").get("name").asText());
+    }
+
+    @Override
+    public void createBranch(OperationContext context, @NonNull BranchName branchName, @NonNull BranchName fromBranch)
             throws Exception {
-        String url = String.format("%s/repositories/%s/%s/src", API_BASE, encode(workspace), encode(repoSlug));
+        String fromHash = getBranchCommitHash(fromBranch.name());
+        String url = String.format("%s/repositories/%s/%s/refs/branches", API_BASE, encode(workspace),
+                encode(repoSlug));
+        String body = objectMapper.writeValueAsString(
+                Map.of("name", branchName.name(), "target", Map.of("hash", fromHash)));
+        HttpRequest request = buildPostRequest(url, body);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "createBranch");
+        if (response.statusCode() != 201 && response.statusCode() != 200) {
+            HttpResponseHandler.checkResponse(response, "Bitbucket", "createBranch " + branchName.name());
+        }
+    }
 
-        // Use UUID-based boundary to avoid collision with file content
-        String boundary = "----FormBoundary" + java.util.UUID.randomUUID().toString().replace("-", "");
+    private String getBranchCommitHash(String branch) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/refs/branches/%s", API_BASE, encode(workspace),
+                encode(repoSlug),
+                encode(branch));
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(buildGetRequest(url), HttpResponse.BodyHandlers.ofString()), "Bitbucket",
+                "getBranchCommitHash");
+        if (response.statusCode() != 200) {
+            HttpResponseHandler.checkResponse(response, "Bitbucket", "getBranchCommitHash");
+        }
+        return objectMapper.readTree(response.body()).get("target").get("hash").asText();
+    }
+
+    @Override
+    public String commitFiles(OperationContext context, @NonNull BranchName branchName,
+            @NonNull List<AgentResult.GeneratedFile> files, String commitMessage) throws Exception {
+        List<RepoFile> repoFiles = files.stream()
+                .map(f -> new RepoFile(f.getPath(), f.getContent(), f.getOperation().name()))
+                .toList();
+        return pushFiles(context, branchName, repoFiles, commitMessage);
+    }
+
+    @Override
+    public String pushFiles(OperationContext context, BranchName branchName, List<RepoFile> files, String commitMessage)
+            throws Exception {
+        Objects.requireNonNull(files, "files must not be null");
+        String url = String.format("%s/repositories/%s/%s/src", API_BASE, encode(workspace), encode(repoSlug));
+        String boundary = "----FormBoundary" + java.util.UUID.randomUUID().toString();
         StringBuilder bodyBuilder = new StringBuilder();
 
-        // Add commit message (null-safe)
-        String safeCommitMessage = commitMessage != null ? commitMessage : "Auto-generated commit";
         bodyBuilder.append("--").append(boundary).append("\r\n");
         bodyBuilder.append("Content-Disposition: form-data; name=\"message\"\r\n\r\n");
-        bodyBuilder.append(safeCommitMessage).append("\r\n");
+        bodyBuilder.append(commitMessage != null ? commitMessage : "Auto-commit").append("\r\n");
 
-        // Add branch
         bodyBuilder.append("--").append(boundary).append("\r\n");
         bodyBuilder.append("Content-Disposition: form-data; name=\"branch\"\r\n\r\n");
-        bodyBuilder.append(branchName).append("\r\n");
+        bodyBuilder.append(branchName.name()).append("\r\n");
 
-        // Add files
-        for (AgentResult.GeneratedFile file : files) {
-            // Sanitize path: remove leading slashes, prevent directory traversal
-            String safePath = file.getPath().replaceAll("^[./]*", "").replace("..", "");
+        for (RepoFile file : files) {
+            String safePath = file.path().replaceAll("^[./]*", "").replace("..", "");
             bodyBuilder.append("--").append(boundary).append("\r\n");
-            bodyBuilder.append("Content-Disposition: form-data; name=\"").append(safePath)
-                    .append("\"; filename=\"").append(safePath).append("\"\r\n");
+            bodyBuilder.append("Content-Disposition: form-data; name=\"").append(safePath).append("\"; filename=\"")
+                    .append(safePath).append("\"\r\n");
             bodyBuilder.append("Content-Type: text/plain\r\n\r\n");
-            bodyBuilder.append(file.getContent() != null ? file.getContent() : "").append("\r\n");
+            bodyBuilder.append(file.content() != null ? file.content() : "").append("\r\n");
         }
-
         bodyBuilder.append("--").append(boundary).append("--\r\n");
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -191,465 +182,299 @@ public class BitbucketClient implements SourceControlClient {
                 .POST(HttpRequest.BodyPublishers.ofString(bodyBuilder.toString()))
                 .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 201 Created is expected for commits
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "pushFiles");
         if (response.statusCode() != 201 && response.statusCode() != 200) {
-            log.error("Bitbucket commitFiles failed: HTTP {} - Body: {}", response.statusCode(), response.body());
-            HttpResponseHandler.checkResponse(response, "Bitbucket", "commitFiles to " + branchName);
+            throw new RuntimeException("Commit failed: " + response.body());
         }
-
-        log.info("Committed {} files to branch {}", files.size(), branchName);
         return "success";
     }
 
-    /**
-     * Creates a pull request.
-     */
     @Override
-    public SourceControlClient.PullRequestResult createPullRequest(String title, String description,
-            String sourceBranch, String destinationBranch) throws Exception {
+    public SourceControlProvider.PullRequestResult openPullRequest(OperationContext context, String title,
+            String description, BranchName sourceBranch, BranchName destinationBranch) throws Exception {
+        Objects.requireNonNull(title, "title must not be null");
+        Objects.requireNonNull(sourceBranch, "sourceBranch must not be null");
+        Objects.requireNonNull(destinationBranch, "destinationBranch must not be null");
+
         String url = String.format("%s/repositories/%s/%s/pullrequests", API_BASE, encode(workspace), encode(repoSlug));
-
-        var prMap = new java.util.HashMap<String, Object>();
-        prMap.put("title", title);
-        prMap.put("description", description != null ? description : "");
-        prMap.put("source", Map.of("branch", Map.of("name", sourceBranch)));
-        prMap.put("destination", Map.of("branch", Map.of("name", destinationBranch)));
-        prMap.put("close_source_branch", true);
-        String body = objectMapper.writeValueAsString(prMap);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        // 201 Created is expected for new PRs
-        if (response.statusCode() != 201 && response.statusCode() != 200) {
-            log.error("Bitbucket createPullRequest failed: HTTP {} - Body: {}", response.statusCode(), response.body());
-            HttpResponseHandler.checkResponse(response, "Bitbucket",
-                    "createPullRequest " + sourceBranch + " -> " + destinationBranch);
-        }
-
+        Map<String, Object> bodyMap = new HashMap<>();
+        bodyMap.put("title", title);
+        bodyMap.put("description", description);
+        bodyMap.put("source", Map.of("branch", Map.of("name", sourceBranch.name())));
+        bodyMap.put("destination", Map.of("branch", Map.of("name", destinationBranch.name())));
+        String body = objectMapper.writeValueAsString(bodyMap);
+        HttpRequest request = buildPostRequest(url, body);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "openPullRequest");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "openPullRequest");
         JsonNode json = objectMapper.readTree(response.body());
-        String prId = JsonPathExtractor.getRequiredString(json, "Bitbucket PR", "id");
-        String prUrl = JsonPathExtractor.getRequiredString(json, "Bitbucket PR", "links", "html", "href");
-
-        log.info("Created pull request: {} -> {}", prUrl, prId);
-
-        return new SourceControlClient.PullRequestResult(prId, prUrl, sourceBranch);
+        return new SourceControlProvider.PullRequestResult(json.get("id").asText(),
+                json.get("links").get("html").get("href").asText(), sourceBranch, title);
     }
 
-    /**
-     * Gets the default branch of the repository.
-     */
     @Override
-    public String getDefaultBranch() throws Exception {
-        String url = String.format("%s/repositories/%s/%s", API_BASE, workspace, repoSlug);
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        HttpResponseHandler.checkResponse(response, "Bitbucket", "getDefaultBranch");
-
-        JsonNode json = objectMapper.readTree(response.body());
-        return JsonPathExtractor.getRequiredString(json, "Bitbucket repository", "mainbranch", "name");
+    public SourceControlProvider.PullRequestResult createPullRequest(OperationContext context, String title,
+            String description, BranchName sourceBranch, BranchName destinationBranch)
+            throws Exception {
+        return openPullRequest(context, title, description, sourceBranch, destinationBranch);
     }
 
-    private void validateBranchName(String name) {
-        if (name == null || name.isBlank()) {
-            throw new IllegalArgumentException("Branch name must not be empty");
-        }
-    }
-
-    private String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    // ==================== CODE EXPLORER APIs ====================
-
-    /**
-     * Gets the file tree (list of all files) from a branch.
-     * 
-     * @param branch The branch name (e.g., "main")
-     * @param path   Optional path prefix to filter (e.g., "src/main/java")
-     * @return List of file paths
-     */
     @Override
-    public List<String> getFileTree(String branch, String path) throws Exception {
-        List<String> allFiles = new ArrayList<>();
-        java.util.Queue<String> directories = new java.util.LinkedList<>();
-        directories.add(path != null ? path : "");
+    public List<RepositoryReader.PullRequestSummary> listPullRequests(OperationContext context) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/pullrequests?state=OPEN", API_BASE, encode(workspace),
+                encode(repoSlug));
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket",
+                "listPullRequests");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "listPullRequests");
 
-        int maxFiles = 2000; // Safety limit for structural mapping
-
-        while (!directories.isEmpty() && allFiles.size() < maxFiles) {
-            String currentPath = directories.poll();
-            String nextUrl = String.format("%s/repositories/%s/%s/src/%s/%s?pagelen=100",
-                    API_BASE, encode(workspace), encode(repoSlug), encode(branch), encode(currentPath));
-
-            while (nextUrl != null && allFiles.size() < maxFiles) {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(nextUrl))
-                        .header("Authorization", authHeader)
-                        .header("Accept", "application/json")
-                        .GET()
-                        .build();
-
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() != 200) {
-                    log.warn("Failed to get file tree at {}: {}", nextUrl, response.body());
-                    break;
-                }
-
-                JsonNode json = objectMapper.readTree(response.body());
-                JsonNode values = json.get("values");
-
-                if (values != null && values.isArray()) {
-                    for (JsonNode node : values) {
-                        JsonNode typeNode = node.get("type");
-                        JsonNode pathNode = node.get("path");
-                        if (typeNode == null || pathNode == null) {
-                            continue;
-                        }
-                        String type = typeNode.asText();
-                        String nodePath = pathNode.asText();
-                        if ("commit_file".equals(type)) {
-                            allFiles.add(nodePath);
-                        } else if ("commit_directory".equals(type)) {
-                            directories.add(nodePath);
-                        }
-                    }
-                }
-
-                // Handle pagination
-                nextUrl = json.has("next") ? json.get("next").asText() : null;
+        JsonNode root = objectMapper.readTree(response.body());
+        List<RepositoryReader.PullRequestSummary> results = new ArrayList<>();
+        if (root.has("values")) {
+            for (JsonNode node : root.get("values")) {
+                results.add(new RepositoryReader.PullRequestSummary(
+                        node.get("id").asText(),
+                        node.get("links").get("html").get("href").asText(),
+                        BranchName.of(node.get("source").get("branch").get("name").asText()),
+                        node.get("title").asText()));
             }
         }
-        return allFiles;
+        return results;
     }
 
-    /**
-     * Gets the content of a file from a branch.
-     * 
-     * @param branch   The branch name
-     * @param filePath The path to the file
-     * @return The file content as a string
-     */
     @Override
-    public String getFileContent(String branch, String filePath) throws Exception {
-        String url = String.format("%s/repositories/%s/%s/src/%s/%s",
-                API_BASE, encode(workspace), encode(repoSlug), encode(branch), encode(filePath));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "text/plain")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            log.warn("Failed to get file content for {}: {}", filePath, response.body());
-            return null;
-        }
-
-        return response.body();
-    }
-
-    /**
-     * Searches for files matching a pattern in the repo.
-     * Uses the Bitbucket code search API.
-     * 
-     * @param query The search query (e.g., "class UserService")
-     * @return List of matching file paths
-     */
-    @Override
-    public List<String> searchFiles(String query) throws Exception {
-        String url = String.format("%s/workspaces/%s/search/code?search_query=repo:%s+%s",
-                API_BASE, encode(workspace), encode(repoSlug), encode(query));
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .header("Accept", "application/json")
-                .GET()
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() != 200) {
-            log.warn("Code search failed: {}", response.body());
-            return List.of();
-        }
-
+    public List<String> getFileTree(OperationContext context, @NonNull BranchName branch, String path)
+            throws Exception {
+        String url = String.format("%s/repositories/%s/%s/src/%s/%s?pagelen=100", API_BASE, encode(workspace),
+                encode(repoSlug), branch.name(),
+                path != null ? encode(path) : "");
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "getFileTree");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "getFileTree");
         JsonNode json = objectMapper.readTree(response.body());
-        JsonNode values = json.get("values");
-
         List<String> files = new ArrayList<>();
-        if (values != null && values.isArray()) {
-            for (JsonNode node : values) {
-                JsonNode file = node.get("file");
-                if (file != null) {
-                    files.add(file.get("path").asText());
+        if (json.has("values")) {
+            for (JsonNode node : json.get("values")) {
+                if (node.has("path") && node.path("type").asText().equals("commit_file")) {
+                    files.add(node.get("path").asText());
                 }
             }
         }
         return files;
     }
 
-    /**
-     * Gets core configuration files from the repo (build files, configs).
-     */
-    public List<RepoFile> getCoreConfigFiles(String branch) throws Exception {
-        List<String> configPatterns = List.of(
-                "pom.xml", "build.gradle", "settings.gradle", "package.json",
-                "README.md", "application.yml", "application.properties");
+    @Override
+    public String getFileContent(OperationContext context, @NonNull BranchName branch, String filePath)
+            throws Exception {
+        String url = String.format("%s/repositories/%s/%s/src/%s/%s", API_BASE, encode(workspace), encode(repoSlug),
+                branch.name(),
+                encode(filePath));
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "getFileContent");
+        if (response.statusCode() == 404)
+            return null;
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "getFileContent");
+        return response.body();
+    }
 
-        List<RepoFile> configFiles = new ArrayList<>();
-        List<String> allFiles = getFileTree(branch, null);
-
-        for (String filePath : allFiles) {
-            String fileName = filePath.contains("/")
-                    ? filePath.substring(filePath.lastIndexOf("/") + 1)
-                    : filePath;
-
-            if (configPatterns.stream().anyMatch(pattern -> fileName.equalsIgnoreCase(pattern))) {
-                String content = getFileContent(branch, filePath);
-                if (content != null) {
-                    configFiles.add(new RepoFile(filePath, content));
-                }
+    @Override
+    public List<String> searchFiles(OperationContext context, String query) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/src?q=%s", API_BASE, encode(workspace), encode(repoSlug),
+                encode(query));
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "searchFiles");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "searchFiles");
+        JsonNode json = objectMapper.readTree(response.body());
+        List<String> paths = new ArrayList<>();
+        if (json.has("values")) {
+            for (JsonNode node : json.get("values")) {
+                paths.add(node.get("path").asText());
             }
         }
-        return configFiles;
+        return paths;
     }
 
-    public record RepoFile(String path, String content) {
-    }
-
-    /** @deprecated Use {@link SourceControlClient.PullRequestResult} instead. */
-    @Deprecated
-    public static SourceControlClient.PullRequestResult pullRequestResult(String id, String url, String branchName) {
-        return new SourceControlClient.PullRequestResult(id, url, branchName);
-    }
-
-    /**
-     * Result of parsing a Bitbucket repository URL.
-     */
-    public record ParsedRepoUrl(String workspace, String repoSlug) {
-    }
-
-    /**
-     * Parses various Bitbucket URL formats and extracts workspace and repository
-     * slug.
-     * Supports:
-     * - HTTPS: https://bitbucket.org/workspace/repo
-     * - HTTPS with .git: https://bitbucket.org/workspace/repo.git
-     * - SSH: git@bitbucket.org:workspace/repo.git
-     * - SSH without .git: git@bitbucket.org:workspace/repo
-     * - API URLs: https://api.bitbucket.org/2.0/repositories/workspace/repo
-     *
-     * @param url The Bitbucket repository URL to parse
-     * @return ParsedRepoUrl containing workspace and repoSlug
-     * @throws IllegalArgumentException if the URL format is not recognized
-     */
-    public static ParsedRepoUrl parseRepoUrl(String url) {
-        Objects.requireNonNull(url, "url must not be null");
-        String trimmedUrl = url.trim();
-
-        if (trimmedUrl.isEmpty()) {
-            throw new IllegalArgumentException("URL must not be empty");
-        }
-
-        // Remove trailing .git if present
-        if (trimmedUrl.endsWith(".git")) {
-            trimmedUrl = trimmedUrl.substring(0, trimmedUrl.length() - 4);
-        }
-
-        // Remove trailing slash if present
-        if (trimmedUrl.endsWith("/")) {
-            trimmedUrl = trimmedUrl.substring(0, trimmedUrl.length() - 1);
-        }
-
-        // SSH format: git@bitbucket.org:workspace/repo
-        if (trimmedUrl.startsWith("git@bitbucket.org:")) {
-            String path = trimmedUrl.substring("git@bitbucket.org:".length());
-            return parseWorkspaceAndRepo(path, url);
-        }
-
-        // HTTPS format: https://bitbucket.org/workspace/repo
-        if (trimmedUrl.startsWith("https://bitbucket.org/")) {
-            String path = trimmedUrl.substring("https://bitbucket.org/".length());
-            return parseWorkspaceAndRepo(path, url);
-        }
-
-        // HTTP format: http://bitbucket.org/workspace/repo
-        if (trimmedUrl.startsWith("http://bitbucket.org/")) {
-            String path = trimmedUrl.substring("http://bitbucket.org/".length());
-            return parseWorkspaceAndRepo(path, url);
-        }
-
-        // API URL format: https://api.bitbucket.org/2.0/repositories/workspace/repo
-        if (trimmedUrl.contains("api.bitbucket.org") && trimmedUrl.contains("/repositories/")) {
-            int repoIndex = trimmedUrl.indexOf("/repositories/");
-            String path = trimmedUrl.substring(repoIndex + "/repositories/".length());
-            return parseWorkspaceAndRepo(path, url);
-        }
-
-        throw new IllegalArgumentException("Unrecognized Bitbucket URL format: " + url);
-    }
-
-    private static ParsedRepoUrl parseWorkspaceAndRepo(String path, String originalUrl) {
-        String[] parts = path.split("/");
-        if (parts.length < 2) {
-            throw new IllegalArgumentException("Could not extract workspace and repo from URL: " + originalUrl);
-        }
-
-        String workspace = parts[0];
-        String repoSlug = parts[1];
-
-        if (workspace.isEmpty() || repoSlug.isEmpty()) {
-            throw new IllegalArgumentException("Workspace and repo slug must not be empty: " + originalUrl);
-        }
-
-        return new ParsedRepoUrl(workspace, repoSlug);
-    }
-
-    /**
-     * Creates a BitbucketClient from a repository URL and credentials.
-     *
-     * @param repoUrl     The Bitbucket repository URL (HTTPS, SSH, or API format)
-     * @param username    The Bitbucket username
-     * @param appPassword The Bitbucket app password
-     * @return A new BitbucketClient instance
-     */
-    public static BitbucketClient fromRepoUrl(String repoUrl, String username, String appPassword) {
-        ParsedRepoUrl parsed = parseRepoUrl(repoUrl);
-        String auth = username + ":" + appPassword;
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
-        String authHeader = "Basic " + encodedAuth;
-
-        String workspace = parsed.workspace();
-        String repoSlug = parsed.repoSlug();
-
-        return new BitbucketClient(
-                authHeader,
-                HttpClient.newHttpClient(),
-                new ObjectMapper(),
-                workspace,
-                repoSlug);
-    }
-
-    // ==================== FULL REPO DOWNLOAD ====================
-
-    /**
-     * Downloads the full repository as a zip archive and extracts it to disk.
-     * Uses the Bitbucket Cloud download URL format.
-     *
-     * @param branch    The branch to download (e.g., "main")
-     * @param outputDir The parent directory for extraction (e.g., /tmp)
-     * @return Path to the extracted repository root directory
-     */
     @Override
-    public Path downloadArchive(String branch, Path outputDir) throws Exception {
-        // Bitbucket archive download URL
-        String url = String.format("https://bitbucket.org/%s/%s/get/%s.zip",
-                encode(workspace), encode(repoSlug), encode(branch));
+    public String addPrComment(OperationContext context, String prNumber, String body) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/pullrequests/%s/comments", API_BASE, encode(workspace),
+                encode(repoSlug),
+                prNumber);
+        Map<String, Object> bodyMap = Map.of("content", Map.of("raw", body));
+        HttpRequest request = buildPostRequest(url, objectMapper.writeValueAsString(bodyMap));
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "addPrComment");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "addPrComment");
+        return objectMapper.readTree(response.body()).get("id").asText();
+    }
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Authorization", authHeader)
-                .timeout(Duration.ofMinutes(5))
-                .GET()
-                .build();
-
-        Path zipFile = outputDir.resolve("repo-" + System.currentTimeMillis() + ".zip");
-
-        HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(zipFile));
-
-        if (response.statusCode() != 200) {
-            Files.deleteIfExists(zipFile);
-            throw new RuntimeException("Failed to download archive: HTTP " + response.statusCode());
+    @Override
+    public void addPrComment(OperationContext context, String repoOwner, String repoSlug, String prNumber,
+            String body) {
+        try {
+            addPrComment(context, prNumber, body);
+        } catch (Exception e) {
+            log.error("Failed to add PR comment: {}", e.getMessage(), e);
         }
+    }
 
-        log.info("Downloaded archive: {} ({} bytes)", zipFile, Files.size(zipFile));
+    @Override
+    public String addPrCommentReply(OperationContext context, String prNumber, String parentCommentId, String body)
+            throws Exception {
+        String url = String.format("%s/repositories/%s/%s/pullrequests/%s/comments", API_BASE, encode(workspace),
+                encode(repoSlug),
+                prNumber);
+        Map<String, Object> bodyMap = Map.of(
+                "content", Map.of("raw", body),
+                "parent", Map.of("id", Long.parseLong(parentCommentId)));
+        HttpRequest request = buildPostRequest(url, objectMapper.writeValueAsString(bodyMap));
+        HttpResponse<String> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofString()), "Bitbucket", "addPrCommentReply");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "addPrCommentReply");
+        return objectMapper.readTree(response.body()).get("id").asText();
+    }
 
-        // Extract zip to a temp directory
-        Path extractDir = outputDir.resolve("repo-extract-" + System.currentTimeMillis());
-        Files.createDirectories(extractDir);
+    @Override
+    public void addPrCommentReply(OperationContext context, String repoOwner, String repoSlug, String prNumber,
+            String parentCommentId, String body) {
+        try {
+            addPrCommentReply(context, prNumber, parentCommentId, body);
+        } catch (Exception e) {
+            log.error("Failed to add PR comment reply: {}", e.getMessage(), e);
+        }
+    }
 
+    @Override
+    public Path downloadArchive(OperationContext context, @NonNull BranchName branch, Path outputDir) throws Exception {
+        String url = String.format("%s/repositories/%s/%s/get/%s.zip", API_BASE, encode(workspace), encode(repoSlug),
+                branch.name());
+        HttpRequest request = buildGetRequest(url);
+        HttpResponse<byte[]> response = HttpResponseHandler.sendWithRetry(
+                () -> httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray()), "Bitbucket",
+                "downloadArchive");
+        HttpResponseHandler.checkResponse(response, "Bitbucket", "downloadArchive");
+
+        Files.createDirectories(outputDir);
+        Path zipFile = outputDir.resolve("repo.zip");
+        Files.write(zipFile, response.body());
+
+        try {
+            unzip(zipFile, outputDir);
+            return findRepoRoot(outputDir);
+        } finally {
+            Files.deleteIfExists(zipFile);
+        }
+    }
+
+    @Override
+    public String getWorkflowRunLogs(OperationContext context, String runId, Integer maxLogChars) throws Exception {
+        log.warn("getWorkflowRunLogs is not yet implemented for Bitbucket Pipeline APIs");
+        return "Bitbucket log fetching is pending implementation.";
+    }
+
+    private void unzip(Path zipFile, Path extractDir) throws IOException {
         try (ZipInputStream zis = new ZipInputStream(Files.newInputStream(zipFile))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
-                Path entryPath = extractDir.resolve(entry.getName()).normalize();
-
-                // Prevent zip-slip attacks
-                if (!entryPath.startsWith(extractDir)) {
-                    throw new SecurityException("Zip entry outside target dir: " + entry.getName());
-                }
-
+                Path newPath = extractDir.resolve(entry.getName());
                 if (entry.isDirectory()) {
-                    Files.createDirectories(entryPath);
+                    Files.createDirectories(newPath);
                 } else {
-                    Files.createDirectories(entryPath.getParent());
-                    Files.copy(zis, entryPath);
+                    Files.createDirectories(newPath.getParent());
+                    Files.copy(zis, newPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 }
                 zis.closeEntry();
             }
         }
-
-        // Clean up zip file to free disk space
-        Files.deleteIfExists(zipFile);
-
-        // Bitbucket zips contain a single root directory: {user}-{repo}-{hash}/
-        // Detect and return the actual repo root
-        try (var dirs = Files.list(extractDir)) {
-            List<Path> topLevel = dirs.filter(Files::isDirectory).toList();
-            if (topLevel.size() == 1) {
-                log.info("Extracted repo to: {}", topLevel.get(0));
-                return topLevel.get(0);
-            }
-        }
-
-        log.info("Extracted repo to: {}", extractDir);
-        return extractDir;
     }
 
-    /**
-     * Recursively deletes a directory and all its contents.
-     * Used for cleaning up extracted archives from /tmp.
-     */
-    public static void deleteDirectory(Path dir) {
-        if (dir == null || !Files.exists(dir))
-            return;
+    private Path findRepoRoot(Path extractDir) throws IOException {
+        try (var stream = Files.list(extractDir)) {
+            return stream.filter(Files::isDirectory)
+                    .findFirst()
+                    .orElse(extractDir);
+        }
+    }
+
+    // --- Helpers ---
+    private HttpRequest buildGetRequest(String url) {
+        return HttpRequest.newBuilder().uri(URI.create(url)).header("Authorization", authHeader).GET().build();
+    }
+
+    private HttpRequest buildPostRequest(String url, String body) {
+        return HttpRequest.newBuilder().uri(URI.create(url)).header("Authorization", authHeader)
+                .header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(body)).build();
+    }
+
+    private String encode(String val) {
+        return URLEncoder.encode(val, StandardCharsets.UTF_8);
+    }
+
+    public static ParsedRepoUrl parseRepoUrl(String url) {
+        Objects.requireNonNull(url, "url must not be null");
+        if (url.isBlank())
+            throw new IllegalArgumentException("url must not be blank");
+
+        // Handle SSH: git@bitbucket.org:myworkspace/myrepo.git
+        if (url.startsWith("git@")) {
+            if (!url.contains("bitbucket.org")) {
+                throw new IllegalArgumentException("Invalid repository URL: " + url);
+            }
+            int colonIdx = url.indexOf(':');
+            if (colonIdx != -1) {
+                String path = url.substring(colonIdx + 1);
+                String[] parts = path.split("/");
+                if (parts.length >= 2) {
+                    return new ParsedRepoUrl(parts[0], parts[1].replace(".git", ""));
+                }
+            }
+            throw new IllegalArgumentException("Invalid repo URL format");
+        }
+
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            throw new IllegalArgumentException("Invalid repository URL: " + url);
+        }
+
+        if (!url.contains("bitbucket.org")) {
+            throw new IllegalArgumentException("Invalid repository URL: " + url);
+        }
 
         try {
-            Files.walkFileTree(dir, new SimpleFileVisitor<>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    Files.delete(file);
-                    return FileVisitResult.CONTINUE;
-                }
+            URI uri = URI.create(url);
+            String path = uri.getPath();
+            if (path == null || path.isEmpty()) {
+                throw new IllegalArgumentException("Invalid repo URL format");
+            }
 
-                @Override
-                public FileVisitResult postVisitDirectory(Path d, IOException exc) throws IOException {
-                    Files.delete(d);
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            log.warn("Failed to clean up directory {}: {}", dir, e.getMessage());
+            if (path.startsWith("/"))
+                path = path.substring(1);
+
+            if (path.endsWith("/"))
+                path = path.substring(0, path.length() - 1);
+
+            // Handle API URL: https://api.bitbucket.org/2.0/repositories/workspace/slug
+            if (path.startsWith("2.0/repositories/")) {
+                path = path.substring("2.0/repositories/".length());
+            }
+
+            String[] parts = path.split("/");
+            if (parts.length < 2)
+                throw new IllegalArgumentException("Invalid repo URL format");
+
+            String workspace = parts[0];
+            String slug = parts[1].replace(".git", "");
+            return new ParsedRepoUrl(workspace, slug);
+        } catch (Exception e) {
+            if (e instanceof IllegalArgumentException)
+                throw (IllegalArgumentException) e;
+            throw new IllegalArgumentException("Invalid repository URL: " + url, e);
         }
+    }
+
+    public record ParsedRepoUrl(String workspace, String repoSlug) {
     }
 }

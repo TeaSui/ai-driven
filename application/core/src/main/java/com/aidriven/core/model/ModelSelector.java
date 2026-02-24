@@ -18,7 +18,9 @@ public final class ModelSelector {
 
     private static final Map<String, String> MODEL_MAP = Map.of(
             "haiku", "claude-haiku-4-5",
-            "sonnet", "claude-sonnet-4-5",
+            "sonnet", "claude-sonnet-4-6",
+            // ADR-012: Opus is the precision fallback, pinned to 4-6 to match README and
+            // STRATEGY.md
             "opus", "claude-opus-4-6");
 
     private ModelSelector() {

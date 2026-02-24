@@ -27,7 +27,7 @@ class ConversationRepositoryTest {
     @Test
     void save_and_load_single_message() {
         ConversationMessage msg = ConversationMessage.builder()
-                .pk(ConversationMessage.createPk("ONC-100"))
+                .pk(ConversationMessage.createPk("test-tenant", "ONC-100"))
                 .sk(ConversationMessage.createSk(Instant.parse("2026-02-15T10:00:00Z"), 1))
                 .role("user")
                 .author("tea.nguyen")
@@ -40,7 +40,7 @@ class ConversationRepositoryTest {
 
         repository.save(msg);
 
-        List<ConversationMessage> history = repository.getConversation("ONC-100");
+        List<ConversationMessage> history = repository.getConversation("test-tenant", "ONC-100");
         assertEquals(1, history.size());
         assertEquals("user", history.get(0).getRole());
         assertEquals("tea.nguyen", history.get(0).getAuthor());
@@ -58,7 +58,7 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t1, 1, "user", "tea.nguyen", 50);
         saveMessage("ONC-100", t3, 1, "user", "tea.nguyen", 60);
 
-        List<ConversationMessage> history = repository.getConversation("ONC-100");
+        List<ConversationMessage> history = repository.getConversation("test-tenant", "ONC-100");
         assertEquals(3, history.size());
         assertEquals("user", history.get(0).getRole()); // t1 first
         assertEquals("assistant", history.get(1).getRole()); // t2 second
@@ -67,7 +67,7 @@ class ConversationRepositoryTest {
 
     @Test
     void load_returns_empty_for_unknown_ticket() {
-        List<ConversationMessage> history = repository.getConversation("UNKNOWN-999");
+        List<ConversationMessage> history = repository.getConversation("test-tenant", "UNKNOWN-999");
         assertNotNull(history);
         assertTrue(history.isEmpty());
     }
@@ -81,10 +81,10 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t1, 1, "user", "alice", 50);
         saveMessage("ONC-200", t1, 1, "user", "bob", 60);
 
-        assertEquals(1, repository.getConversation("ONC-100").size());
-        assertEquals(1, repository.getConversation("ONC-200").size());
-        assertEquals("alice", repository.getConversation("ONC-100").get(0).getAuthor());
-        assertEquals("bob", repository.getConversation("ONC-200").get(0).getAuthor());
+        assertEquals(1, repository.getConversation("test-tenant", "ONC-100").size());
+        assertEquals(1, repository.getConversation("test-tenant", "ONC-200").size());
+        assertEquals("alice", repository.getConversation("test-tenant", "ONC-100").get(0).getAuthor());
+        assertEquals("bob", repository.getConversation("test-tenant", "ONC-200").get(0).getAuthor());
     }
 
     // --- total tokens ---
@@ -97,13 +97,13 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t1, 1, "user", "tea.nguyen", 100);
         saveMessage("ONC-100", t2, 1, "assistant", "ai-agent", 500);
 
-        int total = repository.getTotalTokens("ONC-100");
+        int total = repository.getTotalTokens("test-tenant", "ONC-100");
         assertEquals(600, total);
     }
 
     @Test
     void getTotalTokens_returns_zero_for_empty_conversation() {
-        assertEquals(0, repository.getTotalTokens("UNKNOWN-999"));
+        assertEquals(0, repository.getTotalTokens("test-tenant", "UNKNOWN-999"));
     }
 
     // --- delete ---
@@ -116,9 +116,9 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t1, 1, "user", "tea.nguyen", 50);
         saveMessage("ONC-100", t2, 1, "assistant", "ai-agent", 200);
 
-        repository.deleteConversation("ONC-100");
+        repository.deleteConversation("test-tenant", "ONC-100");
 
-        assertTrue(repository.getConversation("ONC-100").isEmpty());
+        assertTrue(repository.getConversation("test-tenant", "ONC-100").isEmpty());
     }
 
     @Test
@@ -128,10 +128,10 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t1, 1, "user", "alice", 50);
         saveMessage("ONC-200", t1, 1, "user", "bob", 60);
 
-        repository.deleteConversation("ONC-100");
+        repository.deleteConversation("test-tenant", "ONC-100");
 
-        assertTrue(repository.getConversation("ONC-100").isEmpty());
-        assertEquals(1, repository.getConversation("ONC-200").size());
+        assertTrue(repository.getConversation("test-tenant", "ONC-100").isEmpty());
+        assertEquals(1, repository.getConversation("test-tenant", "ONC-200").size());
     }
 
     // --- sequence ordering within same timestamp ---
@@ -145,7 +145,7 @@ class ConversationRepositoryTest {
         saveMessage("ONC-100", t, 2, "assistant", "ai-agent", 200);
         saveMessage("ONC-100", t, 3, "user", "tea.nguyen", 60);
 
-        List<ConversationMessage> history = repository.getConversation("ONC-100");
+        List<ConversationMessage> history = repository.getConversation("test-tenant", "ONC-100");
         assertEquals(3, history.size());
         assertEquals("user", history.get(0).getRole());
         assertEquals("assistant", history.get(1).getRole());
@@ -157,7 +157,7 @@ class ConversationRepositoryTest {
     private void saveMessage(String ticketKey, Instant timestamp, int seq,
             String role, String author, int tokens) {
         repository.save(ConversationMessage.builder()
-                .pk(ConversationMessage.createPk(ticketKey))
+                .pk(ConversationMessage.createPk("test-tenant", ticketKey))
                 .sk(ConversationMessage.createSk(timestamp, seq))
                 .role(role)
                 .author(author)

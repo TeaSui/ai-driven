@@ -33,7 +33,7 @@ Replace the current full-repo download with targeted context fetching:
 - [x] Include import chains (if file A references file B, include B)
 
 ### BitbucketFetchHandler Refactor
-- [x] Add `CONTEXT_MODE` env var (`FULL_REPO` | `INCREMENTAL`, default: `FULL_REPO`)
+- [x] Add `CONTEXT_MODE` env var (`FULL_REPO` | `INCREMENTAL`, default: `INCREMENTAL`)
 - [x] Route to incremental path when mode is `INCREMENTAL`
 - [x] Keep full-repo as fallback when search yields too few results
 - [x] Track files fetched + tokens saved for observability

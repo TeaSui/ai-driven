@@ -58,6 +58,26 @@ public class PromptBuilder {
      * Builds a user message from ticket info.
      */
     public static String buildUserMessage(TicketInfo ticket) {
+        if (ticket == null) {
+            return "Error: TicketInfo is null";
+        }
+
+        String key = ticket.getTicketKey() != null ? ticket.getTicketKey() : "Unknown";
+        String summary = ticket.getSummary() != null ? ticket.getSummary() : "No Summary";
+        String description = ticket.getDescription() != null ? ticket.getDescription() : "No Description";
+
+        java.util.List<String> rawLabels = ticket.getLabels();
+        String labels = "";
+        if (rawLabels != null) {
+            try {
+                labels = String.join(", ", rawLabels);
+            } catch (Exception e) {
+                labels = "Error joining labels: " + e.getMessage();
+            }
+        }
+
+        String priority = ticket.getPriority() != null ? ticket.getPriority() : "None";
+
         return String.format("""
                 Please implement the following feature:
 
@@ -72,10 +92,10 @@ public class PromptBuilder {
 
                 Generate the necessary code to implement this feature.
                 """,
-                ticket.getTicketKey(),
-                ticket.getSummary(),
-                ticket.getDescription(),
-                String.join(", ", ticket.getLabels()),
-                ticket.getPriority());
+                key,
+                summary,
+                description,
+                labels,
+                priority);
     }
 }

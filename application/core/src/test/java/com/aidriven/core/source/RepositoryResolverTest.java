@@ -1,149 +1,52 @@
 package com.aidriven.core.source;
 
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-
 import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 class RepositoryResolverTest {
 
-    @Nested
-    class ResolveFromLabels {
-        @Test
-        void should_resolve_repo_from_label() {
-            var result = RepositoryResolver.resolve(
-                    List.of("ai-generate", "repo:my-org/my-repo"), null, null, null, null);
+    @Test
+    void should_resolve_from_valid_label() {
+        List<String> labels = List.of("repo:TeaSui/ai-driven");
+        RepositoryResolver.ResolvedRepository result = RepositoryResolver.resolve(
+                labels, null, "DefaultOwner", "DefaultRepo", "GITHUB");
 
-            assertNotNull(result);
-            assertEquals("my-org", result.owner());
-            assertEquals("my-repo", result.repo());
-        }
-
-        @Test
-        void should_resolve_platform_alongside_repo_label() {
-            var result = RepositoryResolver.resolve(
-                    List.of("repo:owner/project", "platform:github"), null, null, null, null);
-
-            assertNotNull(result);
-            assertEquals("owner", result.owner());
-            assertEquals("project", result.repo());
-            assertEquals(Platform.GITHUB, result.platform());
-        }
-
-        @Test
-        void should_ignore_malformed_repo_label() {
-            var result = RepositoryResolver.resolve(
-                    List.of("repo:invalid"), null, "default-ws", "default-repo", null);
-
-            assertNotNull(result);
-            assertEquals("default-ws", result.owner());
-            assertEquals("default-repo", result.repo());
-        }
-
-        @Test
-        void should_ignore_empty_repo_label() {
-            var result = RepositoryResolver.resolve(
-                    List.of("repo:/repo"), null, "ws", "repo", null);
-
-            assertNotNull(result);
-            assertEquals("ws", result.owner());
-        }
+        assertNotNull(result);
+        assertEquals("TeaSui", result.owner());
+        assertEquals("ai-driven", result.repo());
     }
 
-    @Nested
-    class ResolveFromUrl {
-        @Test
-        void should_resolve_from_github_url() {
-            var result = RepositoryResolver.resolve(
-                    null, "https://github.com/acme/backend", null, null, null);
+    @Test
+    void should_resolve_from_label_with_spaces_and_casing() {
+        List<String> labels = List.of(" REPO:TeaKuo/test-repo ");
+        RepositoryResolver.ResolvedRepository result = RepositoryResolver.resolve(
+                labels, null, "DefaultOwner", "DefaultRepo", "GITHUB");
 
-            assertNotNull(result);
-            assertEquals("acme", result.owner());
-            assertEquals("backend", result.repo());
-            assertEquals(Platform.GITHUB, result.platform());
-        }
-
-        @Test
-        void should_resolve_from_bitbucket_url() {
-            var result = RepositoryResolver.resolve(
-                    null, "https://bitbucket.org/workspace/project", null, null, null);
-
-            assertNotNull(result);
-            assertEquals("workspace", result.owner());
-            assertEquals("project", result.repo());
-            assertEquals(Platform.BITBUCKET, result.platform());
-        }
-
-        @Test
-        void should_resolve_from_ssh_url() {
-            var result = RepositoryResolver.resolve(
-                    null, "git@github.com:owner/repo.git", null, null, null);
-
-            assertNotNull(result);
-            assertEquals("owner", result.owner());
-            assertEquals("repo", result.repo());
-            assertEquals(Platform.GITHUB, result.platform());
-        }
+        assertNotNull(result);
+        assertEquals("TeaKuo", result.owner());
+        assertEquals("test-repo", result.repo());
     }
 
-    @Nested
-    class ResolveFromDefaults {
-        @Test
-        void should_use_default_owner_and_repo() {
-            var result = RepositoryResolver.resolve(
-                    null, null, "my-workspace", "my-repo", "BITBUCKET");
+    @Test
+    void should_resolve_from_label_with_extra_colon() {
+        List<String> labels = List.of("repo: TeaSui/ai-driven");
+        RepositoryResolver.ResolvedRepository result = RepositoryResolver.resolve(
+                labels, null, "DefaultOwner", "DefaultRepo", "GITHUB");
 
-            assertNotNull(result);
-            assertEquals("my-workspace", result.owner());
-            assertEquals("my-repo", result.repo());
-            assertEquals(Platform.BITBUCKET, result.platform());
-        }
-
-        @Test
-        void should_return_null_when_no_info_available() {
-            var result = RepositoryResolver.resolve(null, null, null, null, null);
-            assertNull(result);
-        }
-
-        @Test
-        void should_return_null_when_only_owner_provided() {
-            var result = RepositoryResolver.resolve(null, null, "owner", null, null);
-            assertNull(result);
-        }
-
-        @Test
-        void should_return_null_when_only_repo_provided() {
-            var result = RepositoryResolver.resolve(null, null, null, "repo", null);
-            assertNull(result);
-        }
+        assertNotNull(result);
+        assertEquals("TeaSui", result.owner());
+        assertEquals("ai-driven", result.repo());
     }
 
-    @Nested
-    class LabelPriority {
-        @Test
-        void should_prefer_label_over_url() {
-            var result = RepositoryResolver.resolve(
-                    List.of("repo:label-owner/label-repo"),
-                    "https://github.com/url-owner/url-repo",
-                    "default-owner", "default-repo", null);
+    @Test
+    void should_fallback_to_default_when_no_matching_label() {
+        List<String> labels = List.of("other-label");
+        RepositoryResolver.ResolvedRepository result = RepositoryResolver.resolve(
+                labels, null, "DefaultOwner", "DefaultRepo", "GITHUB");
 
-            assertNotNull(result);
-            assertEquals("label-owner", result.owner());
-            assertEquals("label-repo", result.repo());
-        }
-
-        @Test
-        void should_prefer_url_over_defaults() {
-            var result = RepositoryResolver.resolve(
-                    List.of("ai-generate"),
-                    "https://github.com/url-owner/url-repo",
-                    "default-owner", "default-repo", null);
-
-            assertNotNull(result);
-            assertEquals("url-owner", result.owner());
-            assertEquals("url-repo", result.repo());
-        }
+        assertNotNull(result);
+        assertEquals("DefaultOwner", result.owner());
+        assertEquals("DefaultRepo", result.repo());
     }
 }

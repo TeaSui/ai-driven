@@ -3,6 +3,7 @@ package com.aidriven.lambda;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.IdempotencyService;
 import com.aidriven.jira.JiraClient;
+import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,8 +12,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import software.amazon.awssdk.services.sfn.SfnClient;
+import com.aidriven.core.config.AppConfig;
 import software.amazon.awssdk.services.sfn.model.StartExecutionRequest;
 import software.amazon.awssdk.services.sfn.model.StartExecutionResponse;
+import com.aidriven.core.security.RateLimiter;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -42,16 +45,31 @@ class JiraWebhookHandlerTest {
     @Mock
     private Context lambdaContext;
 
+    @Mock
+    private ServiceFactory serviceFactory;
+
+    @Mock
+    private AppConfig appConfig;
+
+    @Mock
+    private RateLimiter rateLimiter;
+
     private JiraWebhookHandler handler;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
+        when(serviceFactory.getAppConfig()).thenReturn(appConfig);
+        when(appConfig.getDefaultWorkspace()).thenReturn("test-workspace");
+        when(appConfig.getDefaultRepo()).thenReturn("test-repo");
+        when(appConfig.getDefaultPlatform()).thenReturn("BITBUCKET");
+        when(serviceFactory.getRateLimiter()).thenReturn(rateLimiter);
+
         String stateMachineArn = "arn:aws:states:us-east-1:123456789:stateMachine:test";
         handler = new JiraWebhookHandler(
                 objectMapper, ticketStateRepository, idempotencyService,
-                jiraClient, sfnClient, stateMachineArn);
+                jiraClient, sfnClient, stateMachineArn, serviceFactory);
     }
 
     @Test
@@ -167,7 +185,8 @@ class JiraWebhookHandlerTest {
         Map<String, Object> input = Map.of("body", payload);
 
         // Simulate duplicate - checkAndRecord returns false
-        when(idempotencyService.checkAndRecord("12345", "12345")).thenReturn(false);
+        when(idempotencyService.checkAndRecord(anyString(), eq("12345"), eq("PROJ-123"), anyString()))
+                .thenReturn(false);
 
         Map<String, Object> result = handler.handleRequest(input, lambdaContext);
 
@@ -193,7 +212,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("12345", "12345")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("12345"), eq("PROJ-123"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -224,7 +243,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("67890", "67890")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("67890"), eq("PROJ-456"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -253,7 +272,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("11111", "11111")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("11111"), eq("PROJ-789"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -281,7 +300,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("22222", "22222")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("22222"), eq("PROJ-100"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -313,7 +332,7 @@ class JiraWebhookHandlerTest {
         input.put("body", encoded);
         input.put("isBase64Encoded", true);
 
-        when(idempotencyService.checkAndRecord("33333", "33333")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("33333"), eq("PROJ-200"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -334,7 +353,7 @@ class JiraWebhookHandlerTest {
                 "id", "44444",
                 "fields", Map.of("labels", java.util.List.of("ai-generate"))));
 
-        when(idempotencyService.checkAndRecord("44444", "44444")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("44444"), eq("PROJ-300"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -382,7 +401,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("66666", "66666")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("66666"), eq("PROJ-500"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenThrow(new RuntimeException("SFN error"));
 
@@ -409,7 +428,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("77777", "77777")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("77777"), eq("PROJ-600"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -436,7 +455,7 @@ class JiraWebhookHandlerTest {
                 """;
         Map<String, Object> input = Map.of("body", payload);
 
-        when(idempotencyService.checkAndRecord("88888", "88888")).thenReturn(true);
+        when(idempotencyService.checkAndRecord(anyString(), eq("88888"), eq("PROJ-700"), anyString())).thenReturn(true);
         when(sfnClient.startExecution(any(StartExecutionRequest.class)))
                 .thenReturn(StartExecutionResponse.builder().build());
 
@@ -445,5 +464,123 @@ class JiraWebhookHandlerTest {
         assertEquals(200, result.get("statusCode"));
         String body = (String) result.get("body");
         assertTrue(body.contains("Workflow started"));
+    }
+
+    // ─── Exact label match security tests ───
+
+    @Test
+    void should_skip_when_label_is_prefixed_variant_of_ai_generate() {
+        // "custom-ai-generate-label" CONTAINS "ai-generate" as substring but must NOT
+        // trigger
+        String payload = """
+                {
+                    "webhookEvent": "jira:issue_updated",
+                    "issue": {
+                        "key": "PROJ-800",
+                        "id": "90001",
+                        "fields": {
+                            "labels": ["custom-ai-generate-label"]
+                        }
+                    }
+                }
+                """;
+        Map<String, Object> input = Map.of("body", payload);
+
+        Map<String, Object> result = handler.handleRequest(input, lambdaContext);
+
+        assertEquals(200, result.get("statusCode"));
+        String body = (String) result.get("body");
+        assertTrue(body.contains("skipped"),
+                "custom-ai-generate-label must not trigger the pipeline; got: " + body);
+        assertTrue(body.contains("No AI-related labels"),
+                "Reason should indicate no valid AI labels; got: " + body);
+        // Idempotency should NOT be checked — handler skipped before that point
+        verify(idempotencyService, never()).checkAndRecord(any(), any(), any(), any());
+    }
+
+    @Test
+    void should_skip_when_label_is_suffixed_variant_of_ai_generate() {
+        // "ai-generate-custom" has the prefix "ai-generate" but must NOT trigger
+        String payload = """
+                {
+                    "webhookEvent": "jira:issue_updated",
+                    "issue": {
+                        "key": "PROJ-801",
+                        "id": "90002",
+                        "fields": {
+                            "labels": ["ai-generate-custom"]
+                        }
+                    }
+                }
+                """;
+        Map<String, Object> input = Map.of("body", payload);
+
+        Map<String, Object> result = handler.handleRequest(input, lambdaContext);
+
+        assertEquals(200, result.get("statusCode"));
+        String body = (String) result.get("body");
+        assertTrue(body.contains("skipped"),
+                "ai-generate-custom must not trigger the pipeline; got: " + body);
+        verify(idempotencyService, never()).checkAndRecord(any(), any(), any(), any());
+    }
+
+    @Test
+    void should_skip_when_label_only_partially_matches_ai_test() {
+        // "ai-testing" is NOT in VALID_AI_LABELS (which contains "ai-test")
+        String payload = """
+                {
+                    "webhookEvent": "jira:issue_updated",
+                    "issue": {
+                        "key": "PROJ-802",
+                        "id": "90003",
+                        "fields": {
+                            "labels": ["ai-testing"]
+                        }
+                    }
+                }
+                """;
+        Map<String, Object> input = Map.of("body", payload);
+
+        Map<String, Object> result = handler.handleRequest(input, lambdaContext);
+
+        assertEquals(200, result.get("statusCode"));
+        assertTrue(((String) result.get("body")).contains("skipped"));
+    }
+
+    // ─── HMAC skip when no secret configured ───
+
+    @Test
+    void should_process_webhook_normally_when_no_jira_webhook_secret_configured() throws Exception {
+        // Default mock: appConfig.getJiraWebhookSecret() → Optional.empty()
+        // appConfig.getJiraWebhookSecretArn() → Optional.empty()
+        // → resolveJiraWebhookSecret() returns null → verifyJiraWebhookToken skips with
+        // WARN
+        String payload = """
+                {
+                    "webhookEvent": "jira:issue_updated",
+                    "issue": {
+                        "key": "PROJ-803",
+                        "id": "90004",
+                        "fields": {
+                            "labels": ["ai-generate"]
+                        }
+                    }
+                }
+                """;
+        // No extra headers — HMAC verification is skipped when secret is absent
+        Map<String, Object> input = Map.of("body", payload);
+
+        when(idempotencyService.checkAndRecord(anyString(), eq("90004"), eq("PROJ-803"), anyString()))
+                .thenReturn(true);
+        when(sfnClient.startExecution(any(StartExecutionRequest.class)))
+                .thenReturn(StartExecutionResponse.builder().build());
+
+        Map<String, Object> result = handler.handleRequest(input, lambdaContext);
+
+        assertEquals(200, result.get("statusCode"),
+                "Webhook should be accepted when no JIRA_WEBHOOK_SECRET is configured");
+        String body = (String) result.get("body");
+        assertTrue(body.contains("Workflow started"));
+        verify(sfnClient).startExecution(any(StartExecutionRequest.class));
     }
 }

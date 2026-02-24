@@ -5,6 +5,7 @@ import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.model.TicketState;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.jira.JiraClient;
+import com.aidriven.spi.model.OperationContext;
 import com.amazonaws.services.lambda.runtime.Context;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class FetchTicketHandlerTest {
                 .priority("High")
                 .build();
 
-        when(jiraClient.getTicket("PROJ-1")).thenReturn(ticket);
+        when(jiraClient.getTicket(any(OperationContext.class), eq("PROJ-1"))).thenReturn(ticket);
 
         Map<String, Object> input = Map.of("ticketKey", "PROJ-1", "ticketId", "123");
         Map<String, Object> result = handler.handleRequest(input, lambdaContext);
@@ -77,12 +78,12 @@ class FetchTicketHandlerTest {
                 .labels(List.of("ai-model:sonnet"))
                 .build();
 
-        when(jiraClient.getTicket("PROJ-2")).thenReturn(ticket);
+        when(jiraClient.getTicket(any(OperationContext.class), eq("PROJ-2"))).thenReturn(ticket);
 
         Map<String, Object> input = Map.of("ticketKey", "PROJ-2", "ticketId", "123");
         Map<String, Object> result = handler.handleRequest(input, lambdaContext);
 
-        assertEquals("claude-sonnet-4-5", result.get("resolvedModel"));
+        assertEquals("claude-sonnet-4-6", result.get("resolvedModel"));
     }
 
     @Test
@@ -98,7 +99,7 @@ class FetchTicketHandlerTest {
                 .labels(List.of("backend")) // No platform label
                 .build();
 
-        when(jiraClient.getTicket("PROJ-4")).thenReturn(ticket);
+        when(jiraClient.getTicket(any(OperationContext.class), eq("PROJ-4"))).thenReturn(ticket);
 
         Map<String, Object> input = Map.of("ticketKey", "PROJ-4", "ticketId", "123");
         Map<String, Object> result = handler.handleRequest(input, lambdaContext);
@@ -108,7 +109,8 @@ class FetchTicketHandlerTest {
 
     @Test
     void should_propagate_jira_error() throws Exception {
-        when(jiraClient.getTicket("PROJ-3")).thenThrow(new RuntimeException("Jira down"));
+        when(jiraClient.getTicket(any(OperationContext.class), eq("PROJ-3")))
+                .thenThrow(new RuntimeException("Jira down"));
 
         Map<String, Object> input = Map.of("ticketKey", "PROJ-3", "ticketId", "123");
 

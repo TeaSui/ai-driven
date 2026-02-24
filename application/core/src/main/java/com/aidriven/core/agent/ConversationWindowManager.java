@@ -45,11 +45,12 @@ public class ConversationWindowManager {
      * Builds the message list for the Claude API call, applying token window
      * pruning.
      *
+     * @param tenantId  The tenant ID
      * @param ticketKey Jira ticket key
      * @return Ordered list of messages in Claude API format, pruned to fit budget
      */
-    public List<Map<String, Object>> buildMessages(String ticketKey) {
-        List<ConversationMessage> allMessages = repository.getConversation(ticketKey);
+    public List<Map<String, Object>> buildMessages(String tenantId, String ticketKey) {
+        List<ConversationMessage> allMessages = repository.getConversation(tenantId, ticketKey);
         if (allMessages.isEmpty()) {
             return List.of();
         }
@@ -61,14 +62,15 @@ public class ConversationWindowManager {
     /**
      * Saves a new message and builds the pruned message list in one operation.
      *
+     * @param tenantId  The tenant ID
      * @param ticketKey Jira ticket key
      * @param message   New message to persist
      * @return Ordered list of messages (including the new one), pruned to fit
      *         budget
      */
-    public List<Map<String, Object>> appendAndBuild(String ticketKey, ConversationMessage message) {
+    public List<Map<String, Object>> appendAndBuild(String tenantId, String ticketKey, ConversationMessage message) {
         repository.save(message);
-        return buildMessages(ticketKey);
+        return buildMessages(tenantId, ticketKey);
     }
 
     /**

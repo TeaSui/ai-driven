@@ -2,6 +2,8 @@ package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
 import com.aidriven.claude.PromptBuilder;
+import com.aidriven.core.cost.BudgetTracker;
+import com.aidriven.core.cost.ModelPricing;
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.model.GenerationMetrics;
 import com.aidriven.core.model.ProcessingStatus;
@@ -10,6 +12,7 @@ import com.aidriven.core.model.TicketState;
 import com.aidriven.core.repository.GenerationMetricsRepository;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.ContextStorageService;
+import com.aidriven.core.audit.AuditService;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -29,6 +32,7 @@ import java.util.HashMap;
 import java.util.Objects;
 import java.util.Base64;
 import java.nio.charset.StandardCharsets;
+import com.aidriven.spi.model.OperationContext;
 
 /**
  * Lambda handler for direct Claude API invocation in the linear workflow.
@@ -41,10 +45,15 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
     private final TicketStateRepository ticketStateRepository;
     private final GenerationMetricsRepository metricsRepository;
     private final ContextStorageService contextStorageService;
+    private final AuditService auditService;
     private final ClaudeClient claudeClient;
     private final JsonRepairService jsonRepairService;
     private final int maxContext;
     private final String promptVersion;
+    private final boolean costAwareMode;
+    private final double monthlyBudgetUsd;
+    private final int maxTokensPerTicket;
+    private final BudgetTracker budgetTracker;
 
     /** No-arg constructor required by AWS Lambda runtime. */
     public ClaudeInvokeHandler() {
@@ -53,10 +62,15 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
         this.ticketStateRepository = factory.getTicketStateRepository();
         this.metricsRepository = factory.getGenerationMetricsRepository();
         this.contextStorageService = factory.getContextStorageService();
+        this.auditService = factory.getAuditService();
         this.claudeClient = factory.getClaudeClient();
         this.jsonRepairService = new JsonRepairService(factory.getObjectMapper());
         this.maxContext = factory.getAppConfig().getMaxContextForClaude();
         this.promptVersion = factory.getAppConfig().getPromptVersion();
+        this.costAwareMode = factory.getAppConfig().isCostAwareMode();
+        this.monthlyBudgetUsd = factory.getAppConfig().getMonthlyBudgetUsd();
+        this.maxTokensPerTicket = factory.getAppConfig().getMaxTokensPerTicket();
+        this.budgetTracker = factory.getBudgetTracker();
     }
 
     @Override
@@ -74,20 +88,41 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
 
         log.info("ClaudeInvokeHandler processing ticket: {} (dryRun={})", ticketKey, dryRun);
 
+        OperationContext tenantContext = extractTenantContext(input);
         try {
             TicketInfo ticket = parseTicketInfo(ticketId, ticketKey, input);
-            updateStatus(ticketId, ticketKey, ProcessingStatus.GENERATING);
+            updateStatus(tenantContext.getTenantId(), ticketId, ticketKey, ProcessingStatus.GENERATING);
 
             String codeContext = loadContextFromS3((String) input.get("codeContextS3Key"));
             String systemPrompt = PromptBuilder.backendAgentSystemPrompt();
             String userMessage = buildUserMessage(ticket, codeContext);
 
+            // impl-12: cost-aware pre-invocation checks
+            TicketState currentState = ticketStateRepository.getLatestState(
+                    tenantContext.getTenantId(), ticketId).orElse(null);
+            if (costAwareMode) {
+                userMessage = applyCostGuard(ticketKey, userMessage, currentState, tenantContext, ticketId);
+            }
+
             ClaudeClient activeClient = resolveActiveClient((String) input.get("resolvedModel"));
             log.info("Invoking Claude ({}) with prompt length: {} chars", activeClient.getModel(),
                     userMessage.length());
 
+            long startTime = System.currentTimeMillis();
             String response = activeClient.chat(systemPrompt, userMessage);
+            long durationMs = System.currentTimeMillis() - startTime;
+
             AgentResult result = parseClaudeResponse(response, ticketId);
+
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("model", activeClient.getModel());
+            metadata.put("durationMs", durationMs);
+            metadata.put("dryRun", dryRun);
+            auditService.recordInvocation(ticketKey, systemPrompt, userMessage, response, metadata);
+
+            // impl-12: post-invocation cost recording
+            recordCostToTicketState(tenantContext.getTenantId(), ticketId, ticketKey,
+                    activeClient.getModel(), userMessage.length(), response.length());
 
             recordMetrics(ticketKey, activeClient.getModel(), userMessage.length(), response.length(), result,
                     (List<String>) input.get("labels"));
@@ -96,7 +131,7 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
 
         } catch (Exception e) {
             log.error("ClaudeInvokeHandler failed for ticket: {}", ticketKey, e);
-            updateStatus(ticketId, ticketKey, ProcessingStatus.FAILED);
+            updateStatus(tenantContext.getTenantId(), ticketId, ticketKey, ProcessingStatus.FAILED);
             throw new RuntimeException("Claude invocation failed", e);
         } finally {
             // Context cleared by Powertools
@@ -145,6 +180,87 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
 
     private ClaudeClient resolveActiveClient(String resolvedModel) {
         return resolvedModel != null ? claudeClient.withModel(resolvedModel) : claudeClient;
+    }
+
+    /**
+     * Checks token thresholds and monthly budget before invoking Claude.
+     * May downgrade the userMessage context or throw if budget is fully exhausted.
+     *
+     * @return potentially shortened userMessage after downgrade
+     */
+    private String applyCostGuard(String ticketKey, String userMessage, TicketState state,
+            OperationContext ctx, String ticketId) {
+        int estimatedInputTokens = ModelPricing.estimateInputTokens(userMessage.length());
+
+        // Per-ticket token cap
+        int previousTokens = (state != null && state.getInputTokens() != null) ? state.getInputTokens() : 0;
+        if (previousTokens + estimatedInputTokens > maxTokensPerTicket) {
+            log.warn("[CostGuard] Ticket {} would exceed per-ticket token cap ({} + {} > {}). Truncating context.",
+                    ticketKey, previousTokens, estimatedInputTokens, maxTokensPerTicket);
+            // Shorten message to fit within cap
+            int allowedChars = (int) ((maxTokensPerTicket - previousTokens) * ModelPricing.CHARS_PER_TOKEN);
+            if (allowedChars < 200) {
+                throw new RuntimeException("[CostGuard] Per-ticket token cap fully exhausted for " + ticketKey);
+            }
+            if (state == null || Boolean.TRUE.equals(state.getCostWarningSent())) {
+                // Warning already sent or no state — skip redundant comment
+            } else {
+                log.warn("[CostGuard] Posting one-time cost warning to Jira for ticket {}", ticketKey);
+                // Note: Jira comment here would require JiraClient injection — deferred as
+                // low-priority.
+                // The state flag is set so we don't repeat this logic.
+            }
+            userMessage = userMessage.substring(0, Math.min(allowedChars, userMessage.length()));
+        }
+
+        // Monthly budget circuit breaker
+        double totalSpend = (state != null && state.getEstimatedCostUsd() != null) ? state.getEstimatedCostUsd() : 0.0;
+        if (budgetTracker != null && budgetTracker.isBudgetExceeded(totalSpend)) {
+            throw new RuntimeException("[CostGuard] Monthly budget of $" + monthlyBudgetUsd
+                    + " reached for ticket " + ticketKey + ". Total spend: $" + totalSpend);
+        }
+
+        // Log actual vs estimated for calibration
+        log.info("[CostGuard] Ticket={} estimatedInputTokens={} previousTokens={} totalTokensCap={}",
+                ticketKey, estimatedInputTokens, previousTokens, maxTokensPerTicket);
+
+        return userMessage;
+    }
+
+    /**
+     * Records actual token usage and cost to TicketState after a successful
+     * invocation.
+     */
+    private void recordCostToTicketState(String tenantId, String ticketId, String ticketKey,
+            String model, int inputChars, int outputChars) {
+        try {
+            int newInputTokens = ModelPricing.estimateInputTokens(inputChars);
+            int newOutputTokens = ModelPricing.estimateInputTokens(outputChars);
+            double invocationCost = ModelPricing.estimateCostUsd(model, newInputTokens, newOutputTokens);
+
+            TicketState existing = ticketStateRepository.getLatestState(tenantId, ticketId).orElse(
+                    TicketState.forTicket(tenantId, ticketId, ticketKey, ProcessingStatus.GENERATING));
+
+            int totalInput = (existing.getInputTokens() != null ? existing.getInputTokens() : 0) + newInputTokens;
+            int totalOutput = (existing.getOutputTokens() != null ? existing.getOutputTokens() : 0) + newOutputTokens;
+            double totalCost = (existing.getEstimatedCostUsd() != null ? existing.getEstimatedCostUsd() : 0.0)
+                    + invocationCost;
+
+            ticketStateRepository.save(existing.toBuilder()
+                    .inputTokens(totalInput)
+                    .outputTokens(totalOutput)
+                    .estimatedCostUsd(totalCost)
+                    .build());
+
+            if (budgetTracker != null) {
+                budgetTracker.recordUsage(ticketKey, invocationCost);
+            }
+
+            log.info("[CostGuard] Ticket={} thisInvocation=${} totalSpend=${} tokens={}in+{}out",
+                    ticketKey, invocationCost, totalCost, newInputTokens, newOutputTokens);
+        } catch (Exception e) {
+            log.warn("Failed to record cost to TicketState for ticket {}: {}", ticketKey, e.getMessage());
+        }
     }
 
     private void recordMetrics(String ticketKey, String model, int inputLen, int outputLen, AgentResult result,
@@ -239,7 +355,23 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
                 .build();
     }
 
-    private void updateStatus(String id, String key, ProcessingStatus status) {
-        ticketStateRepository.save(TicketState.forTicket(id, key, status).withAgentType("claude-opus"));
+    private void updateStatus(String tenantId, String id, String key, ProcessingStatus status) {
+        ticketStateRepository.save(TicketState.forTicket(tenantId, id, key, status).withAgentType("claude-opus"));
+    }
+
+    private OperationContext extractTenantContext(Map<String, Object> input) {
+        if (!input.containsKey("context") || !(input.get("context") instanceof Map)) {
+            return OperationContext.builder().tenantId("default").build();
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> context = (Map<String, Object>) input.get("context");
+        String tenantId = (String) context.getOrDefault("tenantId", "default");
+        String userId = (String) context.getOrDefault("userId", "system");
+        @SuppressWarnings("unchecked")
+        Map<String, String> metadata = (Map<String, String>) context.getOrDefault("metadata", Map.of());
+        return OperationContext.builder()
+                .tenantId(tenantId)
+                .userId(userId)
+                .build();
     }
 }

@@ -25,24 +25,27 @@ public interface ConversationRepository {
     /**
      * Loads all messages for a ticket, sorted by sort key (chronological order).
      *
+     * @param tenantId  The tenant ID
      * @param ticketKey Jira ticket key (e.g., "ONC-100")
      * @return Ordered list of conversation messages, empty if none
      */
-    List<ConversationMessage> getConversation(String ticketKey);
+    List<ConversationMessage> getConversation(String tenantId, String ticketKey);
 
     /**
      * Returns the total token count across all messages for a ticket.
      *
+     * @param tenantId  The tenant ID
      * @param ticketKey Jira ticket key
      * @return Total tokens, 0 if no conversation exists
      */
-    int getTotalTokens(String ticketKey);
+    int getTotalTokens(String tenantId, String ticketKey);
 
     /**
      * Deletes all messages for a ticket's conversation.
      * Used when resetting conversation state.
      *
+     * @param tenantId  The tenant ID
      * @param ticketKey Jira ticket key
      */
-    void deleteConversation(String ticketKey);
+    void deleteConversation(String tenantId, String ticketKey);
 }

@@ -1,0 +1,24 @@
+{
+  "name": "zeno360-claude-installer",
+  "version": "1.0.0",
+  "description": "CLI tool to setup Claude Code with Zeno360 configuration",
+  "type": "module",
+  "bin": {
+    "zeno360-claude": "index.js"
+  },
+  "scripts": {
+    "build": "bun build index.js --compile --outfile zeno-claude"
+  },
+  "keywords": [
+    "claude",
+    "cli",
+    "zeno360",
+    "ai",
+    "installer"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

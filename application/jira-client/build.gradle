@@ -4,8 +4,9 @@ plugins {
 
 dependencies {
     implementation project(':core')
-    compileOnly 'org.projectlombok:lombok:1.18.30'
-    annotationProcessor 'org.projectlombok:lombok:1.18.30'
-    // java.net.http.HttpClient is built into Java 11+, no external dependency needed
+    implementation project(':spi')
+    compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
+    annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
 }
+
 

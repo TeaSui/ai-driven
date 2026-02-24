@@ -1,11 +1,11 @@
 package com.aidriven.core.agent.guardrail;
 
-import com.aidriven.core.agent.tool.Tool;
 import com.aidriven.core.agent.tool.ToolCall;
 import com.aidriven.core.agent.tool.ToolRegistry;
 import com.aidriven.core.agent.tool.ToolResult;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.notification.ApprovalNotifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,26 +25,31 @@ class GuardedToolRegistryTest {
     @Mock
     private ApprovalStore approvalStore;
 
+    @Mock
+    private ApprovalNotifier approvalNotifier;
+
     private ToolRiskRegistry riskRegistry;
     private GuardedToolRegistry guardedRegistry;
     private final ObjectMapper mapper = new ObjectMapper();
+    private OperationContext operationContext;
 
     @BeforeEach
     void setUp() {
         riskRegistry = new ToolRiskRegistry();
-        guardedRegistry = new GuardedToolRegistry(delegate, riskRegistry, approvalStore, true);
+        guardedRegistry = new GuardedToolRegistry(delegate, riskRegistry, approvalStore, approvalNotifier, true, true);
+        operationContext = OperationContext.builder().tenantId("test-tenant").userId("test-user").build();
     }
 
     @Test
     void execute_lowRiskTool_delegatesDirectly() {
         ToolCall call = toolCall("source_control_get_file");
         ToolResult expected = ToolResult.success(call.id(), "file content");
-        when(delegate.execute(call)).thenReturn(expected);
+        when(delegate.execute(operationContext, call)).thenReturn(expected);
 
-        ToolResult result = guardedRegistry.execute(call, "TICKET-1", "user1");
+        ToolResult result = guardedRegistry.execute(operationContext, call, "TICKET-1", "user1");
 
         assertEquals(expected, result);
-        verify(delegate).execute(call);
+        verify(delegate).execute(operationContext, call);
         verifyNoInteractions(approvalStore);
     }
 
@@ -52,27 +57,29 @@ class GuardedToolRegistryTest {
     void execute_highRiskTool_storesApprovalAndReturnsPrompt() {
         ToolCall call = toolCall("source_control_merge_pr");
 
-        ToolResult result = guardedRegistry.execute(call, "TICKET-1", "user1");
+        ToolResult result = guardedRegistry.execute(operationContext, call, "TICKET-1", "user1");
 
         assertFalse(result.isError());
         assertTrue(result.content().contains("Approval required"));
         verify(approvalStore).storePendingApproval(
                 eq("TICKET-1"), eq(call.id()), eq("source_control_merge_pr"),
                 any(), eq(RiskLevel.HIGH), any(), eq("user1"));
-        verify(delegate, never()).execute(any());
+        verify(approvalNotifier).notifyPending(any());
+        verify(delegate, never()).execute(any(), any());
     }
 
     @Test
     void execute_guardrailsDisabled_alwaysDelegates() {
-        GuardedToolRegistry disabled = new GuardedToolRegistry(delegate, riskRegistry, approvalStore, false);
+        GuardedToolRegistry disabled = new GuardedToolRegistry(delegate, riskRegistry, approvalStore, approvalNotifier,
+                true, false);
         ToolCall call = toolCall("source_control_merge_pr");
         ToolResult expected = ToolResult.success(call.id(), "merged");
-        when(delegate.execute(call)).thenReturn(expected);
+        when(delegate.execute(operationContext, call)).thenReturn(expected);
 
-        ToolResult result = disabled.execute(call, "TICKET-1", "user1");
+        ToolResult result = disabled.execute(operationContext, call, "TICKET-1", "user1");
 
         assertEquals(expected, result);
-        verify(delegate).execute(call);
+        verify(delegate).execute(operationContext, call);
         verifyNoInteractions(approvalStore);
     }
 
@@ -86,12 +93,12 @@ class GuardedToolRegistryTest {
                 java.time.Instant.now());
 
         ToolResult expected = ToolResult.success("call-id-1", "PR merged");
-        when(delegate.execute(any())).thenReturn(expected);
+        when(delegate.execute(eq(operationContext), any())).thenReturn(expected);
 
-        ToolResult result = guardedRegistry.executeApproved("TICKET-1", approval);
+        ToolResult result = guardedRegistry.executeApproved(operationContext, "TICKET-1", approval);
 
         assertEquals(expected, result);
-        verify(delegate).execute(any());
+        verify(delegate).execute(eq(operationContext), any());
         verify(approvalStore).consumeApproval("TICKET-1", approval.sk());
     }
 

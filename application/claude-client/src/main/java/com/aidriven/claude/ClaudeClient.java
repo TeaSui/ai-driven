@@ -2,9 +2,12 @@ package com.aidriven.claude;
 
 import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.service.SecretsService;
+import com.aidriven.spi.model.OperationContext;
+import com.aidriven.spi.provider.AiProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -23,7 +26,7 @@ import java.util.Map;
  * it automatically sends follow-up requests to get the complete response.
  */
 @Slf4j
-public class ClaudeClient implements AiClient {
+public class ClaudeClient implements AiClient, AiProvider {
 
     private static final String API_URL = "https://api.anthropic.com/v1/messages";
     private static final String DEFAULT_MODEL = "claude-opus-4-6";
@@ -199,6 +202,57 @@ public class ClaudeClient implements AiClient {
      * @param tools        Tool definitions in Claude API format
      * @return Raw response with content blocks and stop reason
      */
+    @Override
+    public String getName() {
+        return "claude";
+    }
+
+    @Override
+    public ChatResponse chat(OperationContext context, String systemPrompt, List<Map<String, Object>> messages,
+            List<Map<String, Object>> tools) {
+        try {
+            log.info("ClaudeClient.chat called via SPI for tenant={}",
+                    context != null ? context.getTenantId() : "none");
+            AiClient.ToolUseResponse response = chatWithTools(systemPrompt, messages, tools);
+            return new ClaudeChatResponse(response, objectMapper);
+        } catch (Exception e) {
+            log.error("Claude SPI chat failed: {}", e.getMessage());
+            throw new RuntimeException("Claude chat failed", e);
+        }
+    }
+
+    @RequiredArgsConstructor
+    private static class ClaudeChatResponse implements AiProvider.ChatResponse {
+        private final AiClient.ToolUseResponse response;
+        private final ObjectMapper objectMapper;
+
+        @Override
+        public String getText() {
+            return response.getText();
+        }
+
+        @Override
+        public List<Map<String, Object>> getToolCalls() {
+            List<Map<String, Object>> calls = new ArrayList<>();
+            for (JsonNode block : response.contentBlocks()) {
+                if ("tool_use".equals(block.path("type").asText())) {
+                    calls.add(objectMapper.convertValue(block, Map.class));
+                }
+            }
+            return calls;
+        }
+
+        @Override
+        public int getInputTokens() {
+            return response.inputTokens();
+        }
+
+        @Override
+        public int getOutputTokens() {
+            return response.outputTokens();
+        }
+    }
+
     @Override
     public AiClient.ToolUseResponse chatWithTools(String systemPrompt,
             List<Map<String, Object>> messages,

@@ -36,7 +36,7 @@ class ConversationWindowManagerTest {
         saveMessage("ONC-100", 2, "assistant", 200);
         saveMessage("ONC-100", 3, "user", 100);
 
-        List<Map<String, Object>> messages = windowManager.buildMessages("ONC-100");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "ONC-100");
 
         assertEquals(3, messages.size());
         assertEquals("user", messages.get(0).get("role"));
@@ -46,7 +46,7 @@ class ConversationWindowManagerTest {
 
     @Test
     void returns_empty_list_for_no_conversation() {
-        List<Map<String, Object>> messages = windowManager.buildMessages("UNKNOWN-999");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "UNKNOWN-999");
         assertNotNull(messages);
         assertTrue(messages.isEmpty());
     }
@@ -63,7 +63,7 @@ class ConversationWindowManagerTest {
 
         // Total = 1400 > 1000. Recent = 600. Remaining = 400. Msg2 (400) fits. Msg1
         // won't.
-        List<Map<String, Object>> messages = windowManager.buildMessages("ONC-100");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "ONC-100");
 
         // msg2 + msg3 + msg4 = 1000 (exactly budget)
         assertEquals(3, messages.size());
@@ -79,7 +79,7 @@ class ConversationWindowManagerTest {
         saveMessage("ONC-100", 2, "assistant", 600);
 
         // Total = 1200 > 1000, but keepRecent=2 means we keep both
-        List<Map<String, Object>> messages = windowManager.buildMessages("ONC-100");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "ONC-100");
         assertEquals(2, messages.size());
     }
 
@@ -92,7 +92,7 @@ class ConversationWindowManagerTest {
         saveMessage("ONC-100", 4, "assistant", 300);
         saveMessage("ONC-100", 5, "user", 300);
 
-        List<Map<String, Object>> messages = windowManager.buildMessages("ONC-100");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "ONC-100");
 
         // Must include at least 2 recent + as many older as fit
         // Recent (4,5) = 600 tokens. Budget remaining = 400. Can fit msg 3 (300).
@@ -108,11 +108,11 @@ class ConversationWindowManagerTest {
         saveMessage("ONC-100", 2, "assistant", 200);
 
         ConversationMessage newMsg = buildMessage("ONC-100", 3, "user", 100);
-        List<Map<String, Object>> messages = windowManager.appendAndBuild("ONC-100", newMsg);
+        List<Map<String, Object>> messages = windowManager.appendAndBuild("test-tenant", "ONC-100", newMsg);
 
         assertEquals(3, messages.size());
         // Also verify it was persisted
-        assertEquals(3, repository.getConversation("ONC-100").size());
+        assertEquals(3, repository.getConversation("test-tenant", "ONC-100").size());
     }
 
     @Test
@@ -123,7 +123,7 @@ class ConversationWindowManagerTest {
 
         // Append one more that pushes over budget
         ConversationMessage newMsg = buildMessage("ONC-100", 3, "user", 400);
-        List<Map<String, Object>> messages = windowManager.appendAndBuild("ONC-100", newMsg);
+        List<Map<String, Object>> messages = windowManager.appendAndBuild("test-tenant", "ONC-100", newMsg);
 
         // Total stored = 1200 > 1000. Recent 2 = msgs 2,3 = 800.
         // Budget remaining = 200. Can't fit msg 1 (400). So keep 2 messages.
@@ -136,7 +136,7 @@ class ConversationWindowManagerTest {
     void messages_contain_correct_role_and_content_format() {
         String content = "[{\"type\":\"text\",\"text\":\"hello world\"}]";
         ConversationMessage msg = ConversationMessage.builder()
-                .pk(ConversationMessage.createPk("ONC-100"))
+                .pk(ConversationMessage.createPk("test-tenant", "ONC-100"))
                 .sk(ConversationMessage.createSk(Instant.parse("2026-02-15T10:00:00Z"), 1))
                 .role("user")
                 .author("tea.nguyen")
@@ -146,7 +146,7 @@ class ConversationWindowManagerTest {
                 .build();
         repository.save(msg);
 
-        List<Map<String, Object>> messages = windowManager.buildMessages("ONC-100");
+        List<Map<String, Object>> messages = windowManager.buildMessages("test-tenant", "ONC-100");
         assertEquals(1, messages.size());
         assertEquals("user", messages.get(0).get("role"));
         // Content should be parsed from JSON
@@ -162,7 +162,7 @@ class ConversationWindowManagerTest {
     private ConversationMessage buildMessage(String ticketKey, int seq, String role, int tokens) {
         Instant timestamp = Instant.parse("2026-02-15T10:00:00Z").plusSeconds(seq * 60L);
         return ConversationMessage.builder()
-                .pk(ConversationMessage.createPk(ticketKey))
+                .pk(ConversationMessage.createPk("test-tenant", ticketKey))
                 .sk(ConversationMessage.createSk(timestamp, seq))
                 .role(role)
                 .author(role.equals("user") ? "tea.nguyen" : "ai-agent")

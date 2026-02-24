@@ -1,6 +1,9 @@
 package com.aidriven.core.util;
 
 import com.aidriven.core.exception.*;
+import com.aidriven.core.resilience.CircuitBreaker;
+
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.http.HttpResponse;
 import java.util.Objects;
@@ -9,7 +12,16 @@ import java.util.Objects;
  * Utility class for handling HTTP responses and converting error codes to
  * appropriate exceptions.
  */
+@Slf4j
 public final class HttpResponseHandler {
+
+    private static final int MAX_RETRIES = 3;
+    private static final long INITIAL_BACKOFF_MS = 1000;
+
+    @FunctionalInterface
+    public interface HttpCallProvider<T> {
+        HttpResponse<T> execute() throws Exception;
+    }
 
     private HttpResponseHandler() {
         // Utility class
@@ -29,12 +41,14 @@ public final class HttpResponseHandler {
      * @throws ServiceUnavailableException if status is 503
      * @throws HttpClientException         for other 4xx/5xx errors
      */
-    public static void checkResponse(HttpResponse<String> response, String serviceName, String operation) {
+    public static void checkResponse(HttpResponse<?> response, String serviceName, String operation) {
         Objects.requireNonNull(response, "response must not be null");
         Objects.requireNonNull(serviceName, "serviceName must not be null");
 
         int statusCode = response.statusCode();
-        String body = response.body();
+        Object bodyObj = response.body();
+        String body = bodyObj instanceof byte[] bytes ? new String(bytes, java.nio.charset.StandardCharsets.UTF_8)
+                : String.valueOf(bodyObj);
 
         if (isSuccess(statusCode)) {
             return;
@@ -43,6 +57,14 @@ public final class HttpResponseHandler {
         String context = Objects.nonNull(operation)
                 ? String.format("%s - %s", serviceName, operation)
                 : serviceName;
+
+        if (statusCode >= 300 && statusCode < 400) {
+            throw new HttpClientException(statusCode,
+                    String.format(
+                            "Unhandled redirect for %s: HTTP %d. Ensure HttpClient is configured to follow redirects.",
+                            context, statusCode),
+                    body);
+        }
 
         switch (statusCode) {
             case 401 -> throw new HttpClientException(statusCode,
@@ -99,7 +121,7 @@ public final class HttpResponseHandler {
      * @return The retry-after value in seconds, or null if not present or
      *         unparseable
      */
-    private static Long parseRetryAfter(HttpResponse<String> response) {
+    private static Long parseRetryAfter(HttpResponse<?> response) {
         return response.headers()
                 .firstValue("Retry-After")
                 .map(value -> {
@@ -110,5 +132,71 @@ public final class HttpResponseHandler {
                     }
                 })
                 .orElse(null);
+    }
+
+    /**
+     * Executes an HTTP request with exponential backoff for 429 and 5xx errors.
+     * Retries up to MAX_RETRIES times. Checks the response after resolving.
+     */
+    public static <T> HttpResponse<T> sendWithRetry(HttpCallProvider<T> provider, String serviceName, String operation)
+            throws Exception {
+        int attempt = 0;
+        long backoff = INITIAL_BACKOFF_MS;
+
+        while (true) {
+            HttpResponse<T> response = provider.execute();
+            int statusCode = response.statusCode();
+
+            if (statusCode == 429 || statusCode == 503 || statusCode == 502 || statusCode == 504) {
+                attempt++;
+                if (attempt > MAX_RETRIES) {
+                    return response;
+                }
+
+                long waitTime = backoff;
+                if (statusCode == 429) {
+                    Long retryAfter = parseRetryAfter(response);
+                    if (retryAfter != null && retryAfter > 0) {
+                        waitTime = retryAfter * 1000;
+                    }
+                }
+
+                log.warn("{} - {} failed with {}. Retrying in {} ms (attempt {}/{})", serviceName, operation,
+                        statusCode, waitTime, attempt, MAX_RETRIES);
+                Thread.sleep(waitTime);
+                backoff *= 2; // Exponential backoff
+            } else {
+                return response;
+            }
+        }
+    }
+
+    /**
+     * Executes an HTTP request with circuit breaker protection and retry.
+     */
+    public static <T> HttpResponse<T> sendWithCircuitBreaker(HttpCallProvider<T> provider, String serviceName,
+            String operation, CircuitBreaker breaker) throws Exception {
+        if (breaker != null && !breaker.allowRequest()) {
+            log.warn("CircuitBreaker '{}' is OPEN. Blocking request to {} - {}", breaker.getClass().getSimpleName(),
+                    serviceName, operation);
+            throw new HttpClientException(503, serviceName + " circuit is OPEN", "Circuit Breaker Protection");
+        }
+
+        try {
+            HttpResponse<T> response = sendWithRetry(provider, serviceName, operation);
+            if (breaker != null) {
+                if (isSuccess(response.statusCode())) {
+                    breaker.recordSuccess();
+                } else if (isServerError(response.statusCode()) || response.statusCode() == 429) {
+                    breaker.recordFailure();
+                }
+            }
+            return response;
+        } catch (Exception e) {
+            if (breaker != null) {
+                breaker.recordFailure();
+            }
+            throw e;
+        }
     }
 }

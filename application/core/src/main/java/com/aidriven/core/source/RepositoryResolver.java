@@ -72,10 +72,15 @@ public final class RepositoryResolver {
             String trimmed = label.trim();
             if (trimmed.toLowerCase().startsWith(LABEL_PREFIX)) {
                 String repoPath = trimmed.substring(LABEL_PREFIX.length()).trim();
+                // Special case: "repo: owner/repo" or "repo : owner/repo"
+                if (repoPath.startsWith(":")) {
+                    repoPath = repoPath.substring(1).trim();
+                }
+
                 String[] parts = repoPath.split("/");
                 if (parts.length >= 2 && !parts[0].isBlank() && !parts[1].isBlank()) {
                     Platform platform = PlatformResolver.resolve(labels, null, defaultPlatform);
-                    return new ResolvedRepository(parts[0], parts[1], platform);
+                    return new ResolvedRepository(parts[0].trim(), parts[1].trim(), platform);
                 }
             }
         }

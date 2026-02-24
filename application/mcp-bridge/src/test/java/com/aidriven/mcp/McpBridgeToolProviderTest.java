@@ -3,6 +3,7 @@ package com.aidriven.mcp;
 import com.aidriven.core.agent.tool.Tool;
 import com.aidriven.core.agent.tool.ToolCall;
 import com.aidriven.core.agent.tool.ToolResult;
+import com.aidriven.spi.model.OperationContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.modelcontextprotocol.client.McpSyncClient;
@@ -37,6 +38,10 @@ class McpBridgeToolProviderTest {
     private McpSyncClient mcpClient;
 
     private final ObjectMapper mapper = new ObjectMapper();
+    private final OperationContext operationContext = OperationContext.builder()
+            .tenantId("test-tenant")
+            .requestId("test-request")
+            .build();
 
     // ========================================================================
     // Helper: build a provider with standard mock tools
@@ -266,7 +271,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-1", "monitoring_search_logs", mapper.createObjectNode());
-            provider.execute(call);
+            provider.execute(operationContext, call);
 
             ArgumentCaptor<McpSchema.CallToolRequest> captor = ArgumentCaptor.forClass(McpSchema.CallToolRequest.class);
             verify(mcpClient).callTool(captor.capture());
@@ -291,7 +296,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("c-2", "monitoring_datadog_search_metrics", mapper.createObjectNode());
-            provider.execute(call);
+            provider.execute(operationContext, call);
 
             ArgumentCaptor<McpSchema.CallToolRequest> captor = ArgumentCaptor.forClass(McpSchema.CallToolRequest.class);
             verify(mcpClient).callTool(captor.capture());
@@ -336,7 +341,7 @@ class McpBridgeToolProviderTest {
             input.put("query", "error");
             ToolCall call = new ToolCall("call-1", "monitoring_search_logs", input);
 
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertFalse(result.isError());
             assertEquals("Found 5 log entries", result.content());
@@ -357,7 +362,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-2", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertEquals("Line 1\nLine 2\nLine 3", result.content());
         }
@@ -375,7 +380,7 @@ class McpBridgeToolProviderTest {
             input.put("query", "error 500");
             input.put("limit", 10);
             ToolCall call = new ToolCall("call-3", "monitoring_search_logs", input);
-            provider.execute(call);
+            provider.execute(operationContext, call);
 
             ArgumentCaptor<McpSchema.CallToolRequest> captor = ArgumentCaptor.forClass(McpSchema.CallToolRequest.class);
             verify(mcpClient).callTool(captor.capture());
@@ -395,7 +400,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-4", "monitoring_search_logs", null);
-            provider.execute(call);
+            provider.execute(operationContext, call);
 
             ArgumentCaptor<McpSchema.CallToolRequest> captor = ArgumentCaptor.forClass(McpSchema.CallToolRequest.class);
             verify(mcpClient).callTool(captor.capture());
@@ -420,7 +425,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-e1", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertTrue(result.isError());
             assertTrue(result.content().contains("Rate limit"));
@@ -435,7 +440,7 @@ class McpBridgeToolProviderTest {
                     .thenThrow(new RuntimeException("Connection lost"));
 
             ToolCall call = new ToolCall("call-e2", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertTrue(result.isError());
             assertTrue(result.content().contains("Connection lost"));
@@ -449,7 +454,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(null);
 
             ToolCall call = new ToolCall("call-e3", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertFalse(result.isError());
             assertEquals("", result.content());
@@ -464,7 +469,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-e4", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertFalse(result.isError());
             assertEquals("", result.content());
@@ -480,7 +485,7 @@ class McpBridgeToolProviderTest {
             when(mcpClient.callTool(any(McpSchema.CallToolRequest.class))).thenReturn(mcpResult);
 
             ToolCall call = new ToolCall("call-e5", "monitoring_search_logs", mapper.createObjectNode());
-            ToolResult result = provider.execute(call);
+            ToolResult result = provider.execute(operationContext, call);
 
             assertFalse(result.isError());
             assertEquals("", result.content());
