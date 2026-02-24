@@ -126,7 +126,8 @@
       "Bash(cd /Users/tungnguyen/TYME/ClaudeCode/ai-driven/application && export JAVA_HOME=/opt/homebrew/opt/openjdk@21 && ./gradlew :lambda-handlers:clean :lambda-handlers:build -x test 2>&1 | tail -20)",
       "WebFetch(domain:bedrock.ap-southeast-1.amazonaws.com)",
       "WebFetch(domain:sts.amazonaws.com)",
-      "WebFetch(domain:get.sdkman.io)"
+      "WebFetch(domain:get.sdkman.io)",
+      "WebFetch(domain:api.github.com)"
     ]
   },
   "sandbox": {
