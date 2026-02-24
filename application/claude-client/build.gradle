@@ -5,7 +5,17 @@ plugins {
 dependencies {
     implementation project(':core')
     implementation project(':spi')
+    implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
+    implementation 'software.amazon.awssdk:bedrockruntime'
     compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
     annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
+
+    testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"
+    testImplementation "org.mockito:mockito-core:${project.property('mockitoVersion')}"
+    testImplementation "org.assertj:assertj-core:${project.property('assertjVersion')}"
+}
+
+test {
+    useJUnitPlatform()
 }
 

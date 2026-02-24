@@ -2,6 +2,7 @@ package com.aidriven.lambda.factory;
 
 import com.aidriven.bitbucket.BitbucketClient;
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.agent.ConversationRepository;
 import com.aidriven.core.agent.ConversationWindowManager;
 import com.aidriven.core.agent.CostTracker;
@@ -259,7 +260,7 @@ public class ServiceFactory {
         return getExternalClientFactory().sourceControlClient(platform);
     }
 
-    public ClaudeClient getClaudeClient() {
+    public AiClient getClaudeClient() {
         return getExternalClientFactory().claudeClient();
     }
 
@@ -350,7 +351,7 @@ public class ServiceFactory {
         GitHubClient github = getGitHubClient();
         BitbucketClient bitbucket = getBitbucketClient();
         JiraClient jira = getJiraClient();
-        ClaudeClient claude = getClaudeClient();
+        AiProvider claude = (AiProvider) getClaudeClient();
 
         return getCached("ProviderRegistry", () -> {
             ProviderRegistry registry = new ProviderRegistry();

@@ -1,6 +1,7 @@
 package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.agent.AgentOrchestrator;
 import com.aidriven.core.agent.CommentIntentClassifier;
 import com.aidriven.core.agent.ConversationWindowManager;
@@ -174,7 +175,7 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
             GuardedToolRegistry guardedToolRegistry = toolRegistryBuilder.buildGuarded(scClient);
 
             // Orchestrator dependencies
-            ClaudeClient claudeClient = serviceFactory.getClaudeClient();
+            AiClient claudeClient = serviceFactory.getClaudeClient();
             ConversationWindowManager windowManager = serviceFactory.getConversationWindowManager();
             CostTracker costTracker = serviceFactory.getCostTracker();
             AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();

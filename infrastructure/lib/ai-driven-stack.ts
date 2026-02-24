@@ -94,9 +94,11 @@ export class AiDrivenStack extends cdk.Stack {
             MAX_TOTAL_CONTEXT_CHARS: '3000000',
             MAX_FILE_SIZE_BYTES: '500000',
             MAX_CONTEXT_FOR_CLAUDE: '700000',
+            CLAUDE_PROVIDER: 'BEDROCK',
             CLAUDE_MODEL: 'claude-sonnet-4-6',
             CLAUDE_MAX_TOKENS: '32768',
             CLAUDE_TEMPERATURE: '0.2',
+            BEDROCK_REGION: 'ap-southeast-1',
             MERGE_WAIT_TIMEOUT_DAYS: '7',
             CONTEXT_MODE: 'FULL_REPO',
             PROMPT_VERSION: 'v1',
@@ -242,6 +244,12 @@ export class AiDrivenStack extends cdk.Stack {
         });
 
         stateTable.grantReadWriteData(processingRole);
+
+        processingRole.addToPrincipalPolicy(new iam.PolicyStatement({
+            actions: ["bedrock:InvokeModel"],
+            resources: ["*"],
+        }));
+
         claudeApiKeySecret.grantRead(processingRole);
         bitbucketSecret.grantRead(processingRole);
         jiraSecret.grantRead(processingRole);
@@ -303,6 +311,10 @@ export class AiDrivenStack extends cdk.Stack {
         codeContextBucket.grantReadWrite(agentProcessorRole);
         agentQueue.grantConsumeMessages(agentProcessorRole);
 
+        agentProcessorRole.addToPrincipalPolicy(new iam.PolicyStatement({
+            actions: ["bedrock:InvokeModel"],
+            resources: ["*"],
+        }));
         // Grant agent processor permission to invoke MCP Gateway via Function URL
         mcpGatewayHandler.grantInvokeUrl(agentProcessorRole);
 

@@ -36,6 +36,16 @@ public class AppConfig {
     private final int claudeMaxTokens;
     private final double claudeTemperature;
     private final String promptVersion;
+    /**
+     * Claude provider: ANTHROPIC_API or BEDROCK.
+     * Populated from CLAUDE_PROVIDER env var (default: ANTHROPIC_API).
+     */
+    private final String claudeProvider;
+    /**
+     * AWS region for BedRock (when CLAUDE_PROVIDER=BEDROCK).
+     * Populated from BEDROCK_REGION env var (default: us-east-1).
+     */
+    private final String bedrockRegion;
     private final String branchPrefix;
     private final String gitHubSecretArn;
     private final String jiraWebhookSecret;
@@ -129,7 +139,9 @@ public class AppConfig {
                 claudeTemperature,
                 promptVersion,
                 claudeSecretArn,
-                claudeModelFallback);
+                claudeModelFallback,
+                claudeProvider,
+                bedrockRegion);
     }
 
     public FetchConfig getFetchConfig() {

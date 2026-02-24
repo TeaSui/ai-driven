@@ -1,6 +1,7 @@
 package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.cost.BudgetTracker;
 import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.service.ContextStorageService;
@@ -35,7 +36,7 @@ class ClaudeInvokeHandlerTest {
     private GenerationMetricsRepository metricsRepository;
 
     @Mock
-    private ClaudeClient claudeClient;
+    private AiClient claudeClient;
 
     @Mock
     private Context lambdaContext;

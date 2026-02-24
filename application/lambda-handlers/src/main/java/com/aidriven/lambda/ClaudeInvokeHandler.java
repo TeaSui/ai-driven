@@ -1,6 +1,7 @@
 package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.claude.PromptBuilder;
 import com.aidriven.core.cost.BudgetTracker;
 import com.aidriven.core.cost.ModelPricing;
@@ -46,7 +47,7 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
     private final GenerationMetricsRepository metricsRepository;
     private final ContextStorageService contextStorageService;
     private final AuditService auditService;
-    private final ClaudeClient claudeClient;
+    private final AiClient claudeClient;
     private final JsonRepairService jsonRepairService;
     private final int maxContext;
     private final String promptVersion;
@@ -104,7 +105,7 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
                 userMessage = applyCostGuard(ticketKey, userMessage, currentState, tenantContext, ticketId);
             }
 
-            ClaudeClient activeClient = resolveActiveClient((String) input.get("resolvedModel"));
+            AiClient activeClient = resolveActiveClient((String) input.get("resolvedModel"));
             log.info("Invoking Claude ({}) with prompt length: {} chars", activeClient.getModel(),
                     userMessage.length());
 
@@ -178,7 +179,7 @@ public class ClaudeInvokeHandler implements RequestHandler<Map<String, Object>, 
         return msg.toString();
     }
 
-    private ClaudeClient resolveActiveClient(String resolvedModel) {
+    private AiClient resolveActiveClient(String resolvedModel) {
         return resolvedModel != null ? claudeClient.withModel(resolvedModel) : claudeClient;
     }
 

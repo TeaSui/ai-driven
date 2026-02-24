@@ -1,6 +1,7 @@
 package com.aidriven.lambda;
 
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.config.AppConfig;
 import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.service.IdempotencyService;
@@ -40,7 +41,7 @@ class AgentEndToEndTest {
         @Mock
         private SqsClient sqsClient;
         @Mock
-        private ClaudeClient claudeClient;
+        private AiClient claudeClient;
         @Mock
         private IdempotencyService idempotencyService;
         @Mock

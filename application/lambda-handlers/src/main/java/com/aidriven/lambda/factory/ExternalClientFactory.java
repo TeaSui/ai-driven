@@ -1,7 +1,10 @@
 package com.aidriven.lambda.factory;
 
 import com.aidriven.bitbucket.BitbucketClient;
+import com.aidriven.claude.BedrockClient;
 import com.aidriven.claude.ClaudeClient;
+import com.aidriven.claude.ClaudeProvider;
+import com.aidriven.core.agent.AiClient;
 import com.aidriven.core.config.AppConfig;
 import com.aidriven.core.config.ClaudeConfig;
 import com.aidriven.core.service.SecretsService;
@@ -12,6 +15,7 @@ import com.aidriven.github.GitHubClient;
 import com.aidriven.jira.JiraClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.regions.Region;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -95,14 +99,32 @@ public class ExternalClientFactory {
 
     // --- Claude ---
 
-    public ClaudeClient claudeClient() {
-        return getCached("ClaudeClient", () -> {
-            ClaudeClient client = ClaudeClient.fromSecrets(secretsService, appConfig.getClaudeSecretArn());
+    public AiClient claudeClient() {
+        return getCached("AiClient", () -> {
             ClaudeConfig config = appConfig.getClaudeConfig();
-            return client.withModel(config.model())
-                    .withMaxTokens(config.maxTokens())
-                    .withTemperature(config.temperature());
+            ClaudeProvider provider = ClaudeProvider.fromString(config.provider());
+
+            log.info("Creating Claude client with provider={}, model={}", provider, config.model());
+
+            return switch (provider) {
+                case ANTHROPIC_API -> createAnthropicClient(config);
+                case BEDROCK -> createBedrockClient(config);
+            };
         });
+    }
+
+    private AiClient createAnthropicClient(ClaudeConfig config) {
+        ClaudeClient client = ClaudeClient.fromSecrets(secretsService, appConfig.getClaudeSecretArn());
+        return client.withModel(config.model())
+                .withMaxTokens(config.maxTokens())
+                .withTemperature(config.temperature());
+    }
+
+    private AiClient createBedrockClient(ClaudeConfig config) {
+        // BedRock uses AWS IAM credentials (default provider chain), not a separate API key
+        // The Lambda functions already have bedrock:InvokeModel permission via their IAM role
+        software.amazon.awssdk.regions.Region region = software.amazon.awssdk.regions.Region.of(config.bedrockRegion());
+        return new BedrockClient(config.model(), config.maxTokens(), config.temperature(), region);
     }
 
     // --- Unified Source Control ---

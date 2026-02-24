@@ -34,6 +34,51 @@ public interface AiClient {
             List<Map<String, Object>> tools) throws Exception;
 
     /**
+     * Sends a simple chat message to the AI model.
+     * This is a convenience method for non-tool-use scenarios.
+     *
+     * @param systemPrompt System prompt
+     * @param userMessage User message content
+     * @return The AI model's response text
+     */
+    String chat(String systemPrompt, String userMessage) throws Exception;
+
+    /**
+     * Gets the model identifier currently in use.
+     *
+     * @return The model identifier (e.g., "claude-opus-4-6")
+     */
+    String getModel();
+
+    /**
+     * Returns a new instance of this client with the specified model.
+     * Implementations should return a new instance with the updated model
+     * configuration.
+     *
+     * @param model The model identifier to use
+     * @return A new client instance configured with the specified model
+     */
+    AiClient withModel(String model);
+
+    /**
+     * Returns a new instance of this client with the specified max tokens.
+     * Implementations should return a new instance with the updated configuration.
+     *
+     * @param maxTokens Maximum tokens for model responses
+     * @return A new client instance configured with the specified max tokens
+     */
+    AiClient withMaxTokens(int maxTokens);
+
+    /**
+     * Returns a new instance of this client with the specified temperature.
+     * Implementations should return a new instance with the updated configuration.
+     *
+     * @param temperature Temperature for sampling (0.0 to 1.0)
+     * @return A new client instance configured with the specified temperature
+     */
+    AiClient withTemperature(double temperature);
+
+    /**
      * Response from the AI model when tools are available.
      * Contains raw content blocks (text + tool_use) and stop reason.
      */

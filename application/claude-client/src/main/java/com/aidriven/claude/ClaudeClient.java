@@ -65,14 +65,17 @@ public class ClaudeClient implements AiClient, AiProvider {
         return model;
     }
 
+    @Override
     public ClaudeClient withModel(String model) {
         return new ClaudeClient(this.apiKey, model, this.maxTokens, this.temperature);
     }
 
+    @Override
     public ClaudeClient withMaxTokens(int maxTokens) {
         return new ClaudeClient(this.apiKey, this.model, maxTokens, this.temperature);
     }
 
+    @Override
     public ClaudeClient withTemperature(double temperature) {
         return new ClaudeClient(this.apiKey, this.model, this.maxTokens, temperature);
     }
