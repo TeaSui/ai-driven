@@ -29,7 +29,7 @@ import java.util.Map;
 public class ClaudeClient implements AiClient, AiProvider {
 
     private static final String API_URL = "https://api.anthropic.com/v1/messages";
-    private static final String DEFAULT_MODEL = "claude-opus-4-6";
+    private static final String DEFAULT_MODEL = "claude-sonnet-4-6";
     private static final String API_VERSION = "2023-06-01";
     private static final int DEFAULT_MAX_TOKENS = 32768;
     private static final int MAX_CONTINUATIONS = 5;

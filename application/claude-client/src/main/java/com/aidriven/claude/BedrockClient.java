@@ -31,8 +31,7 @@ import java.util.Map;
  *
  * <p>BedRock model IDs:
  * <ul>
- *   <li>anthropic.claude-opus-4-6-v1:0 (Claude Opus 4.6)</li>
- *   <li>anthropic.claude-opus-4-6 (Claude Opus 4.6)</li>
+ *   <li>anthropic.claude-sonnet-4-6 (Claude Opus 4.6)</li>
  *   <li>anthropic.claude-3-5-sonnet-20240620-v1:0</li>
  *   <li>anthropic.claude-3-opus-20240229-v1:0</li>
  *   <li>anthropic.claude-3-sonnet-20240229-v1:0</li>

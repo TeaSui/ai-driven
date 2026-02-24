@@ -59,7 +59,7 @@ class AppConfigTest {
         void should_return_defaults_for_optional_env_vars() {
                 AppConfig config = AppConfig.getInstance();
 
-                assertEquals("claude-opus-4-6", config.getClaudeModel());
+                assertEquals("claude-sonnet-4-6", config.getClaudeModel());
                 assertEquals(32768, config.getClaudeMaxTokens());
                 assertEquals(0.2, config.getClaudeTemperature(), 0.001);
                 assertEquals("v1", config.getPromptVersion());
@@ -111,13 +111,13 @@ class AppConfigTest {
                 ClaudeConfig claudeConfig = config.getClaudeConfig();
 
                 assertEquals(700_000, claudeConfig.maxContext());
-                assertEquals("claude-opus-4-6", claudeConfig.model());
+                assertEquals("claude-sonnet-4-6", claudeConfig.model());
                 assertEquals(32768, claudeConfig.maxTokens());
                 assertEquals(0.2, claudeConfig.temperature(), 0.001);
                 assertEquals("v1", claudeConfig.promptVersion());
                 assertNull(claudeConfig.secretArn(),
                                 "Secret ARN should be null when env var not set");
-                assertEquals("claude-opus-4-6", claudeConfig.fallbackModel());
+                assertEquals("claude-sonnet-4-6", claudeConfig.fallbackModel());
         }
 
         /**
