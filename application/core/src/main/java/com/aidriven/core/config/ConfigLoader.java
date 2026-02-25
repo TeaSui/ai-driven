@@ -53,6 +53,7 @@ public final class ConfigLoader {
                 .maxTokensPerTicket(getIntEnv("MAX_TOKENS_PER_TICKET", 200_000))
                 .maxRequestsPerUserPerHour(getIntEnv("MAX_REQUESTS_PER_USER_PER_HOUR", 10))
                 .maxRequestsPerTicketPerHour(getIntEnv("MAX_REQUESTS_PER_TICKET_PER_HOUR", 20))
+                .summarizationThreshold(getIntEnv("SUMMARIZATION_THRESHOLD", 50_000))
                 .build();
     }
 

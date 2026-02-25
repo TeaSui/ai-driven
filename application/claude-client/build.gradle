@@ -7,12 +7,15 @@ dependencies {
     implementation project(':spi')
     implementation platform("software.amazon.awssdk:bom:${project.property('awsSdkVersion')}")
     implementation 'software.amazon.awssdk:bedrockruntime'
+    implementation 'software.amazon.awssdk:apache-client'
     compileOnly "org.projectlombok:lombok:${project.property('lombokVersion')}"
     annotationProcessor "org.projectlombok:lombok:${project.property('lombokVersion')}"
 
     testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"
     testImplementation "org.mockito:mockito-core:${project.property('mockitoVersion')}"
+    testImplementation "org.mockito:mockito-junit-jupiter:${project.property('mockitoVersion')}"
     testImplementation "org.assertj:assertj-core:${project.property('assertjVersion')}"
+    testImplementation "com.fasterxml.jackson.core:jackson-databind:2.15.2"
 }
 
 test {

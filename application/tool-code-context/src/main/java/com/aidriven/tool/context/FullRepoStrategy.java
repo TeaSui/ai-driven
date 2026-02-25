@@ -3,12 +3,12 @@ package com.aidriven.tool.context;
 import com.aidriven.core.context.ContextStrategy;
 import com.aidriven.core.source.SourceControlClient;
 import com.aidriven.core.model.TicketInfo;
+import com.aidriven.core.util.FileSummarizer;
 import com.aidriven.core.util.SourceFileFilter;
 import com.aidriven.spi.model.BranchName;
 import com.aidriven.spi.model.OperationContext;
 import com.aidriven.tool.context.model.FileEntry;
 import lombok.extern.slf4j.Slf4j;
-import lombok.RequiredArgsConstructor;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -27,9 +27,12 @@ import java.util.List;
  * This class provides two strategies for building context:
  * 1. Archive-based: Downloads repository as archive (more efficient)
  * 2. API-based: Fetches files via API (fallback method)
+ *
+ * <p>
+ * If a {@link FileSummarizer} is provided, large files are structurally
+ * summarized instead of sent in full, reducing context size by 60–80%.
  */
 @Slf4j
-@RequiredArgsConstructor
 public class FullRepoStrategy implements ContextStrategy {
 
     private static final String TICKET_CONTEXT_HEADER = "=== TICKET CONTEXT ===";
@@ -43,6 +46,26 @@ public class FullRepoStrategy implements ContextStrategy {
     private final SourceControlClient sourceControlClient;
     private final int maxFileSizeChars;
     private final long maxTotalContextChars;
+    /** Optional: when non-null, large files are summarized before inclusion. */
+    private final FileSummarizer fileSummarizer;
+
+    /** Constructor without summarization (backward-compatible). */
+    public FullRepoStrategy(SourceControlClient sourceControlClient,
+            int maxFileSizeChars,
+            long maxTotalContextChars) {
+        this(sourceControlClient, maxFileSizeChars, maxTotalContextChars, null);
+    }
+
+    /** Constructor with summarization enabled. */
+    public FullRepoStrategy(SourceControlClient sourceControlClient,
+            int maxFileSizeChars,
+            long maxTotalContextChars,
+            FileSummarizer fileSummarizer) {
+        this.sourceControlClient = sourceControlClient;
+        this.maxFileSizeChars = maxFileSizeChars;
+        this.maxTotalContextChars = maxTotalContextChars;
+        this.fileSummarizer = fileSummarizer;
+    }
 
     @Override
     public String buildContext(OperationContext context, TicketInfo ticket, BranchName branch) {
@@ -101,7 +124,8 @@ public class FullRepoStrategy implements ContextStrategy {
             String content = Files.readString(file, StandardCharsets.UTF_8);
             if (!SourceFileFilter.isBinaryContent(content)) {
                 String truncated = SourceFileFilter.truncate(content, maxFileSizeChars);
-                files.add(new FileEntry(relPath, truncated));
+                String processed = applySummarizerIfPresent(truncated, relPath);
+                files.add(new FileEntry(relPath, processed));
             }
         } catch (Exception e) {
             log.warn("Failed to read file: {}", relPath, e);
@@ -155,11 +179,29 @@ public class FullRepoStrategy implements ContextStrategy {
             }
 
             String truncated = SourceFileFilter.truncate(content, maxFileSizeChars);
-            return new FileEntry(filePath, truncated);
+            String processed = applySummarizerIfPresent(truncated, filePath);
+            return new FileEntry(filePath, processed);
         } catch (Exception e) {
             log.warn("Failed to fetch content for file: {}", filePath, e);
             return null;
         }
+    }
+
+    /**
+     * Applies file summarization if a summarizer is configured.
+     * Extracts the file extension from the path and delegates to
+     * {@link FileSummarizer}.
+     */
+    private String applySummarizerIfPresent(String content, String filePath) {
+        if (fileSummarizer == null) {
+            return content;
+        }
+        String ext = extractFileExtension(filePath);
+        String summarized = fileSummarizer.summarize(content, ext);
+        if (summarized.length() < content.length()) {
+            log.debug("Summarized {}: {}->{} chars", filePath, content.length(), summarized.length());
+        }
+        return summarized;
     }
 
     private String buildContextOutput(TicketInfo ticket, List<String> fileTree, List<FileEntry> files,

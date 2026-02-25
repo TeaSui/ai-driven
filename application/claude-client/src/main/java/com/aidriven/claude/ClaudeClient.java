@@ -7,7 +7,6 @@ import com.aidriven.spi.provider.AiProvider;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -41,6 +40,7 @@ public class ClaudeClient implements AiClient, AiProvider {
     private final String model;
     private final int maxTokens;
     private final double temperature;
+    private final AnthropicResponseParser responseParser;
 
     public ClaudeClient(String apiKey) {
         this(apiKey, DEFAULT_MODEL);
@@ -55,6 +55,7 @@ public class ClaudeClient implements AiClient, AiProvider {
                 .connectTimeout(Duration.ofSeconds(60))
                 .build();
         this.objectMapper = new ObjectMapper();
+        this.responseParser = new AnthropicResponseParser(objectMapper);
         this.apiKey = apiKey;
         this.model = model;
         this.maxTokens = maxTokens;
@@ -179,16 +180,7 @@ public class ClaudeClient implements AiClient, AiProvider {
 
             log.info("Response truncated, auto-continuing ({}/{})", continuation, MAX_CONTINUATIONS);
             messages.add(Map.of("role", "assistant", "content", apiResponse.text));
-
-            boolean isJsonResponse = fullResponse.toString().trim().startsWith("{");
-            String continuationPrompt = isJsonResponse
-                    ? "Your JSON response was truncated. Continue the JSON output from EXACTLY "
-                            + "where it stopped. Output ONLY the remaining JSON characters. "
-                            + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
-                            + "The output will be concatenated directly to your previous response to form valid JSON."
-                    : "Your response was truncated. Continue EXACTLY from where you left off. "
-                            + "Do not repeat any content. Do not add any preamble.";
-            messages.add(Map.of("role", "user", "content", continuationPrompt));
+            messages.add(Map.of("role", "user", "content", responseParser.continuationPrompt(fullResponse.toString())));
         }
 
         return fullResponse.toString();
@@ -211,48 +203,16 @@ public class ClaudeClient implements AiClient, AiProvider {
     }
 
     @Override
-    public ChatResponse chat(OperationContext context, String systemPrompt, List<Map<String, Object>> messages,
-            List<Map<String, Object>> tools) {
+    public AiProvider.ChatResponse chat(OperationContext context, String systemPrompt,
+            List<Map<String, Object>> messages, List<Map<String, Object>> tools) {
         try {
             log.info("ClaudeClient.chat called via SPI for tenant={}",
                     context != null ? context.getTenantId() : "none");
             AiClient.ToolUseResponse response = chatWithTools(systemPrompt, messages, tools);
-            return new ClaudeChatResponse(response, objectMapper);
+            return responseParser.toChatResponse(response);
         } catch (Exception e) {
             log.error("Claude SPI chat failed: {}", e.getMessage());
             throw new RuntimeException("Claude chat failed", e);
-        }
-    }
-
-    @RequiredArgsConstructor
-    private static class ClaudeChatResponse implements AiProvider.ChatResponse {
-        private final AiClient.ToolUseResponse response;
-        private final ObjectMapper objectMapper;
-
-        @Override
-        public String getText() {
-            return response.getText();
-        }
-
-        @Override
-        public List<Map<String, Object>> getToolCalls() {
-            List<Map<String, Object>> calls = new ArrayList<>();
-            for (JsonNode block : response.contentBlocks()) {
-                if ("tool_use".equals(block.path("type").asText())) {
-                    calls.add(objectMapper.convertValue(block, Map.class));
-                }
-            }
-            return calls;
-        }
-
-        @Override
-        public int getInputTokens() {
-            return response.inputTokens();
-        }
-
-        @Override
-        public int getOutputTokens() {
-            return response.outputTokens();
         }
     }
 
@@ -261,24 +221,7 @@ public class ClaudeClient implements AiClient, AiProvider {
             List<Map<String, Object>> messages,
             List<Map<String, Object>> tools) throws Exception {
         JsonNode responseJson = sendRequestRaw(systemPrompt, messages, tools, this.maxTokens);
-
-        String stopReason = responseJson.has("stop_reason")
-                ? responseJson.get("stop_reason").asText()
-                : "unknown";
-
-        ArrayNode contentBlocks = (ArrayNode) responseJson.get("content");
-        if (contentBlocks == null) {
-            contentBlocks = objectMapper.createArrayNode();
-        }
-
-        int inputTokens = 0, outputTokens = 0;
-        JsonNode usage = responseJson.get("usage");
-        if (usage != null) {
-            inputTokens = usage.has("input_tokens") ? usage.get("input_tokens").asInt() : 0;
-            outputTokens = usage.has("output_tokens") ? usage.get("output_tokens").asInt() : 0;
-        }
-
-        return new AiClient.ToolUseResponse(contentBlocks, stopReason, inputTokens, outputTokens);
+        return responseParser.parseToolUseResponse(responseJson);
     }
 
     private ApiResponse sendRequest(String systemPrompt, List<Map<String, Object>> messages, int maxTokens)

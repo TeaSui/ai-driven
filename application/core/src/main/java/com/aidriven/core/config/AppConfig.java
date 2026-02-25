@@ -110,6 +110,14 @@ public class AppConfig {
     private final int maxRequestsPerTicketPerHour;
 
     /**
+     * Maximum file size in characters before summarization is applied (impl-22).
+     * Files larger than this threshold will be structurally summarized before
+     * being sent to the model. Set to Integer.MAX_VALUE to disable summarization.
+     * Populated from SUMMARIZATION_THRESHOLD env var (default: 50 000).
+     */
+    private final int summarizationThreshold;
+
+    /**
      * Loads configuration from environment variables.
      * 
      * @deprecated Use {@link ConfigLoader#loadFromEnv()} instead
