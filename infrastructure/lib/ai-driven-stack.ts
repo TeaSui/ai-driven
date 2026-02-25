@@ -246,7 +246,11 @@ export class AiDrivenStack extends cdk.Stack {
         stateTable.grantReadWriteData(processingRole);
 
         processingRole.addToPrincipalPolicy(new iam.PolicyStatement({
-            actions: ["bedrock:InvokeModel"],
+            actions: [
+                "bedrock:InvokeModel",
+                "bedrock:Converse",
+                "cloudwatch:PutMetricData"
+            ],
             resources: ["*"],
         }));
 
