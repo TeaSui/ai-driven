@@ -70,8 +70,8 @@ class CodeFetchHandlerTest {
         when(serviceFactory.createContextService(any())).thenReturn(contextService);
 
         // Pass mock client and factory in constructor
-        handler = new CodeFetchHandler(config, ticketStateRepository, contextStorageService, serviceFactory,
-                sourceControlClient);
+        handler = new CodeFetchHandler(config, ticketStateRepository, contextStorageService,
+                sourceControlClient, serviceFactory);
     }
 
     // ======== Input Validation ========
@@ -203,7 +203,7 @@ class CodeFetchHandlerTest {
         FetchConfig config = new FetchConfig(100000, 3000000L, 500000L, "INCREMENTAL");
         handler = new CodeFetchHandler(
                 config,
-                ticketStateRepository, contextStorageService, serviceFactory, sourceControlClient);
+                ticketStateRepository, contextStorageService, sourceControlClient, serviceFactory);
 
         when(sourceControlClient.getDefaultBranch(any())).thenReturn(BranchName.of("main"));
         when(contextService.buildContext(any(OperationContext.class), any(TicketInfo.class), any(BranchName.class)))
@@ -229,7 +229,7 @@ class CodeFetchHandlerTest {
         FetchConfig config = new FetchConfig(100000, 3000000L, 500000L, "INCREMENTAL");
         handler = new CodeFetchHandler(
                 config,
-                ticketStateRepository, contextStorageService, serviceFactory, sourceControlClient);
+                ticketStateRepository, contextStorageService, sourceControlClient, serviceFactory);
 
         Path repoDir = createMockRepo();
 

@@ -24,7 +24,8 @@ import java.util.function.Supplier;
  * Factory for creating external API clients (Jira, GitHub, Bitbucket, Claude).
  * Extracted from ServiceFactory to adhere to Single Responsibility Principle.
  *
- * <p>Each client is lazily initialized and cached as a singleton to reuse
+ * <p>
+ * Each client is lazily initialized and cached as a singleton to reuse
  * expensive HTTP connection pools across Lambda invocations.
  */
 @Slf4j
@@ -100,31 +101,40 @@ public class ExternalClientFactory {
     // --- Claude ---
 
     public AiClient claudeClient() {
-        return getCached("AiClient", () -> {
+        return getCached("AiClient",
+                () -> createAiClient(appConfig.getClaudeConfig().model(), appConfig.getClaudeConfig().maxTokens()));
+    }
+
+    public AiClient researcherClient() {
+        return getCached("ResearcherAiClient", () -> {
             ClaudeConfig config = appConfig.getClaudeConfig();
-            ClaudeProvider provider = ClaudeProvider.fromString(config.provider());
-
-            log.info("Creating Claude client with provider={}, model={}", provider, config.model());
-
-            return switch (provider) {
-                case ANTHROPIC_API -> createAnthropicClient(config);
-                case BEDROCK -> createBedrockClient(config);
-            };
+            return createAiClient(config.researcherModel(), config.researcherMaxTokens());
         });
     }
 
-    private AiClient createAnthropicClient(ClaudeConfig config) {
-        ClaudeClient client = ClaudeClient.fromSecrets(secretsService, appConfig.getClaudeSecretArn());
-        return client.withModel(config.model())
-                .withMaxTokens(config.maxTokens())
-                .withTemperature(config.temperature());
+    private AiClient createAiClient(String model, int maxTokens) {
+        ClaudeConfig config = appConfig.getClaudeConfig();
+        ClaudeProvider provider = ClaudeProvider.fromString(config.provider());
+
+        log.info("Creating AiClient with provider={}, model={}", provider, model);
+
+        return switch (provider) {
+            case ANTHROPIC_API -> createAnthropicClient(model, maxTokens);
+            case BEDROCK -> createBedrockClient(model, maxTokens);
+        };
     }
 
-    private AiClient createBedrockClient(ClaudeConfig config) {
-        // BedRock uses AWS IAM credentials (default provider chain), not a separate API key
-        // The Lambda functions already have bedrock:InvokeModel permission via their IAM role
-        software.amazon.awssdk.regions.Region region = software.amazon.awssdk.regions.Region.of(config.bedrockRegion());
-        return new BedrockClient(config.model(), config.maxTokens(), config.temperature(), region);
+    private AiClient createAnthropicClient(String model, int maxTokens) {
+        ClaudeClient client = ClaudeClient.fromSecrets(secretsService, appConfig.getClaudeSecretArn());
+        return client.withModel(model)
+                .withMaxTokens(maxTokens)
+                .withTemperature(appConfig.getClaudeConfig().temperature());
+    }
+
+    private AiClient createBedrockClient(String model, int maxTokens) {
+        software.amazon.awssdk.regions.Region region = software.amazon.awssdk.regions.Region
+                .of(appConfig.getClaudeConfig().bedrockRegion());
+        return new BedrockClient(model, maxTokens, appConfig.getClaudeConfig().temperature(), region);
     }
 
     // --- Unified Source Control ---

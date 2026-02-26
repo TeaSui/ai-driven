@@ -1,15 +1,9 @@
 package com.aidriven.lambda;
 
-import com.aidriven.claude.ClaudeClient;
-import com.aidriven.core.agent.AiClient;
-import com.aidriven.core.agent.AgentOrchestrator;
+import com.aidriven.core.agent.swarm.SwarmOrchestrator;
 import com.aidriven.core.agent.CommentIntentClassifier;
-import com.aidriven.core.agent.ConversationWindowManager;
-import com.aidriven.core.agent.CostTracker;
 import com.aidriven.core.agent.JiraCommentFormatter;
 import com.aidriven.core.agent.ProgressTracker;
-import com.aidriven.core.agent.WorkflowContextProvider;
-import com.aidriven.core.agent.guardrail.GuardedToolRegistry;
 import com.aidriven.core.agent.model.AgentRequest;
 import com.aidriven.core.agent.model.AgentResponse;
 import com.aidriven.core.agent.model.CommentIntent;
@@ -27,6 +21,7 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -44,6 +39,7 @@ import com.aidriven.lambda.source.SourceControlClientResolver;
  * Consumes agent tasks from SQS FIFO queue and executes the agent orchestrator.
  */
 @Slf4j
+@RequiredArgsConstructor
 public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
 
     private final ObjectMapper objectMapper;
@@ -170,27 +166,8 @@ public class AgentProcessorHandler implements RequestHandler<SQSEvent, Void> {
                 ticket = jiraClient.getTicket(contextObj, ticketKey);
             }
 
-            // Build guarded tool registry via ToolRegistryBuilder (SRP: extraction from
-            // handler)
-            GuardedToolRegistry guardedToolRegistry = toolRegistryBuilder.buildGuarded(scClient);
-
-            // Orchestrator dependencies
-            AiClient claudeClient = serviceFactory.getClaudeClient();
-            ConversationWindowManager windowManager = serviceFactory.getConversationWindowManager();
-            CostTracker costTracker = serviceFactory.getCostTracker();
-            AgentConfig agentConfig = serviceFactory.getAppConfig().getAgentConfig();
-            WorkflowContextProvider workflowContextProvider = serviceFactory.getWorkflowContextProvider();
-
-            log.info("Starting agent orchestrator for ticket={}", ticketKey);
-            AgentOrchestrator orchestrator = AgentOrchestrator.builder()
-                    .aiClient(claudeClient)
-                    .windowManager(windowManager)
-                    .costTracker(costTracker)
-                    .agentConfig(agentConfig)
-                    .guardedToolRegistry(guardedToolRegistry)
-                    .progressTracker(progressTracker)
-                    .workflowContextProvider(workflowContextProvider)
-                    .build();
+            // Swarm Orchestration (Phase 2)
+            SwarmOrchestrator orchestrator = serviceFactory.getSwarmOrchestrator(scClient, progressTracker);
 
             Map<String, String> prContext = new HashMap<>();
             if (task.getDiffHunk() != null)

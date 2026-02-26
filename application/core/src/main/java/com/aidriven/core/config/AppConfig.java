@@ -33,6 +33,8 @@ public class AppConfig {
      * Populated from CLAUDE_MODEL_FALLBACK env var.
      */
     private final String claudeModelFallback;
+    private final String claudeResearcherModel;
+    private final int claudeResearcherMaxTokens;
     private final int claudeMaxTokens;
     private final double claudeTemperature;
     private final String promptVersion;
@@ -148,6 +150,8 @@ public class AppConfig {
                 promptVersion,
                 claudeSecretArn,
                 claudeModelFallback,
+                claudeResearcherModel,
+                claudeResearcherMaxTokens,
                 claudeProvider,
                 bedrockRegion);
     }

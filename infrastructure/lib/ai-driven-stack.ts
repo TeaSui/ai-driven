@@ -94,8 +94,9 @@ export class AiDrivenStack extends cdk.Stack {
             MAX_TOTAL_CONTEXT_CHARS: '3000000',
             MAX_FILE_SIZE_BYTES: '500000',
             MAX_CONTEXT_FOR_CLAUDE: '700000',
-            CLAUDE_PROVIDER: 'BEDROCK',
+            CLAUDE_PROVIDER: 'BEDROCK', // ANTHROPIC_API - BEDROCK
             CLAUDE_MODEL: 'claude-sonnet-4-6',
+            CLAUDE_RESEARCHER_MODEL: 'claude-3-haiku-20240307',
             CLAUDE_MAX_TOKENS: '32768',
             CLAUDE_TEMPERATURE: '0.2',
             BEDROCK_REGION: 'ap-southeast-1',

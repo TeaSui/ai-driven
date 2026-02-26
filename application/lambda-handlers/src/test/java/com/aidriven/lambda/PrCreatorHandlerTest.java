@@ -7,7 +7,6 @@ import com.aidriven.core.repository.TicketStateRepository;
 import com.aidriven.core.source.SourceControlClient;
 import com.aidriven.github.GitHubClient;
 import com.aidriven.jira.JiraClient;
-import com.aidriven.core.source.RepositoryWriter;
 import com.aidriven.lambda.factory.ServiceFactory;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.fasterxml.jackson.databind.ObjectMapper;

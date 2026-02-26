@@ -53,9 +53,16 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.sfn.SfnClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
-import com.aidriven.core.audit.AuditService;
-import com.aidriven.core.security.DynamoDbRateLimiter;
-import com.aidriven.core.security.RateLimiter;
+import com.aidriven.core.agent.AgentOrchestrator;
+import com.aidriven.core.agent.ProgressTracker;
+import com.aidriven.core.agent.swarm.*;
+import com.aidriven.lambda.agent.ToolRegistryBuilder;
+import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
+import software.amazon.awssdk.services.cloudwatchlogs.CloudWatchLogsClient;
+import com.aidriven.core.observability.CloudWatchObservabilityClient;
+import com.aidriven.tool.observability.ObservabilityToolProvider;
+import com.aidriven.tool.source.SourceControlToolProvider;
+import com.aidriven.tool.tracker.IssueTrackerToolProvider;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -367,6 +374,50 @@ public class ServiceFactory {
         // Pre-compute to avoid recursive computeIfAbsent
         ProviderRegistry registry = getProviderRegistry();
         return getCached("ManagedMcpToolProvider", () -> new ManagedMcpToolProvider(registry));
+    }
+
+    // --- Swarm Orchestration ---
+
+    public ToolRegistryBuilder getToolRegistryBuilder() {
+        JiraClient jira = getJiraClient();
+        return getCached("ToolRegistryBuilder", () -> new ToolRegistryBuilder(this, jira));
+    }
+
+    public SwarmOrchestrator getSwarmOrchestrator(SourceControlClient scClient, ProgressTracker tracker) {
+        // Routing client (typically Haiku for speed/cost)
+        AiClient routingClient = getExternalClientFactory().researcherClient();
+
+        WorkerAgent coder = getCoderAgent(scClient, tracker);
+        WorkerAgent researcher = getResearcherAgent(scClient, tracker);
+
+        return new SwarmOrchestrator(routingClient, coder, researcher);
+    }
+
+    public CoderAgent getCoderAgent(SourceControlClient scClient, ProgressTracker tracker) {
+        AgentOrchestrator orchestrator = AgentOrchestrator.builder()
+                .aiClient(getClaudeClient())
+                .windowManager(getConversationWindowManager())
+                .costTracker(getCostTracker())
+                .agentConfig(appConfig.getAgentConfig())
+                .guardedToolRegistry(getToolRegistryBuilder().buildGuarded(scClient))
+                .progressTracker(tracker)
+                .workflowContextProvider(getWorkflowContextProvider())
+                .build();
+        return new CoderAgent(orchestrator);
+    }
+
+    public ResearcherAgent getResearcherAgent(SourceControlClient scClient, ProgressTracker tracker) {
+        AgentOrchestrator orchestrator = AgentOrchestrator.builder()
+                .aiClient(getExternalClientFactory().researcherClient())
+                .windowManager(getConversationWindowManager())
+                .costTracker(getCostTracker())
+                .agentConfig(appConfig.getAgentConfig())
+                // Use read-only tools for research
+                .guardedToolRegistry(getToolRegistryBuilder().buildGuardedReadOnly(scClient))
+                .progressTracker(tracker)
+                .workflowContextProvider(getWorkflowContextProvider())
+                .build();
+        return new ResearcherAgent(orchestrator);
     }
 
 }

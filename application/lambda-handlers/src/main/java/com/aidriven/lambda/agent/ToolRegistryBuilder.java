@@ -76,4 +76,44 @@ public class ToolRegistryBuilder {
         ToolRegistry baseRegistry = build(sourceControlClient);
         return serviceFactory.createGuardedToolRegistry(baseRegistry);
     }
+
+    /**
+     * Builds a tool registry with only read-only tools.
+     */
+    public ToolRegistry buildReadOnly(SourceControlClient sourceControlClient) {
+        ToolRegistry toolRegistry = new ToolRegistry();
+
+        // Wrap all providers in ReadOnlyToolProvider
+        toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(
+                new SourceControlToolProvider(sourceControlClient)));
+        toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(
+                new IssueTrackerToolProvider(jiraClient)));
+
+        ContextService contextService = serviceFactory.createContextService(sourceControlClient);
+        toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(
+                new CodeContextToolProvider(contextService)));
+
+        for (McpBridgeToolProvider mcpProvider : serviceFactory.getMcpToolProviders()) {
+            toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(mcpProvider));
+        }
+
+        for (McpGatewayClient gatewayClient : serviceFactory.getMcpGatewayClients()) {
+            toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(gatewayClient));
+        }
+
+        ManagedMcpToolProvider managedMcp = serviceFactory.getManagedMcpToolProvider();
+        if (managedMcp != null) {
+            toolRegistry.register(new com.aidriven.core.agent.tool.ReadOnlyToolProvider(managedMcp));
+        }
+
+        return toolRegistry;
+    }
+
+    /**
+     * Builds a guarded read-only tool registry.
+     */
+    public GuardedToolRegistry buildGuardedReadOnly(SourceControlClient sourceControlClient) {
+        ToolRegistry baseRegistry = buildReadOnly(sourceControlClient);
+        return serviceFactory.createGuardedToolRegistry(baseRegistry);
+    }
 }

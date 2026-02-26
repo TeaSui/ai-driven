@@ -26,10 +26,12 @@ public final class ConfigLoader {
                 .maxContextForClaude(getIntEnv("MAX_CONTEXT_FOR_CLAUDE", 700_000))
                 .claudeModel(getEnv("CLAUDE_MODEL", "claude-sonnet-4-6"))
                 .claudeModelFallback(getEnv("CLAUDE_MODEL_FALLBACK", "claude-sonnet-4-6"))
+                .claudeResearcherModel(getEnv("CLAUDE_RESEARCHER_MODEL", "claude-haiku"))
+                .claudeResearcherMaxTokens(getIntEnv("CLAUDE_RESEARCHER_MAX_TOKENS", 4096))
                 .claudeMaxTokens(getIntEnv("CLAUDE_MAX_TOKENS", 32768))
                 .claudeTemperature(getDoubleEnv("CLAUDE_TEMPERATURE", 0.2))
                 .promptVersion(getEnv("PROMPT_VERSION", "v1"))
-                .claudeProvider(getEnv("CLAUDE_PROVIDER", "BEDROCK")) // ANTHROPIC_API - BEDROCK
+                .claudeProvider(getEnv("CLAUDE_PROVIDER", "ANTHROPIC_API")) // ANTHROPIC_API - BEDROCK
                 .bedrockRegion(getEnv("BEDROCK_REGION", "ap-southeast-1"))
                 .branchPrefix(getEnv("BRANCH_PREFIX", "ai/"))
                 .gitHubSecretArn(System.getenv("GITHUB_SECRET_ARN"))
