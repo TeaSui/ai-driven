@@ -68,7 +68,7 @@ AGENT MODE:
                    │ Jira Webhook (comment_created)
                    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│              AgentWebhookHandler (Lambda)                     │
+│              AgentWebhookController (Spring Boot)             │
 │  1. Validate webhook (comment event, not bot-authored)       │
 │  2. Check if ticket has "ai-agent" label                     │
 │  3. Route to AgentOrchestrator (in `core` module)            │
@@ -136,14 +136,14 @@ The agent is built as a **Modular Monolith** to ensure flexibility and separatio
 *   **`tool-issue-tracker` Module**: Contains `IssueTrackerToolProvider` and depends on `core`.
 *   **`tool-code-context` Module**: Contains `CodeContextToolProvider` and depends on `core`.
 *   **`mcp-bridge` Module** (Phase 4): Contains `McpBridgeToolProvider` and `McpConnectionFactory`. Bridges ANY MCP server into the `ToolProvider` contract via the MCP Java SDK.
-*   **`lambda-handlers`**: Depends on `core`, `tool-*` modules, and `mcp-bridge` to assemble the full agent.
+*   **`spring-boot-app` Module**: Depends on `core`, `tool-*` modules, `spi`, and `mcp-bridge` to assemble the full agent via Spring Boot configuration.
 
 ### Trade-offs (Counter-arguments)
 
 While the Modular Monolith structure provides good separation of concerns, it does have some trade-offs compared to a microservices or plugin-based architecture:
 
-1.  **Deployment Coupling**: All tools (`source-control`, `issue-tracker`, etc.) are bundled into a single Lambda function (`AgentWebhookHandler`). A change in one module requires redeploying the entire agent.
-2.  **Build-Time Composition**: Tools are wired together at build time in `lambda-handlers`. Adding a new tool requires code changes to `ServiceFactory` and a recompile; it is not a dynamic runtime plugin system.
+1.  **Deployment Coupling**: All tools (`source-control`, `issue-tracker`, etc.) are bundled into a single Spring Boot application. A change in one module requires redeploying the entire agent.
+2.  **Build-Time Composition**: Tools are wired together at build time via Spring `@Configuration` classes. Adding a new tool requires code changes to `AgentConfig` and a recompile; it is not a dynamic runtime plugin system.
 3.  **Single Failure Domain**: Since all tools run in the same process, a critical error (like an OutOfMemoryError) in one tool provider could crash the entire request processing, affecting other tools.
 4.  **Shared Runtime Characteristics**: All tools must share the same memory and timeout configuration of the Lambda function. A memory-intensive tool might force over-provisioning for lightweight tools.
 
@@ -411,7 +411,7 @@ interfaces (compile-time safety) with a unified registration contract (extensibi
 
       private static final int MAX_TOOL_TURNS = 10;
 
-      private final ClaudeClient claudeClient;
+      private final AiClient aiClient;
       private final ToolRegistry toolRegistry;
       private final JiraCommentFormatter formatter;
 
@@ -463,7 +463,7 @@ interfaces (compile-time safety) with a unified registration contract (extensibi
 
 #### 1.6 Claude Client Extension (Tool Use Support)
 
-- [x] Extend `ClaudeClient` to support tool-use API:
+- [x] Extend AI client to support tool-use API (now via `SpringAiClientAdapter`):
   ```java
   public ClaudeResponse chat(String system, List<Message> messages, List<Tool> tools) {
       // Build request body with tools array
@@ -846,10 +846,10 @@ and avoids these constraints.
 | ✅ | `tool-source-control/.../SourceControlToolProvider.java` |
 | ✅ | `tool-issue-tracker/.../IssueTrackerToolProvider.java` |
 | ✅ | `tool-code-context/.../CodeContextToolProvider.java` |
-| ✅ | `lambda-handlers/.../AgentWebhookHandler.java` |
-| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` |
-| ✅ | `lambda-handlers/.../factory/ServiceFactory.java` (modified) |
-| ✅ | `claude-client/.../ClaudeClient.java` (modified: tool-use support) |
+| ✅ | `spring-boot-app/.../AgentWebhookController.java` |
+| ✅ | `spring-boot-app/.../AgentSqsListener.java` |
+| ✅ | `spring-boot-app/.../config/AgentConfig.java` (Spring Boot configuration) |
+| ✅ | `claude-client/.../SpringAiClientAdapter.java` (modified: tool-use support) |
 | ✅ | `core/.../config/{AppConfig,AgentConfig}.java` (modified) |
 
 ### Phase 3: Guardrails + Multi-Actor Collaboration
@@ -865,7 +865,7 @@ and avoids these constraints.
 | ✅ | `core/.../config/AgentConfig.java` (modified: 3 new fields) |
 | ✅ | `core/.../agent/CommentIntentClassifier.java` (modified: enhanced patterns + LLM fallback) |
 | ✅ | `core/.../agent/AgentOrchestrator.java` (modified: intent-aware prompts, guardrails, cost) |
-| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` (modified: intent routing, approval flow) |
+| ✅ | `spring-boot-app/.../AgentSqsListener.java` (intent routing, approval flow) |
 
 ### Phase 4: MCP Integration Gateway
 
@@ -876,8 +876,8 @@ and avoids these constraints.
 | ✅ | `mcp-bridge/.../mcp/McpConnectionFactory.java` |
 | ✅ | `core/.../config/McpServerConfig.java` |
 | ✅ | `core/.../config/AppConfig.java` (modified: `getMcpServersConfig()`) |
-| ✅ | `lambda-handlers/.../factory/ServiceFactory.java` (modified: MCP factory methods) |
-| ✅ | `lambda-handlers/.../AgentProcessorHandler.java` (modified: MCP registration) |
+| ✅ | `spring-boot-app/.../config/AgentConfig.java` (MCP factory methods via Spring Boot) |
+| ✅ | `spring-boot-app/.../config/SpringAiConfig.java` (MCP registration via Spring AI) |
 | ✅ | `settings.gradle` (modified: `include 'mcp-bridge'`) |
 | ✅ | `infrastructure/lib/ai-driven-stack.ts` (modified: new env vars) |
 

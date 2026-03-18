@@ -60,6 +60,6 @@ Abstract the issue tracker integration so multiple platforms can trigger the AI 
 | NEW | `core/src/main/java/com/aidriven/core/tracker/IssueTrackerClient.java` |
 | NEW | `linear-client/` (new Gradle submodule) |
 | NEW | `notion-client/` (new Gradle submodule) |
-| NEW | `lambda-handlers/src/main/java/com/aidriven/lambda/WebhookRouter.java` |
+| NEW | `spring-boot-app/src/main/java/com/aidriven/app/WebhookRouter.java` |
 | MODIFY | `jira-client/src/main/java/com/aidriven/jira/JiraClient.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

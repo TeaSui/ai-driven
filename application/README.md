@@ -11,18 +11,20 @@ application/
   bitbucket-client/       # SourceControlClient → Bitbucket REST API
   github-client/          # SourceControlClient → GitHub REST API
   claude-client/          # Claude AI direct API client (auto-continuation + tool use)
-  lambda-handlers/        # Lambda handler implementations (fat JAR)
+  spring-boot-app/        # Spring Boot application entry point (ECS Fargate deployment)
 ```
 
 ### Module Dependency Graph
 
 ```
-lambda-handlers
+spring-boot-app
   ├── core
   ├── jira-client       → core
   ├── bitbucket-client  → core
   ├── github-client     → core
-  └── claude-client     → core
+  ├── claude-client     → core
+  ├── mcp-bridge        → core
+  └── spi (service provider interface)
 ```
 
 ## Modules
@@ -56,31 +58,34 @@ GitHub REST API v3 client implementing `SourceControlClient`.
 - `GitHubClient` — Same operations as Bitbucket client via GitHub's tree/commit API
 
 ### `claude-client`
-Direct Claude API client (not AWS Bedrock).
-- `ClaudeClient` — Send prompts, handle auto-continuation for truncated responses, tool-use support
-- Configurable: model, max tokens, temperature via constructor params
+AI client adapters for Claude models, powered by Spring AI 1.1.2 (library-only, no Spring Boot).
+- `SpringAiClientAdapter` — Default provider using Spring AI's `AnthropicChatModel` (simple chat with retry + prompt caching) and `AnthropicApi` (tool-use with raw content blocks)
+- `BedrockClient` — AWS Bedrock-based client for Claude models (alternative provider)
+- `ClaudeProvider` enum — Routes between `SPRING_AI` (default) and `BEDROCK`
+- Configurable: model, max tokens, temperature via immutable builder pattern
 
-### `lambda-handlers`
-AWS Lambda handler implementations, packaged as a single fat JAR.
+### `spring-boot-app`
+Spring Boot 3.5 application deployed on ECS Fargate, replacing the Lambda-based architecture.
 
-| Handler | Mode | Purpose |
-|---------|------|---------|
-| `JiraWebhookHandler` | Pipeline | API Gateway entry point; validates Jira webhooks, starts Step Functions |
-| `FetchTicketHandler` | Pipeline | Fetches full ticket details from Jira |
-| `CodeFetchHandler` | Pipeline | Downloads repo, filters source files, stores context in S3 |
-| `ClaudeInvokeHandler` | Pipeline | Reads S3 context, invokes Claude, parses JSON response |
-| `PrCreatorHandler` | Pipeline | Creates branch, commits generated files, opens PR |
-| `MergeWaitHandler` | Pipeline | Manages task-token callback for PR merge wait |
-| `AgentWebhookHandler` | Agent | Validates comment webhooks, invokes AgentOrchestrator |
+**Key components:**
+- `AiDrivenApplication.java` — Spring Boot entry point with embedded Tomcat
+- `@Configuration` classes — Bean definitions for AWS clients, external integrations, agents, observability
+- `@RestController` classes — REST endpoints for webhooks (Jira, GitHub) and health checks
+- `@SqsListener` classes — SQS FIFO message consumers for agent tasks and merge-wait logic
+- `@Service` classes — Business logic for pipeline stages (fetch ticket, generate code, create PR)
 
-**Key classes:**
-- `ServiceFactory` — Singleton factory for all service instantiation (client creation, tool registry, context services)
-- `ContextService` — Orchestrates smart vs full-repo context strategies
+**Deployment:**
+- Containerized as Docker image, deployed on ECS Fargate with ALB
+- Health checks via Spring Boot Actuator (`/actuator/health`)
+- Structured logging with Spring Boot defaults + custom EMF metrics
+- Configuration via `application.yml` + environment variable overrides
 
-**Handler patterns:**
-- Dual-constructor pattern (no-arg for Lambda, package-private for testing)
-- MDC correlation context (`correlationId`, `ticketKey`, `handler`) on every invocation
-- Configurable via environment variables with fallback defaults
+**Handler mapping (Lambda → Spring Boot):**
+- `JiraWebhookHandler` → `JiraWebhookController`
+- `AgentWebhookHandler` → `AgentWebhookController`
+- `AgentProcessorHandler` → `AgentSqsListener`
+- `MergeWaitHandler` → `MergeWaitSqsListener`
+- `FetchTicketHandler`, `CodeFetchHandler`, `ClaudeInvokeHandler`, `PrCreatorHandler` → Methods in `PipelineService`
 
 ## Core Design Patterns
 
@@ -114,14 +119,20 @@ ToolRegistry
 ## Build Commands
 
 ```bash
-# Build fat JAR (all handlers in one artifact)
+# Build the entire application
 ./gradlew clean build
+
+# Build spring-boot-app module only
+./gradlew :spring-boot-app:build
 
 # Run unit tests
 ./gradlew test
 
 # Build without tests
 ./gradlew build -x test
+
+# Build Docker image for ECS deployment
+docker build -t ai-driven:latest -f application/spring-boot-app/Dockerfile application/
 
 # List all tasks
 ./gradlew tasks
@@ -132,6 +143,7 @@ ToolRegistry
 | Library | Purpose |
 |---------|---------|
 | AWS SDK v2 | DynamoDB, Secrets Manager, S3, Step Functions |
+| Spring AI 1.1.2 | Anthropic API client (prompt caching, retry, structured types) |
 | Lombok | Boilerplate reduction (`@Slf4j`, `@Builder`) |
 | Jackson | JSON serialization/deserialization |
 | Apache Commons | String utilities |
@@ -140,8 +152,10 @@ ToolRegistry
 
 ## Build Output
 
-The `lambda-handlers` module produces a fat JAR at:
+The `spring-boot-app` module produces executable artifacts for ECS Fargate deployment:
 ```
-lambda-handlers/build/libs/lambda-handlers-all.jar
+spring-boot-app/build/libs/spring-boot-app.jar     # Executable Spring Boot application
+spring-boot-app/build/libs/spring-boot-app-sources.jar  # Source code for debugging
+Dockerfile                                           # Container image definition for ECS
 ```
-This single JAR is deployed to all Lambda functions, with each function pointing to a different handler class.
+The JAR includes all dependencies and runs with `java -jar spring-boot-app.jar` on ECS Fargate.

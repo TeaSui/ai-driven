@@ -252,8 +252,7 @@ public class AgentOrchestrator {
 
             // Track progress if available
             if (progressTracker != null && request.ackCommentId() != null) {
-                progressTracker.updateProgress(request.ackCommentId(),
-                        extractResultsFromBlocks(toolResultBlocks));
+                progressTracker.updateProgress(request.ackCommentId(), List.of());
             }
         }
 
@@ -270,6 +269,8 @@ public class AgentOrchestrator {
             List<Map<String, Object>> toolSchemas, int turn) {
         try {
             return aiClient.chatWithTools(systemPrompt, messages, toolSchemas);
+        } catch (AgentExecutionException e) {
+            throw e;
         } catch (Exception e) {
             throw new AgentExecutionException(
                     "AI model call failed on turn " + turn + " for ticket=" + request.ticketKey(), e);
@@ -383,14 +384,6 @@ public class AgentOrchestrator {
         return toolResultBlocks;
     }
 
-    /**
-     * Extracts ToolResult objects from result blocks for progress tracking.
-     */
-    private List<ToolResult> extractResultsFromBlocks(List<Map<String, Object>> blocks) {
-        // Simplified - returns empty list as this is a helper for progress tracking
-        return List.of();
-    }
-
     private ToolCall sanitizeToolCall(ToolCall call) {
         JsonNode input = call.input();
         if (input != null && input.isObject()) {
@@ -470,7 +463,7 @@ public class AgentOrchestrator {
     private String toJson(Object value) {
         try {
             return OBJECT_MAPPER.writeValueAsString(value);
-        } catch (Exception e) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new AgentExecutionException("Failed to serialize message content", e);
         }
     }

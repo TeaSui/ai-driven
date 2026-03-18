@@ -11,4 +11,8 @@ dependencies {
 
     // Jackson for JSON schema conversion
     implementation "com.fasterxml.jackson.core:jackson-databind:${project.property('jacksonVersion')}"
+
+    // Spring AI model — provides ToolCallback, ToolCallbackProvider, ToolDefinition
+    // ADR-008: With all-in Spring Boot, no excludes needed.
+    implementation "org.springframework.ai:spring-ai-model:${project.property('springAiVersion')}"
 }

@@ -37,7 +37,6 @@ subprojects {
         runtimeOnly "org.apache.logging.log4j:log4j-api:${project.property('log4jVersion')}"
         runtimeOnly "org.apache.logging.log4j:log4j-core:${project.property('log4jVersion')}"
         runtimeOnly "org.apache.logging.log4j:log4j-slf4j2-impl:${project.property('log4jVersion')}"
-        runtimeOnly "com.amazonaws:aws-lambda-java-log4j2:${project.property('awsLambdaLog4jVersion')}"
 
         // --- Testing (JUnit 5 + Mockito) ---
         testImplementation "org.junit.jupiter:junit-jupiter:${project.property('junitVersion')}"

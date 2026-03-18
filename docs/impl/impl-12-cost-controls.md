@@ -61,5 +61,5 @@
 | NEW | `core/src/main/java/com/aidriven/core/cost/BudgetTracker.java` |
 | NEW | `core/src/main/java/com/aidriven/core/cost/ModelPricing.java` |
 | MODIFY | `core/src/main/java/com/aidriven/core/model/TicketState.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/ClaudeInvokeHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

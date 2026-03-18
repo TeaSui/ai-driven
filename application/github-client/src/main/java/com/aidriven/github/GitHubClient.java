@@ -2,6 +2,7 @@ package com.aidriven.github;
 
 import com.aidriven.core.model.AgentResult;
 import com.aidriven.core.exception.ConfigurationException;
+import com.aidriven.core.exception.HttpClientException;
 import com.aidriven.core.service.SecretsService;
 import com.aidriven.spi.model.BranchName;
 import com.aidriven.spi.model.OperationContext;
@@ -95,7 +96,7 @@ public class GitHubClient implements SourceControlClient, SourceControlProvider 
             return new GitHubClient(secret.owner(), secret.repo(), secret.token());
         } catch (ConfigurationException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             throw new ConfigurationException(
                     "GitHubClient: failed to load credentials from secret '" + secretArn + "'", e);
         }
@@ -298,7 +299,10 @@ public class GitHubClient implements SourceControlClient, SourceControlProvider 
             HttpResponseHandler.checkResponse(response, OPERATION_GITHUB, "searchFiles");
             JsonNode json = objectMapper.readTree(response.body());
             return extractSearchResults(json);
-        } catch (Exception e) {
+        } catch (HttpClientException e) {
+            log.warn("searchFiles failed for query {}: {}. Returning empty results.", query, e.getMessage());
+            return List.of();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             log.warn("searchFiles failed for query {}: {}. Returning empty results.", query, e.getMessage());
             return List.of();
         }
@@ -334,6 +338,13 @@ public class GitHubClient implements SourceControlClient, SourceControlProvider 
             String body) {
         try {
             addPrComment(context, prNumber, body);
+        } catch (HttpClientException e) {
+            log.error("Failed to add PR comment: HTTP {} - {}", e.getStatusCode(), e.getMessage(), e);
+        } catch (java.io.IOException e) {
+            log.error("Failed to add PR comment: I/O error: {}", e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Failed to add PR comment: interrupted", e);
         } catch (Exception e) {
             log.error("Failed to add PR comment: {}", e.getMessage(), e);
         }
@@ -376,6 +387,13 @@ public class GitHubClient implements SourceControlClient, SourceControlProvider 
             String parentCommentId, String body) {
         try {
             addPrCommentReplyInternal(context, repoOwner, repoSlug, prNumber, parentCommentId, body);
+        } catch (HttpClientException e) {
+            log.error("Failed to add PR comment reply: HTTP {} - {}", e.getStatusCode(), e.getMessage(), e);
+        } catch (java.io.IOException e) {
+            log.error("Failed to add PR comment reply: I/O error: {}", e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Failed to add PR comment reply: interrupted", e);
         } catch (Exception e) {
             log.error("Failed to add PR comment reply: {}", e.getMessage(), e);
         }

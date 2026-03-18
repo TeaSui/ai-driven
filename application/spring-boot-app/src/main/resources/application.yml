@@ -1,0 +1,108 @@
+spring:
+  application:
+    name: ai-driven
+  ai:
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      chat:
+        options:
+          model: ${CLAUDE_MODEL:claude-sonnet-4-6}
+          max-tokens: ${CLAUDE_MAX_TOKENS:32768}
+          temperature: ${CLAUDE_TEMPERATURE:0.2}
+  main:
+    banner-mode: off
+
+# ---- AI-Driven Application Properties ----
+
+ai-driven:
+  jira:
+    secret-arn: ${JIRA_SECRET_ARN:}
+    webhook-secret-arn: ${JIRA_WEBHOOK_SECRET_ARN:}
+    webhook-secret: ${JIRA_WEBHOOK_SECRET:}
+  github:
+    secret-arn: ${GITHUB_SECRET_ARN:}
+    webhook-secret-arn: ${GITHUB_AGENT_WEBHOOK_SECRET_ARN:}
+  bitbucket:
+    secret-arn: ${BITBUCKET_SECRET_ARN:}
+  claude:
+    secret-arn: ${CLAUDE_SECRET_ARN:}
+    model: ${CLAUDE_MODEL:claude-sonnet-4-6}
+    model-fallback: ${CLAUDE_MODEL_FALLBACK:claude-sonnet-4-6}
+    max-tokens: ${CLAUDE_MAX_TOKENS:32768}
+    temperature: ${CLAUDE_TEMPERATURE:0.2}
+    prompt-version: ${PROMPT_VERSION:v1}
+    researcher-model: ${CLAUDE_RESEARCHER_MODEL:claude-haiku}
+    researcher-max-tokens: ${CLAUDE_RESEARCHER_MAX_TOKENS:4096}
+    provider: ${CLAUDE_PROVIDER:SPRING_AI}
+    bedrock-region: ${BEDROCK_REGION:ap-southeast-1}
+    max-context: ${MAX_CONTEXT_FOR_CLAUDE:700000}
+  aws:
+    region: ${AWS_REGION:ap-southeast-1}
+    sqs:
+      agent-queue-url: ${AGENT_QUEUE_URL:}
+    dynamodb:
+      state-table: ${STATE_TABLE_NAME:ai-driven-state}
+    s3:
+      context-bucket: ${CODE_CONTEXT_BUCKET:ai-driven-context}
+      audit-bucket: ${AUDIT_BUCKET_NAME:}
+    step-functions:
+      state-machine-arn: ${STATE_MACHINE_ARN:}
+  agent:
+    enabled: ${AGENT_ENABLED:false}
+    max-turns: ${AGENT_MAX_TURNS:10}
+    max-wall-clock-seconds: ${AGENT_MAX_WALL_CLOCK_SECONDS:600}
+    trigger-prefix: ${AGENT_TRIGGER_PREFIX:@ai}
+    token-budget: ${AGENT_TOKEN_BUDGET:50000}
+    recent-messages-to-keep: ${AGENT_RECENT_MESSAGES_TO_KEEP:2}
+    guardrails-enabled: ${AGENT_GUARDRAILS_ENABLED:true}
+    cost-budget-per-ticket: ${AGENT_COST_BUDGET_PER_TICKET:200000}
+    classifier-use-llm: ${AGENT_CLASSIFIER_USE_LLM:false}
+    mention-keyword: ${AGENT_MENTION_KEYWORD:ai}
+    bot-account-id: ${AGENT_BOT_ACCOUNT_ID:}
+  slack:
+    webhook-url: ${SLACK_WEBHOOK_URL:}
+    channel: ${SLACK_CHANNEL:}
+    fallback-to-jira: ${SLACK_FALLBACK_TO_JIRA:true}
+  cost:
+    cost-aware-mode: ${COST_AWARE_MODE:true}
+    monthly-budget-usd: ${MONTHLY_BUDGET_USD:100.0}
+    max-tokens-per-ticket: ${MAX_TOKENS_PER_TICKET:200000}
+    max-requests-per-user-per-hour: ${MAX_REQUESTS_PER_USER_PER_HOUR:10}
+    max-requests-per-ticket-per-hour: ${MAX_REQUESTS_PER_TICKET_PER_HOUR:20}
+  context:
+    mode: ${CONTEXT_MODE:INCREMENTAL}
+    max-file-size-chars: ${MAX_FILE_SIZE_CHARS:100000}
+    max-total-context-chars: ${MAX_TOTAL_CONTEXT_CHARS:3000000}
+    max-file-size-bytes: ${MAX_FILE_SIZE_BYTES:500000}
+    summarization-threshold: ${SUMMARIZATION_THRESHOLD:50000}
+    branch-prefix: ${BRANCH_PREFIX:ai/}
+    default-platform: ${DEFAULT_PLATFORM:BITBUCKET}
+    default-workspace: ${DEFAULT_WORKSPACE:}
+    default-repo: ${DEFAULT_REPO:}
+  mcp:
+    gateway-enabled: ${MCP_GATEWAY_ENABLED:false}
+    gateway-url: ${MCP_GATEWAY_URL:}
+    servers-config: ${MCP_SERVERS_CONFIG:[]}
+
+# ---- Actuator ----
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  health:
+    defaults:
+      enabled: true
+
+# ---- Server ----
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# ---- Logging ----
+
+logging:
+  level:
+    com.aidriven: ${LOG_LEVEL:INFO}
+    org.springframework.ai: WARN

@@ -15,8 +15,6 @@ class InputSanitizerTest {
     void should_keep_safe_html_and_text() {
         String input = "This is a <b>bold</b> statement with a <a href=\"#\">link</a>.";
         String sanitized = InputSanitizer.sanitize(input);
-        System.out.println("Original: " + input);
-        System.out.println("Sanitized: " + sanitized);
         assertTrue(sanitized.contains("<b>bold</b>"));
         assertTrue(sanitized.contains("<a>link</a>"));
         assertTrue(sanitized.contains("This is a"));

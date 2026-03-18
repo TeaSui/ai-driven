@@ -58,6 +58,6 @@ Track AI generation quality and use feedback to improve prompts:
 |--------|------|
 | NEW | `core/src/main/java/com/aidriven/core/model/GenerationMetrics.java` |
 | NEW | `core/src/main/java/com/aidriven/core/repository/GenerationMetricsRepository.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/MergeWaitHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/ClaudeInvokeHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/MergeWaitHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

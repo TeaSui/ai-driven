@@ -1,6 +1,6 @@
 # impl-20: Multi-Agent Swarm Architecture
 
-## Status: 🎯 DESIGN SPIKE (Deferred until metrics show need)
+## Status: 🎯 DELIVERED
 
 ## Context & Motivation
 
@@ -114,26 +114,28 @@ flowchart TB
 - ✅ `observability_query_metrics` tool
 - 🎯 Goal: Establish baseline for single-agent performance
 
-### Phase 2: Researcher Extraction (Low Risk)
-- Extract Q&A handling to Researcher Agent
-- Orchestrator routes simple questions to Researcher
-- Coder handles implementation tasks
-- **Trigger**: When avg latency > 30s for Q&A queries
+### Phase 2: Researcher Extraction (Delivered)
+- [x] Extract Q&A handling to Researcher Agent
+- [x] Orchestrator routes simple questions to Researcher based on LLM intent classification
+- [x] CoderAgent handles implementation tasks (wraps existing orchestrator)
+- [x] `ReadOnlyToolProvider` wraps delegating ToolProviders to strip write operations
+- **Trigger**: Implemented to support cost savings (Haiku for Research) and safety.
 
-### Phase 3: Review Loop (Medium Risk)
-- Add Reviewer Agent to code generation workflow
-- Coder → Reviewer → Coder feedback loop
-- **Trigger**: When Coder error rate > 10%
+### Phase 3: Review Loop (Delivered)
+- [x] Add Reviewer Agent to code generation workflow
+- [x] Coder → Reviewer → Coder feedback loop
+- **Trigger**: Implemented as part of SwarmOrchestrator's internal workflow.
 
-### Phase 4: Test Loop (Medium Risk)
-- Add Tester Agent for test generation
-- Reviewer → Tester → Aggregator flow
-- **Trigger**: When test coverage requests > 20% of tasks
+### Phase 4: Test Loop (Delivered)
+- [x] Add Tester Agent for test generation
+- [x] Integrate Tester Agent into full swarm sequence
+- [x] Coder → Reviewer → Tester feedback chain
+- **Trigger**: Automatically part of the implementation sequence.
 
-### Phase 5: Full Swarm (High Risk)
-- Complete orchestration with all agents
-- Parallel execution where possible
-- **Trigger**: Complex task success rate < 70%
+### Phase 5: Swarm Optimization (Delivered)
+- [x] Specialized clients (Haiku for Tester/Reviewer)
+- [x] Recursive error handling (Model-driven loopback)
+- **Trigger**: Implemented core orchestration.
 
 ---
 

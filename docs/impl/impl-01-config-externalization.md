@@ -11,7 +11,7 @@
 - [x] `BitbucketFetchHandler` — externalize 3 constants to env vars
 - [x] `ClaudeInvokeHandler` — externalize context limit + model name to env vars
 - [x] `ClaudeInvokeHandler` — externalize max tokens + temperature to env vars
-- [x] `ClaudeClient` — accept `maxTokens` + `temperature` as constructor params
+- [x] `SpringAiClientAdapter` (formerly `ClaudeClient`) — accept `maxTokens` + `temperature` as constructor params
 - [x] `ai-driven-stack.ts` — add all 8 new env vars to shared Lambda config
 - [x] `ai-driven-stack.ts` — externalize merge wait timeout
 
@@ -30,7 +30,7 @@
 
 ## Files Modified
 
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java`
-- `application/claude-client/src/main/java/com/aidriven/claude/ClaudeClient.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java`
+- `application/claude-client/src/main/java/com/aidriven/claude/SpringAiClientAdapter.java`
 - `infrastructure/lib/ai-driven-stack.ts`

@@ -3,8 +3,9 @@ package com.aidriven.core.config;
 /**
  * Immutable configuration for the AI Agent subsystem.
  *
- * <p>All fields are loaded once from environment variables at cold-start
- * (see {@link AppConfig#getAgentConfig()}) and never mutated.
+ * <p>All fields are loaded from Spring Boot {@code AppProperties.AgentProperties}
+ * and passed via constructor injection. This record is the canonical configuration
+ * object consumed by {@code AgentOrchestrator} and related agent components.</p>
  */
 public record AgentConfig(
         boolean enabled,
@@ -33,16 +34,7 @@ public record AgentConfig(
          */
         String botAccountId) {
 
-    /** Full legacy constructor (Phase 1-2 API). */
-    public AgentConfig(boolean enabled, String queueUrl, int maxTurns,
-            int maxWallClockSeconds, String triggerPrefix,
-            int tokenBudget, int recentMessagesToKeep) {
-        this(enabled, queueUrl, maxTurns, maxWallClockSeconds, triggerPrefix,
-                tokenBudget, recentMessagesToKeep,
-                true, 200_000, false, "ai", null);
-    }
-
-    /** Convenience constructor preserving the 10-field API surface. */
+    /** Convenience constructor preserving the 10-field API surface (used by tests). */
     public AgentConfig(boolean enabled, String queueUrl, int maxTurns,
             int maxWallClockSeconds, String triggerPrefix,
             int tokenBudget, int recentMessagesToKeep,

@@ -40,8 +40,8 @@ public Map handleRequest(Map input, Context context) {
 ## Files Modified
 
 - `application/core/src/main/java/com/aidriven/core/util/LambdaCorrelationContext.java` *(new)*
-- All 6 handlers in `application/lambda-handlers/src/main/java/com/aidriven/lambda/`
-- `application/lambda-handlers/src/main/resources/log4j2.xml` *(new)*
+- All 6 handlers in `application/spring-boot-app/src/main/java/com/aidriven/lambda/`
+- `application/spring-boot-app/src/main/resources/log4j2.xml` *(new)*
 
 ## Logging Framework
 

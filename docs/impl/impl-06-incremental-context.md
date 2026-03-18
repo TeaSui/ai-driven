@@ -54,5 +54,5 @@ Replace the current full-repo download with targeted context fetching:
 | NEW | `core/src/main/java/com/aidriven/core/util/KeywordExtractor.java` |
 | NEW | `core/src/main/java/com/aidriven/core/context/IncrementalContextBuilder.java` |
 | MODIFY | `bitbucket-client/src/main/java/com/aidriven/bitbucket/BitbucketClient.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/BitbucketFetchHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

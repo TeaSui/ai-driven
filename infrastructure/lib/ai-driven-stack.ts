@@ -12,7 +12,10 @@ import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cwActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
-import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import { Construct } from 'constructs';
 import * as path from 'path';
 
@@ -32,7 +35,7 @@ export class AiDrivenStack extends cdk.Stack {
         // Webhook verification secrets (operators set values post-deploy)
         const jiraWebhookTokenSecret = new secretsmanager.Secret(this, 'JiraWebhookTokenSecret', {
             secretName: 'ai-driven/jira-webhook-token',
-            description: 'Pre-shared token for Jira → Lambda webhook verification (X-Jira-Webhook-Token header)',
+            description: 'Pre-shared token for Jira webhook verification (X-Jira-Webhook-Token header)',
             generateSecretString: {
                 excludePunctuation: true,
                 passwordLength: 32,
@@ -41,7 +44,7 @@ export class AiDrivenStack extends cdk.Stack {
 
         const githubAgentWebhookSecret = new secretsmanager.Secret(this, 'GitHubAgentWebhookSecret', {
             secretName: 'ai-driven/github-agent-webhook-secret',
-            description: 'HMAC secret for GitHub → Agent webhook signature verification',
+            description: 'HMAC secret for GitHub to Agent webhook signature verification',
             generateSecretString: {
                 excludePunctuation: true,
                 passwordLength: 40,
@@ -81,38 +84,6 @@ export class AiDrivenStack extends cdk.Stack {
             blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
         });
 
-        // ==================== LAMBDA COMMON CONFIG ====================
-        const lambdaEnvironment = {
-            DYNAMODB_TABLE_NAME: stateTable.tableName,
-            CLAUDE_SECRET_ARN: claudeApiKeySecret.secretArn,
-            BITBUCKET_SECRET_ARN: bitbucketSecret.secretArn,
-            JIRA_SECRET_ARN: jiraSecret.secretArn,
-            GITHUB_SECRET_ARN: githubSecret.secretArn,
-            CODE_CONTEXT_BUCKET: codeContextBucket.bucketName,
-            // Configurable limits (defaults match handler fallbacks)
-            MAX_FILE_SIZE_CHARS: '100000',
-            MAX_TOTAL_CONTEXT_CHARS: '3000000',
-            MAX_FILE_SIZE_BYTES: '500000',
-            MAX_CONTEXT_FOR_CLAUDE: '700000',
-            CLAUDE_PROVIDER: 'BEDROCK', // ANTHROPIC_API - BEDROCK
-            CLAUDE_MODEL: 'claude-sonnet-4-6',
-            CLAUDE_RESEARCHER_MODEL: 'claude-3-haiku-20240307',
-            CLAUDE_MAX_TOKENS: '32768',
-            CLAUDE_TEMPERATURE: '0.2',
-            BEDROCK_REGION: 'ap-southeast-1',
-            MERGE_WAIT_TIMEOUT_DAYS: '7',
-            CONTEXT_MODE: 'FULL_REPO',
-            PROMPT_VERSION: 'v1',
-            BRANCH_PREFIX: 'ai/',
-            DEFAULT_PLATFORM: 'GITHUB',
-            DEFAULT_WORKSPACE: 'TeaSui',
-            DEFAULT_REPO: 'claude-automation',
-            JIRA_APP_USER_EMAIL: 'app-service-account@tyme.com',
-            // Allow forcing a container recycle via --context deployId=...
-            DEPLOY_ID: this.node.tryGetContext('deployId') || 'none',
-            AUDIT_BUCKET_NAME: `ai-driven-audit-trail-${this.account}`,
-        };
-
         // S3 bucket for audit trails - import existing bucket
         const auditBucket = s3.Bucket.fromBucketName(this, 'AuditTrailBucket', `ai-driven-audit-trail-${this.account}`);
 
@@ -127,7 +98,7 @@ export class AiDrivenStack extends cdk.Stack {
             queueName: 'ai-driven-agent-tasks.fifo',
             fifo: true,
             contentBasedDeduplication: true,
-            visibilityTimeout: cdk.Duration.seconds(600), // 10 min to match Lambda timeout
+            visibilityTimeout: cdk.Duration.seconds(600),
             deadLetterQueue: {
                 queue: agentDlq,
                 maxReceiveCount: 3,
@@ -135,9 +106,6 @@ export class AiDrivenStack extends cdk.Stack {
         });
 
         // ==================== SQS (Jira Workflow Queue) ====================
-        // FIFO queue with deduplication for Jira webhook events
-        // Deduplication window: 5 minutes (SQS default)
-        // Prevents multiple Step Functions executions from duplicate webhook deliveries
         const jiraWorkflowDlq = new sqs.Queue(this, 'JiraWorkflowDLQ', {
             queueName: 'ai-driven-jira-workflow-dlq.fifo',
             fifo: true,
@@ -147,9 +115,8 @@ export class AiDrivenStack extends cdk.Stack {
         const jiraWorkflowQueue = new sqs.Queue(this, 'JiraWorkflowQueue', {
             queueName: 'ai-driven-jira-workflow.fifo',
             fifo: true,
-            // NOT content-based - we use explicit MessageDeduplicationId = ticket+labels
             contentBasedDeduplication: false,
-            visibilityTimeout: cdk.Duration.seconds(120), // 2 min for processing
+            visibilityTimeout: cdk.Duration.seconds(120),
             deadLetterQueue: {
                 queue: jiraWorkflowDlq,
                 maxReceiveCount: 3,
@@ -157,7 +124,6 @@ export class AiDrivenStack extends cdk.Stack {
         });
 
         // ==================== MCP GATEWAY LAMBDA (Node.js) ====================
-        // Must be defined before agentEnvironment since it references mcpGatewayUrl
         const mcpGatewayCodePath = path.join(__dirname, '../../mcp-gateway/dist');
         const mcpGatewayCode = lambda.Code.fromAsset(mcpGatewayCodePath);
 
@@ -168,7 +134,6 @@ export class AiDrivenStack extends cdk.Stack {
             ],
         });
 
-        // Grant read access to secrets for MCP providers
         jiraSecret.grantRead(mcpGatewayRole);
         githubSecret.grantRead(mcpGatewayRole);
 
@@ -181,7 +146,6 @@ export class AiDrivenStack extends cdk.Stack {
             timeout: cdk.Duration.seconds(30),
             environment: {
                 CONTEXT7_ENABLED: 'true',
-                // Credentials populated from Secrets Manager at runtime
                 JIRA_SECRET_ARN: jiraSecret.secretArn,
                 GITHUB_SECRET_ARN: githubSecret.secretArn,
             },
@@ -189,289 +153,301 @@ export class AiDrivenStack extends cdk.Stack {
             tracing: lambda.Tracing.ACTIVE,
         });
 
-        // Add Function URL for MCP Gateway
         const mcpGatewayUrl = mcpGatewayHandler.addFunctionUrl({
             authType: lambda.FunctionUrlAuthType.AWS_IAM,
         });
 
-        // Agent-specific environment variables
-        const agentEnvironment = {
-            ...lambdaEnvironment,
-            AGENT_ENABLED: 'true',
-            AGENT_TRIGGER_PREFIX: '@ai',
-            AGENT_MAX_TOOL_TURNS: '10',
-            AGENT_MAX_WALL_CLOCK_SECONDS: '720',
-            AGENT_QUEUE_URL: agentQueue.queueUrl,
-            // Phase 3: Guardrails + cost tracking
-            AGENT_GUARDRAILS_ENABLED: 'true',
-            AGENT_COST_BUDGET_PER_TICKET: '200000',
-            AGENT_CLASSIFIER_USE_LLM: 'false',
-            // Configurable @mention keyword (default: "ai" → @ai in comments)
-            // Override with AGENT_MENTION_KEYWORD=claude to respond to @claude
-            AGENT_MENTION_KEYWORD: 'ai',
-            // Immutable Jira accountId of the bot service account (prevents self-loops)
-            // Set to the Jira accountId of the Lambda execution identity (not display name)
-            AGENT_BOT_ACCOUNT_ID: '',
-            // GitHub agent webhook signature verification secret ARN
-            // The Lambda fetches this secret on first call to verify X-Hub-Signature-256
-            GITHUB_AGENT_WEBHOOK_SECRET_ARN: githubAgentWebhookSecret.secretArn,
-            // Jira webhook pre-shared token — shared with jiraWebhookHandler; fetched lazily from SM
-            JIRA_WEBHOOK_SECRET_ARN: jiraWebhookTokenSecret.secretArn,
-            // Phase 4: MCP Gateway configuration
-            // All MCP servers are now handled by the unified Node.js MCP Gateway Lambda
-            MCP_GATEWAY_URL: mcpGatewayUrl.url,
-            MCP_GATEWAY_ENABLED: 'true',
-            // Legacy stdio config disabled - all MCP via gateway
-            MCP_SERVERS_CONFIG: '[]',
-            MCP_ALLOW_STDIO_IN_LAMBDA: 'false',
-            // Audit Trail & Rate Limits
-            AUDIT_RETENTION_YEARS: '3',
-            MAX_REQUESTS_PER_USER_PER_HOUR: '10',
-            MAX_REQUESTS_PER_TICKET_PER_HOUR: '20',
-        };
-
-        const javaRuntime = lambda.Runtime.JAVA_21;
-        const lambdaCodePath = path.join(__dirname, '../../application/lambda-handlers/build/deployment');
-        const lambdaCode = lambda.Code.fromAsset(lambdaCodePath);
-
-        // ==================== IAM ROLES ====================
-
-        // Role for Processing Handlers (DynamoDB, Secrets, S3)
-        const processingRole = new iam.Role(this, 'ProcessingRole', {
-            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-            managedPolicies: [
-                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        // ==================== VPC ====================
+        const vpc = new ec2.Vpc(this, 'AiDrivenVpc', {
+            vpcName: 'ai-driven-vpc',
+            maxAzs: 2,
+            natGateways: 1,
+            subnetConfiguration: [
+                {
+                    name: 'Public',
+                    subnetType: ec2.SubnetType.PUBLIC,
+                    cidrMask: 24,
+                },
+                {
+                    name: 'Private',
+                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    cidrMask: 24,
+                },
             ],
         });
 
-        stateTable.grantReadWriteData(processingRole);
+        // ==================== ECS CLUSTER ====================
+        const cluster = new ecs.Cluster(this, 'AiDrivenCluster', {
+            clusterName: 'ai-driven',
+            vpc,
+            containerInsights: true,
+        });
 
-        processingRole.addToPrincipalPolicy(new iam.PolicyStatement({
-            actions: [
-                "bedrock:InvokeModel",
-                "bedrock:Converse",
-                "cloudwatch:PutMetricData"
+        // ==================== ECR REPOSITORY ====================
+        const ecrRepo = new ecr.Repository(this, 'SpringBootRepo', {
+            repositoryName: 'ai-driven/spring-boot-app',
+            removalPolicy: cdk.RemovalPolicy.RETAIN,
+            lifecycleRules: [
+                {
+                    maxImageCount: 10,
+                    description: 'Keep last 10 images',
+                },
             ],
-            resources: ["*"],
+        });
+
+        // ==================== ECS TASK DEFINITION ====================
+        const appLogGroup = new logs.LogGroup(this, 'SpringBootLogGroup', {
+            logGroupName: '/ecs/ai-driven-spring-boot',
+            retention: logs.RetentionDays.TWO_WEEKS,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        const taskRole = new iam.Role(this, 'SpringBootTaskRole', {
+            assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+            description: 'ECS task role for Spring Boot application',
+        });
+
+        // Grant task role access to all required AWS resources
+        stateTable.grantReadWriteData(taskRole);
+        codeContextBucket.grantReadWrite(taskRole);
+        auditBucket.grantReadWrite(taskRole);
+        agentQueue.grantSendMessages(taskRole);
+        agentQueue.grantConsumeMessages(taskRole);
+        jiraWorkflowQueue.grantSendMessages(taskRole);
+        jiraWorkflowQueue.grantConsumeMessages(taskRole);
+        claudeApiKeySecret.grantRead(taskRole);
+        bitbucketSecret.grantRead(taskRole);
+        jiraSecret.grantRead(taskRole);
+        githubSecret.grantRead(taskRole);
+        jiraWebhookTokenSecret.grantRead(taskRole);
+        githubAgentWebhookSecret.grantRead(taskRole);
+
+        // Grant MCP Gateway invocation (IAM auth on Function URL)
+        mcpGatewayHandler.grantInvoke(taskRole);
+        taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+            actions: ['lambda:InvokeFunctionUrl'],
+            resources: [mcpGatewayHandler.functionArn],
         }));
 
-        claudeApiKeySecret.grantRead(processingRole);
-        bitbucketSecret.grantRead(processingRole);
-        jiraSecret.grantRead(processingRole);
-        githubSecret.grantRead(processingRole);
-        codeContextBucket.grantReadWrite(processingRole);
-        auditBucket.grantReadWrite(processingRole);
-
-        // Role for Jira Webhook Handler (DynamoDB, Secrets, StepFunctions)
-        const jiraWebhookRole = new iam.Role(this, 'JiraWebhookRole', {
-            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        const executionRole = new iam.Role(this, 'SpringBootExecutionRole', {
+            assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
             managedPolicies: [
-                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonECSTaskExecutionRolePolicy'),
             ],
         });
 
-        stateTable.grantReadWriteData(jiraWebhookRole);
-        jiraSecret.grantRead(jiraWebhookRole);
-        jiraWebhookTokenSecret.grantRead(jiraWebhookRole);
-
-        // Role for MergeWait Handler (DynamoDB, StepFunctions SendTaskSuccess)
-        const mergeWaitRole = new iam.Role(this, 'MergeWaitRole', {
-            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-            managedPolicies: [
-                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-            ],
+        const taskDefinition = new ecs.FargateTaskDefinition(this, 'SpringBootTaskDef', {
+            family: 'ai-driven-spring-boot',
+            cpu: 1024,        // 1 vCPU
+            memoryLimitMiB: 2048,  // 2 GB
+            taskRole,
+            executionRole,
         });
 
-        stateTable.grantReadWriteData(mergeWaitRole);
-        jiraSecret.grantRead(mergeWaitRole);
-
-        // Role for Agent Webhook Handler (Jira, SQS send, DynamoDB)
-        const agentWebhookRole = new iam.Role(this, 'AgentWebhookRole', {
-            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-            managedPolicies: [
-                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-            ],
-        });
-
-        stateTable.grantReadWriteData(agentWebhookRole);
-        jiraSecret.grantRead(agentWebhookRole);
-        githubSecret.grantRead(agentWebhookRole);
-        githubAgentWebhookSecret.grantRead(agentWebhookRole);
-        jiraWebhookTokenSecret.grantRead(agentWebhookRole);  // Jira pre-shared token (shared with jiraWebhookHandler)
-        agentQueue.grantSendMessages(agentWebhookRole);
-
-        // Role for Agent Processor Handler (SQS consume, DynamoDB, Secrets, S3, Claude)
-        const agentProcessorRole = new iam.Role(this, 'AgentProcessorRole', {
-            assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-            managedPolicies: [
-                iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-            ],
-        });
-
-        stateTable.grantReadWriteData(agentProcessorRole);
-        claudeApiKeySecret.grantRead(agentProcessorRole);
-        bitbucketSecret.grantRead(agentProcessorRole);
-        jiraSecret.grantRead(agentProcessorRole);
-        githubSecret.grantRead(agentProcessorRole);
-        codeContextBucket.grantReadWrite(agentProcessorRole);
-        agentQueue.grantConsumeMessages(agentProcessorRole);
-
-        agentProcessorRole.addToPrincipalPolicy(new iam.PolicyStatement({
-            actions: ["bedrock:InvokeModel"],
-            resources: ["*"],
-        }));
-        // Grant agent processor permission to invoke MCP Gateway via Function URL
-        mcpGatewayHandler.grantInvokeUrl(agentProcessorRole);
-
-        // ==================== LAMBDA FUNCTIONS ====================
-
-        // Jira webhook router (API Gateway → SQS FIFO)
-        // Lightweight: validates, extracts ticket+labels, sends to SQS with dedup ID
-        const jiraWebhookRouter = new lambda.Function(this, 'JiraWebhookRouter', {
-            functionName: 'ai-driven-jira-webhook-router',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.JiraWebhookRouter::handleRequest',
-            code: lambdaCode,
-            memorySize: 256, // Lightweight
-            timeout: cdk.Duration.seconds(10), // Fast response to Jira
+        const container = taskDefinition.addContainer('spring-boot', {
+            image: ecs.ContainerImage.fromEcrRepository(ecrRepo, 'latest'),
+            logging: ecs.LogDriver.awsLogs({
+                logGroup: appLogGroup,
+                streamPrefix: 'app',
+            }),
             environment: {
-                ...lambdaEnvironment,
-                JIRA_WORKFLOW_QUEUE_URL: jiraWorkflowQueue.queueUrl,
+                // Core infrastructure
+                DYNAMODB_TABLE_NAME: stateTable.tableName,
+                CODE_CONTEXT_BUCKET: codeContextBucket.bucketName,
+                AUDIT_BUCKET_NAME: `ai-driven-audit-trail-${this.account}`,
+                // Secret ARNs (app fetches values from SM at startup)
+                CLAUDE_SECRET_ARN: claudeApiKeySecret.secretArn,
+                BITBUCKET_SECRET_ARN: bitbucketSecret.secretArn,
+                JIRA_SECRET_ARN: jiraSecret.secretArn,
+                GITHUB_SECRET_ARN: githubSecret.secretArn,
+                JIRA_WEBHOOK_SECRET_ARN: jiraWebhookTokenSecret.secretArn,
+                GITHUB_AGENT_WEBHOOK_SECRET_ARN: githubAgentWebhookSecret.secretArn,
+                // Claude AI configuration
+                CLAUDE_PROVIDER: 'ANTHROPIC_API',
+                CLAUDE_MODEL: 'claude-sonnet-4-6',
+                CLAUDE_RESEARCHER_MODEL: 'claude-3-haiku-20240307',
+                CLAUDE_MAX_TOKENS: '32768',
+                CLAUDE_TEMPERATURE: '0.2',
+                BEDROCK_REGION: 'ap-southeast-1',
+                // Context limits
+                MAX_FILE_SIZE_CHARS: '100000',
+                MAX_TOTAL_CONTEXT_CHARS: '3000000',
+                MAX_FILE_SIZE_BYTES: '500000',
+                MAX_CONTEXT_FOR_CLAUDE: '700000',
+                CONTEXT_MODE: 'FULL_REPO',
+                // Source control
+                BRANCH_PREFIX: 'ai/',
+                DEFAULT_PLATFORM: 'GITHUB',
+                DEFAULT_WORKSPACE: 'AirdropToTheMoon',
+                DEFAULT_REPO: 'ai-driven',
+                JIRA_APP_USER_EMAIL: 'airdroptothemoon1234567890@gmail.com',
+                PROMPT_VERSION: 'v1',
+                MERGE_WAIT_TIMEOUT_DAYS: '7',
+                // Agent configuration
+                AGENT_ENABLED: 'true',
+                AGENT_TRIGGER_PREFIX: '@ai',
+                AGENT_MAX_TOOL_TURNS: '10',
+                AGENT_MAX_WALL_CLOCK_SECONDS: '720',
+                AGENT_QUEUE_URL: agentQueue.queueUrl,
+                AGENT_GUARDRAILS_ENABLED: 'true',
+                AGENT_COST_BUDGET_PER_TICKET: '200000',
+                AGENT_CLASSIFIER_USE_LLM: 'false',
+                AGENT_MENTION_KEYWORD: 'ai',
+                AGENT_BOT_ACCOUNT_ID: '',
+                // MCP Gateway
+                MCP_GATEWAY_URL: mcpGatewayUrl.url,
+                MCP_GATEWAY_ENABLED: 'true',
+                MCP_SERVERS_CONFIG: '[]',
+                MCP_ALLOW_STDIO_IN_LAMBDA: 'false',
+                // Audit & rate limits
+                AUDIT_RETENTION_YEARS: '3',
+                MAX_REQUESTS_PER_USER_PER_HOUR: '10',
+                MAX_REQUESTS_PER_TICKET_PER_HOUR: '20',
+                // Deployment tracking
+                DEPLOY_ID: this.node.tryGetContext('deployId') || 'none',
+                // Spring Boot profile
+                SPRING_PROFILES_ACTIVE: 'prod',
+                // JVM tuning for container
+                JAVA_TOOL_OPTIONS: '-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC',
             },
-            role: jiraWebhookRole,
-            tracing: lambda.Tracing.ACTIVE,
+            healthCheck: {
+                command: ['CMD-SHELL', 'curl -f http://localhost:8080/actuator/health || exit 1'],
+                interval: cdk.Duration.seconds(30),
+                timeout: cdk.Duration.seconds(5),
+                retries: 3,
+                startPeriod: cdk.Duration.seconds(60),
+            },
         });
 
-        // Grant router permission to send messages to Jira workflow queue
-        jiraWorkflowQueue.grantSendMessages(jiraWebhookRouter);
+        container.addPortMappings({ containerPort: 8080 });
 
-        // Jira webhook processor (SQS FIFO → Step Functions)
-        // Triggered by SQS, deduplication already handled at queue level
-        const jiraWebhookProcessor = new lambda.Function(this, 'JiraWebhookProcessor', {
-            functionName: 'ai-driven-jira-webhook-processor',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.JiraWebhookProcessor::handleRequest',
-            code: lambdaCode,
-            memorySize: 512,
-            timeout: cdk.Duration.minutes(2),
-            environment: lambdaEnvironment,
-            role: jiraWebhookRole,
-            tracing: lambda.Tracing.ACTIVE,
+        // ==================== ALB + ECS SERVICE ====================
+        const albSg = new ec2.SecurityGroup(this, 'AlbSecurityGroup', {
+            vpc,
+            description: 'ALB security group - allows inbound HTTPS',
+            allowAllOutbound: true,
+        });
+        albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), 'Allow HTTPS');
+        albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), 'Allow HTTP (redirects to HTTPS)');
+
+        const serviceSg = new ec2.SecurityGroup(this, 'ServiceSecurityGroup', {
+            vpc,
+            description: 'ECS service security group',
+            allowAllOutbound: true,
+        });
+        serviceSg.addIngressRule(albSg, ec2.Port.tcp(8080), 'Allow ALB to ECS on port 8080');
+
+        const alb = new elbv2.ApplicationLoadBalancer(this, 'AppAlb', {
+            loadBalancerName: 'ai-driven-alb',
+            vpc,
+            internetFacing: true,
+            securityGroup: albSg,
         });
 
-        // Processor consumes from Jira workflow queue
-        jiraWebhookProcessor.addEventSource(
-            new lambdaEventSources.SqsEventSource(jiraWorkflowQueue, {
-                batchSize: 1, // Process one at a time for ordering
-            })
+        const targetGroup = new elbv2.ApplicationTargetGroup(this, 'SpringBootTG', {
+            targetGroupName: 'ai-driven-spring-boot',
+            vpc,
+            port: 8080,
+            protocol: elbv2.ApplicationProtocol.HTTP,
+            targetType: elbv2.TargetType.IP,
+            healthCheck: {
+                path: '/actuator/health',
+                interval: cdk.Duration.seconds(30),
+                timeout: cdk.Duration.seconds(5),
+                healthyThresholdCount: 2,
+                unhealthyThresholdCount: 3,
+                healthyHttpCodes: '200',
+            },
+            deregistrationDelay: cdk.Duration.seconds(30),
+        });
+
+        // HTTP listener → redirect to HTTPS (when ACM cert is attached)
+        // For now, forward on port 80 until TLS is configured
+        const httpListener = alb.addListener('HttpListener', {
+            port: 80,
+            defaultTargetGroups: [targetGroup],
+        });
+
+        const fargateService = new ecs.FargateService(this, 'SpringBootService', {
+            serviceName: 'ai-driven-spring-boot',
+            cluster,
+            taskDefinition,
+            desiredCount: 1,
+            securityGroups: [serviceSg],
+            assignPublicIp: false,
+            vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+            circuitBreaker: { rollback: true },
+            minHealthyPercent: 100,
+            maxHealthyPercent: 200,
+            enableExecuteCommand: true, // ECS Exec for debugging
+        });
+
+        fargateService.attachToApplicationTargetGroup(targetGroup);
+
+        // Auto-scaling: 1–4 tasks based on CPU utilization
+        const scaling = fargateService.autoScaleTaskCount({
+            minCapacity: 1,
+            maxCapacity: 4,
+        });
+
+        scaling.scaleOnCpuUtilization('CpuScaling', {
+            targetUtilizationPercent: 70,
+            scaleInCooldown: cdk.Duration.seconds(300),
+            scaleOutCooldown: cdk.Duration.seconds(60),
+        });
+
+        scaling.scaleOnMemoryUtilization('MemoryScaling', {
+            targetUtilizationPercent: 80,
+            scaleInCooldown: cdk.Duration.seconds(300),
+            scaleOutCooldown: cdk.Duration.seconds(60),
+        });
+
+        // ==================== API GATEWAY → ALB (Webhook Proxy) ====================
+        // API Gateway remains the public-facing entry point for webhooks.
+        // It proxies requests to the ALB which routes to Spring Boot.
+        const api = new apigateway.RestApi(this, 'WebhookApi', {
+            restApiName: 'ai-driven-webhook',
+            description: 'Webhook endpoints proxied to Spring Boot on ECS/Fargate',
+            deployOptions: {
+                stageName: 'prod',
+                throttlingRateLimit: 100,
+                throttlingBurstLimit: 200,
+            },
+        });
+
+        // HTTP proxy integration: API Gateway → ALB (internet-facing)
+        const albIntegration = (httpMethod: string, endpointPath: string) =>
+            new apigateway.Integration({
+                type: apigateway.IntegrationType.HTTP_PROXY,
+                integrationHttpMethod: httpMethod,
+                uri: `http://${alb.loadBalancerDnsName}${endpointPath}`,
+            });
+
+        // Jira webhook endpoint
+        api.root.addResource('jira-webhook').addMethod(
+            'POST',
+            albIntegration('POST', '/api/webhooks/jira'),
         );
 
-        // Keep old handler name for backwards compatibility with existing references
-        const jiraWebhookHandler = jiraWebhookRouter;
-
-        // Fetch ticket details from Jira
-        const fetchTicketHandler = new lambda.Function(this, 'FetchTicketHandler', {
-            functionName: 'ai-driven-fetch-ticket',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.FetchTicketHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 512,
-            timeout: cdk.Duration.minutes(5),
-            environment: lambdaEnvironment,
-            role: processingRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Download full repo archive from Source Control (Bitbucket/GitHub)
-        const codeFetchHandler = new lambda.Function(this, 'CodeFetchHandler', {
-            functionName: 'ai-driven-code-fetch',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.CodeFetchHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 2048,
-            timeout: cdk.Duration.minutes(10),
-            ephemeralStorageSize: cdk.Size.gibibytes(2),
-            environment: lambdaEnvironment,
-            role: processingRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Generate code using Claude AI
-        const claudeInvokeHandler = new lambda.Function(this, 'ClaudeInvokeHandler', {
-            functionName: 'ai-driven-claude-invoke',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.ClaudeInvokeHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 2048,
-            timeout: cdk.Duration.minutes(15),
-            environment: lambdaEnvironment,
-            role: processingRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Create PR in Bitbucket
-        const prCreatorHandler = new lambda.Function(this, 'PrCreatorHandler', {
-            functionName: 'ai-driven-pr-creator',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.PrCreatorHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 512,
-            timeout: cdk.Duration.minutes(5),
-            environment: lambdaEnvironment,
-            role: processingRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Merge wait handler (task token callback)
-        const mergeWaitHandler = new lambda.Function(this, 'MergeWaitHandler', {
-            functionName: 'ai-driven-merge-wait',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.MergeWaitHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 512,
-            timeout: cdk.Duration.minutes(1),
-            environment: lambdaEnvironment,
-            role: mergeWaitRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Agent webhook handler (thin: validate, ack, enqueue to SQS)
-        const agentWebhookHandler = new lambda.Function(this, 'AgentWebhookHandler', {
-            functionName: 'ai-driven-agent-webhook',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.AgentWebhookHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 512,
-            timeout: cdk.Duration.minutes(1),
-            environment: agentEnvironment,
-            role: agentWebhookRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // Agent processor handler (heavy: runs orchestrator, triggered by SQS)
-        const agentProcessorHandler = new lambda.Function(this, 'AgentProcessorHandler', {
-            functionName: 'ai-driven-agent-processor',
-            runtime: javaRuntime,
-            handler: 'com.aidriven.lambda.AgentProcessorHandler::handleRequest',
-            code: lambdaCode,
-            memorySize: 2048,
-            timeout: cdk.Duration.minutes(10),
-            environment: agentEnvironment,
-            role: agentProcessorRole,
-            tracing: lambda.Tracing.ACTIVE,
-        });
-
-        // SQS trigger for agent processor
-        agentProcessorHandler.addEventSource(
-            new lambdaEventSources.SqsEventSource(agentQueue, {
-                batchSize: 1, // Process one task at a time
-            })
+        // Merge webhook endpoint (Bitbucket/GitHub PR merge callbacks)
+        api.root.addResource('merge-webhook').addMethod(
+            'POST',
+            albIntegration('POST', '/api/webhooks/merge'),
         );
 
-        // ==================== STEP FUNCTIONS ====================
+        // Agent webhook endpoint (GitHub/Jira @ai comment processing)
+        api.root.addResource('agent-webhook').addMethod(
+            'POST',
+            albIntegration('POST', '/api/webhooks/agent'),
+        );
 
-        const lambdaRetryProps = {
-            errors: ['Lambda.ServiceException', 'Lambda.AWSLambdaException', 'Lambda.SdkClientException', 'States.TaskFailed'],
+        // ==================== STEP FUNCTIONS (SQS + DynamoDB Polling) ====================
+        // ADR-008: Spring Boot handles the full pipeline internally (fetch ticket,
+        // fetch code, invoke Claude, create PR). Step Functions provides orchestration
+        // visibility by enqueueing work via SQS and polling status from DynamoDB.
+
+        const retryProps = {
+            errors: ['States.TaskFailed', 'States.Timeout'],
             interval: cdk.Duration.seconds(5),
             maxAttempts: 3,
             backoffRate: 2,
@@ -482,196 +458,199 @@ export class AiDrivenStack extends cdk.Stack {
             cause: 'One or more steps failed after retries. Check CloudWatch logs for details.',
         });
 
-        // Step 1: Fetch ticket details from Jira
-        const fetchTicketTask = new tasks.LambdaInvoke(this, 'FetchTicketTask', {
-            lambdaFunction: fetchTicketHandler,
-            outputPath: '$.Payload',
-            comment: 'Fetch full ticket details from Jira',
+        // Step 1: Enqueue workflow task to SQS for Spring Boot processing
+        const enqueueWorkflowTask = new tasks.SqsSendMessage(this, 'EnqueueWorkflowTask', {
+            queue: jiraWorkflowQueue,
+            messageBody: stepfunctions.TaskInput.fromJsonPathAt('$'),
+            messageGroupId: 'workflow',
+            comment: 'Enqueue workflow task for Spring Boot processing',
         });
-        fetchTicketTask.addRetry(lambdaRetryProps);
-        fetchTicketTask.addCatch(workflowFailed, { resultPath: '$.error' });
+        enqueueWorkflowTask.addRetry(retryProps);
+        enqueueWorkflowTask.addCatch(workflowFailed, { resultPath: '$.error' });
 
-        // Step 2: Fetch code context from Source Control
-        const fetchCodeTask = new tasks.LambdaInvoke(this, 'FetchCodeTask', {
-            lambdaFunction: codeFetchHandler,
-            outputPath: '$.Payload',
-            comment: 'Download full repo and store code context in S3',
+        // Step 2: Wait for completion (callback pattern via SQS)
+        const waitForProcessing = new stepfunctions.Wait(this, 'WaitForProcessing', {
+            time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(30)),
+            comment: 'Wait for Spring Boot to process the workflow task',
         });
-        fetchCodeTask.addRetry(lambdaRetryProps);
-        fetchCodeTask.addCatch(workflowFailed, { resultPath: '$.error' });
 
-        // Step 3: Generate code using Claude AI
-        const claudeInvokeTask = new tasks.LambdaInvoke(this, 'ClaudeInvokeTask', {
-            lambdaFunction: claudeInvokeHandler,
-            outputPath: '$.Payload',
-            comment: 'Generate code using Claude AI (Direct API)',
+        // Step 3: Check status via ALB health endpoint
+        const checkStatus = new tasks.CallAwsService(this, 'CheckWorkflowStatus', {
+            service: 'dynamodb',
+            action: 'getItem',
+            iamResources: [stateTable.tableArn],
+            parameters: {
+                TableName: stateTable.tableName,
+                Key: {
+                    PK: { 'S.$': "States.Format('WORKFLOW#{}', $.ticketKey)" },
+                    SK: { 'S': 'STATUS' },
+                },
+            },
+            resultPath: '$.statusResult',
+            comment: 'Check workflow status in DynamoDB',
         });
-        claudeInvokeTask.addRetry({
-            ...lambdaRetryProps,
-            maxAttempts: 2, // Fewer retries for AI calls (expensive)
-        });
-        claudeInvokeTask.addCatch(workflowFailed, { resultPath: '$.error' });
-
-        // Step 4: Create PR in Bitbucket
-        const createPrTask = new tasks.LambdaInvoke(this, 'CreatePrTask', {
-            lambdaFunction: prCreatorHandler,
-            outputPath: '$.Payload',
-            comment: 'Create pull request in Bitbucket',
-        });
-        createPrTask.addRetry(lambdaRetryProps);
-        createPrTask.addCatch(workflowFailed, { resultPath: '$.error' });
-
-        // Step 5: Wait for PR merge (task token callback)
-        const waitForMergeTask = new tasks.LambdaInvoke(this, 'WaitForMergeTask', {
-            lambdaFunction: mergeWaitHandler,
-            integrationPattern: stepfunctions.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
-            payload: stepfunctions.TaskInput.fromObject({
-                token: stepfunctions.JsonPath.taskToken,
-                ticketId: stepfunctions.JsonPath.stringAt('$.ticketId'),
-                ticketKey: stepfunctions.JsonPath.stringAt('$.ticketKey'),
-                prUrl: stepfunctions.JsonPath.stringAt('$.prUrl'),
-            }),
-            taskTimeout: stepfunctions.Timeout.duration(
-                cdk.Duration.days(parseInt(lambdaEnvironment.MERGE_WAIT_TIMEOUT_DAYS))
-            ),
-            comment: 'Wait for PR to be merged (callback from webhook)',
-        });
+        checkStatus.addRetry(retryProps);
+        checkStatus.addCatch(workflowFailed, { resultPath: '$.error' });
 
         const workflowComplete = new stepfunctions.Succeed(this, 'WorkflowComplete', {
-            comment: 'PR merged, workflow completed successfully',
+            comment: 'Workflow completed successfully',
         });
 
-        // Dry-run check: skip wait-for-merge if dry-run or PR not created
-        const dryRunChoice = new stepfunctions.Choice(this, 'DryRunCheck')
+        // Status check: if complete → succeed, if failed → fail, otherwise → wait and retry
+        const statusChoice = new stepfunctions.Choice(this, 'StatusCheck')
             .when(
-                stepfunctions.Condition.booleanEquals('$.dryRun', true),
-                workflowComplete
+                stepfunctions.Condition.stringEquals('$.statusResult.Item.status.S', 'COMPLETED'),
+                workflowComplete,
             )
             .when(
-                stepfunctions.Condition.booleanEquals('$.prCreated', false),
-                workflowComplete
+                stepfunctions.Condition.stringEquals('$.statusResult.Item.status.S', 'FAILED'),
+                workflowFailed,
             )
-            .otherwise(waitForMergeTask.next(workflowComplete));
+            .otherwise(waitForProcessing);
 
-        // Linear workflow: FetchTicket → FetchCode → ClaudeInvoke → CreatePR → [DryRunCheck]
-        const workflowDefinition = fetchTicketTask
-            .next(fetchCodeTask)
-            .next(claudeInvokeTask)
-            .next(createPrTask)
-            .next(dryRunChoice);
+        // Workflow: Enqueue → Wait → CheckStatus → [StatusCheck]
+        const workflowDefinition = enqueueWorkflowTask
+            .next(waitForProcessing)
+            .next(checkStatus)
+            .next(statusChoice);
 
-        const stateMachine = new stepfunctions.StateMachine(this, 'LinearStateMachine', {
-            stateMachineName: 'ai-driven-linear-workflow-v2',
+        const workflowLogGroup = new logs.LogGroup(this, 'WorkflowLogGroup', {
+            logGroupName: '/aws/vendedlogs/states/ai-driven-workflow',
+            retention: logs.RetentionDays.ONE_WEEK,
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        });
+
+        const stateMachine = new stepfunctions.StateMachine(this, 'WorkflowStateMachine', {
+            stateMachineName: 'ai-driven-workflow',
             definitionBody: stepfunctions.DefinitionBody.fromChainable(workflowDefinition),
-            timeout: cdk.Duration.days(parseInt(lambdaEnvironment.MERGE_WAIT_TIMEOUT_DAYS)),
+            timeout: cdk.Duration.days(7),
             tracingEnabled: true,
             logs: {
-                destination: new logs.LogGroup(this, 'WorkflowLogGroup', {
-                    logGroupName: '/aws/vendedlogs/states/ai-driven-workflow',
-                    retention: logs.RetentionDays.ONE_WEEK,
-                    removalPolicy: cdk.RemovalPolicy.DESTROY,
-                }),
+                destination: workflowLogGroup,
                 level: stepfunctions.LogLevel.ALL,
             },
         });
 
-        // Grant permissions
-        // Processor needs to start Step Functions executions (not the router)
-        stateMachine.grantStartExecution(jiraWebhookProcessor);
+        // Grant state machine access to SQS and DynamoDB
+        jiraWorkflowQueue.grantSendMessages(stateMachine);
+        stateTable.grantReadData(stateMachine);
 
-        const callbackPolicy = new iam.Policy(this, 'CallbackPolicy', {
-            statements: [
-                new iam.PolicyStatement({
-                    actions: ['states:SendTaskSuccess', 'states:SendTaskFailure'],
-                    resources: [stateMachine.stateMachineArn],
-                }),
-            ],
-        });
-        callbackPolicy.attachToRole(mergeWaitRole);
+        // Spring Boot can start Step Functions executions (for webhook-triggered workflows)
+        stateMachine.grantStartExecution(taskRole);
+        taskRole.addToPrincipalPolicy(new iam.PolicyStatement({
+            actions: ['states:SendTaskSuccess', 'states:SendTaskFailure'],
+            resources: [stateMachine.stateMachineArn],
+        }));
 
-        // Processor needs STATE_MACHINE_ARN to start executions
-        jiraWebhookProcessor.addEnvironment('STATE_MACHINE_ARN', stateMachine.stateMachineArn);
-        // Router needs JIRA_WEBHOOK_SECRET_ARN for token validation
-        jiraWebhookRouter.addEnvironment('JIRA_WEBHOOK_SECRET_ARN', jiraWebhookTokenSecret.secretArn);
-
-        // ==================== API GATEWAY ====================
-        const api = new apigateway.RestApi(this, 'WebhookApi', {
-            restApiName: 'ai-driven-webhook',
-            description: 'Webhook endpoints for Jira and Bitbucket events',
-            deployOptions: {
-                stageName: 'prod',
-                throttlingRateLimit: 100,
-                throttlingBurstLimit: 200,
-            },
-        });
-
-        // Jira webhook endpoint (triggers linear workflow)
-        api.root.addResource('jira-webhook').addMethod(
-            'POST',
-            new apigateway.LambdaIntegration(jiraWebhookHandler, { proxy: true })
-        );
-
-        // Bitbucket merge webhook endpoint (task token callback)
-        api.root.addResource('merge-webhook').addMethod(
-            'POST',
-            new apigateway.LambdaIntegration(mergeWaitHandler, { proxy: true })
-        );
-
-        // Agent webhook endpoint (agent comment processing)
-        api.root.addResource('agent-webhook').addMethod(
-            'POST',
-            new apigateway.LambdaIntegration(agentWebhookHandler, { proxy: true })
-        );
+        // Pass state machine ARN to Spring Boot via env
+        container.addEnvironment('STATE_MACHINE_ARN', stateMachine.stateMachineArn);
 
         // ==================== CLOUDWATCH DASHBOARD ====================
-        const allHandlers = [
-            { fn: jiraWebhookRouter, label: 'JiraRouter' },
-            { fn: jiraWebhookProcessor, label: 'JiraProcessor' },
-            { fn: fetchTicketHandler, label: 'FetchTicket' },
-            { fn: codeFetchHandler, label: 'CodeFetch' },
-            { fn: claudeInvokeHandler, label: 'ClaudeInvoke' },
-            { fn: prCreatorHandler, label: 'PrCreator' },
-            { fn: mergeWaitHandler, label: 'MergeWait' },
-            { fn: agentWebhookHandler, label: 'AgentWebhook' },
-            { fn: agentProcessorHandler, label: 'AgentProcessor' },
-        ];
-
         const dashboard = new cloudwatch.Dashboard(this, 'OperationalDashboard', {
             dashboardName: 'ai-driven-operations',
         });
 
-        // Row 1: Lambda invocations & errors
+        // Row 1: ECS Service metrics
         dashboard.addWidgets(
             new cloudwatch.GraphWidget({
-                title: 'Lambda Invocations',
+                title: 'ECS CPU Utilization',
                 width: 12,
-                left: allHandlers.map(h => h.fn.metricInvocations({ label: h.label })),
+                left: [
+                    new cloudwatch.Metric({
+                        namespace: 'AWS/ECS',
+                        metricName: 'CPUUtilization',
+                        dimensionsMap: {
+                            ClusterName: cluster.clusterName,
+                            ServiceName: fargateService.serviceName,
+                        },
+                        statistic: 'avg',
+                        label: 'CPU Avg',
+                    }),
+                    new cloudwatch.Metric({
+                        namespace: 'AWS/ECS',
+                        metricName: 'CPUUtilization',
+                        dimensionsMap: {
+                            ClusterName: cluster.clusterName,
+                            ServiceName: fargateService.serviceName,
+                        },
+                        statistic: 'p95',
+                        label: 'CPU P95',
+                    }),
+                ],
             }),
             new cloudwatch.GraphWidget({
-                title: 'Lambda Errors',
+                title: 'ECS Memory Utilization',
                 width: 12,
-                left: allHandlers.map(h => h.fn.metricErrors({ label: h.label })),
+                left: [
+                    new cloudwatch.Metric({
+                        namespace: 'AWS/ECS',
+                        metricName: 'MemoryUtilization',
+                        dimensionsMap: {
+                            ClusterName: cluster.clusterName,
+                            ServiceName: fargateService.serviceName,
+                        },
+                        statistic: 'avg',
+                        label: 'Memory Avg',
+                    }),
+                    new cloudwatch.Metric({
+                        namespace: 'AWS/ECS',
+                        metricName: 'MemoryUtilization',
+                        dimensionsMap: {
+                            ClusterName: cluster.clusterName,
+                            ServiceName: fargateService.serviceName,
+                        },
+                        statistic: 'p95',
+                        label: 'Memory P95',
+                    }),
+                ],
             }),
         );
 
-        // Row 2: Lambda duration & throttles
+        // Row 2: ALB metrics
         dashboard.addWidgets(
             new cloudwatch.GraphWidget({
-                title: 'Lambda Duration (P95)',
+                title: 'ALB Request Count & Latency',
                 width: 12,
-                left: allHandlers.map(h => h.fn.metricDuration({
-                    label: h.label,
-                    statistic: 'p95',
-                })),
+                left: [
+                    alb.metrics.requestCount({ label: 'Requests' }),
+                ],
+                right: [
+                    alb.metrics.targetResponseTime({ label: 'Response Time', statistic: 'avg' }),
+                    alb.metrics.targetResponseTime({ label: 'P95 Response Time', statistic: 'p95' }),
+                ],
             }),
             new cloudwatch.GraphWidget({
-                title: 'Lambda Throttles',
+                title: 'ALB HTTP Errors',
                 width: 12,
-                left: allHandlers.map(h => h.fn.metricThrottles({ label: h.label })),
+                left: [
+                    alb.metrics.httpCodeTarget(elbv2.HttpCodeTarget.TARGET_4XX_COUNT, { label: '4xx' }),
+                    alb.metrics.httpCodeTarget(elbv2.HttpCodeTarget.TARGET_5XX_COUNT, { label: '5xx' }),
+                    alb.metrics.httpCodeElb(elbv2.HttpCodeElb.ELB_5XX_COUNT, { label: 'ELB 5xx' }),
+                ],
             }),
         );
 
-        // Row 3: Step Functions workflow metrics
+        // Row 3: MCP Gateway Lambda metrics
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'MCP Gateway Invocations & Errors',
+                width: 12,
+                left: [
+                    mcpGatewayHandler.metricInvocations({ label: 'Invocations' }),
+                    mcpGatewayHandler.metricErrors({ label: 'Errors' }),
+                ],
+            }),
+            new cloudwatch.GraphWidget({
+                title: 'MCP Gateway Duration',
+                width: 12,
+                left: [
+                    mcpGatewayHandler.metricDuration({ label: 'Avg Duration', statistic: 'avg' }),
+                    mcpGatewayHandler.metricDuration({ label: 'P95 Duration', statistic: 'p95' }),
+                ],
+            }),
+        );
+
+        // Row 4: Step Functions + DynamoDB
         dashboard.addWidgets(
             new cloudwatch.GraphWidget({
                 title: 'Workflow Executions',
@@ -684,18 +663,6 @@ export class AiDrivenStack extends cdk.Stack {
                 ],
             }),
             new cloudwatch.GraphWidget({
-                title: 'Workflow Duration',
-                width: 12,
-                left: [
-                    stateMachine.metricTime({ label: 'Avg Duration', statistic: 'avg' }),
-                    stateMachine.metricTime({ label: 'P95 Duration', statistic: 'p95' }),
-                ],
-            }),
-        );
-
-        // Row 4: DynamoDB & Alarm summary
-        dashboard.addWidgets(
-            new cloudwatch.GraphWidget({
                 title: 'DynamoDB Read/Write Capacity',
                 width: 12,
                 left: [
@@ -703,171 +670,179 @@ export class AiDrivenStack extends cdk.Stack {
                     stateTable.metricConsumedWriteCapacityUnits({ label: 'Write CU' }),
                 ],
             }),
-            new cloudwatch.SingleValueWidget({
-                title: 'Total Workflow Failures (24h)',
+        );
+
+        // Row 5: SQS Queue depths
+        dashboard.addWidgets(
+            new cloudwatch.GraphWidget({
+                title: 'SQS Queue Depth',
                 width: 12,
-                metrics: [
-                    stateMachine.metricFailed({ period: cdk.Duration.days(1), label: 'Failures' }),
+                left: [
+                    agentQueue.metricApproximateNumberOfMessagesVisible({ label: 'Agent Queue' }),
+                    jiraWorkflowQueue.metricApproximateNumberOfMessagesVisible({ label: 'Workflow Queue' }),
+                ],
+            }),
+            new cloudwatch.GraphWidget({
+                title: 'SQS DLQ Messages',
+                width: 12,
+                left: [
+                    agentDlq.metricApproximateNumberOfMessagesVisible({ label: 'Agent DLQ' }),
+                    jiraWorkflowDlq.metricApproximateNumberOfMessagesVisible({ label: 'Workflow DLQ' }),
                 ],
             }),
         );
 
-        // ==================== SECURITY ALARMS ====================
-
-        // SNS topic for operator security and operational alerts.
-        // Subscribe your email or PagerDuty endpoint after deployment:
-        //   aws sns subscribe --topic-arn <AlertsTopicArn> --protocol email --notification-endpoint ops@example.com
+        // ==================== SECURITY & OPERATIONAL ALARMS ====================
         const alertsTopic = new sns.Topic(this, 'OperationalAlerts', {
             topicName: 'ai-driven-operational-alerts',
             displayName: 'AI Driven Operational Alerts',
         });
 
-        // Metric filter: Jira pipeline webhook token verification skipped
-        // Triggers when JIRA_WEBHOOK_SECRET_ARN is set but the secret value is null/blank in SM
-        const jiraTokenSkippedFilter = new logs.MetricFilter(this, 'JiraWebhookTokenSkippedFilter', {
-            logGroup: jiraWebhookHandler.logGroup,
+        // Alarm: ECS service unhealthy (no running tasks)
+        const ecsUnhealthyAlarm = new cloudwatch.Alarm(this, 'EcsUnhealthyAlarm', {
+            alarmName: 'ai-driven-ecs-unhealthy',
+            alarmDescription: 'Spring Boot ECS service has zero healthy tasks. Application may be down.',
+            metric: new cloudwatch.Metric({
+                namespace: 'AWS/ECS',
+                metricName: 'RunningTaskCount',
+                dimensionsMap: {
+                    ClusterName: cluster.clusterName,
+                    ServiceName: fargateService.serviceName,
+                },
+                statistic: 'min',
+                period: cdk.Duration.minutes(1),
+            }),
+            threshold: 1,
+            evaluationPeriods: 3,
+            comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.BREACHING,
+        });
+        ecsUnhealthyAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+        // Alarm: High CPU utilization
+        const cpuAlarm = new cloudwatch.Alarm(this, 'EcsCpuAlarm', {
+            alarmName: 'ai-driven-ecs-high-cpu',
+            alarmDescription: 'ECS CPU utilization exceeds 85% - consider scaling or optimizing.',
+            metric: new cloudwatch.Metric({
+                namespace: 'AWS/ECS',
+                metricName: 'CPUUtilization',
+                dimensionsMap: {
+                    ClusterName: cluster.clusterName,
+                    ServiceName: fargateService.serviceName,
+                },
+                statistic: 'avg',
+                period: cdk.Duration.minutes(5),
+            }),
+            threshold: 85,
+            evaluationPeriods: 3,
+            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
+        cpuAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+        // Alarm: ALB 5xx errors
+        const alb5xxAlarm = new cloudwatch.Alarm(this, 'Alb5xxAlarm', {
+            alarmName: 'ai-driven-alb-5xx-errors',
+            alarmDescription: 'ALB returning 5xx errors. Check Spring Boot application logs.',
+            metric: alb.metrics.httpCodeTarget(elbv2.HttpCodeTarget.TARGET_5XX_COUNT, {
+                period: cdk.Duration.minutes(5),
+            }),
+            threshold: 10,
+            evaluationPeriods: 2,
+            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
+        alb5xxAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+        // Alarm: ALB high latency
+        const latencyAlarm = new cloudwatch.Alarm(this, 'AlbLatencyAlarm', {
+            alarmName: 'ai-driven-alb-high-latency',
+            alarmDescription: 'ALB P95 response time exceeds 5 seconds.',
+            metric: alb.metrics.targetResponseTime({ statistic: 'p95', period: cdk.Duration.minutes(5) }),
+            threshold: 5,
+            evaluationPeriods: 3,
+            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
+        latencyAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+        // Alarm: DLQ messages (dead letters indicate processing failures)
+        const dlqAlarm = new cloudwatch.Alarm(this, 'DlqAlarm', {
+            alarmName: 'ai-driven-dlq-messages',
+            alarmDescription: 'Messages appearing in DLQ - tasks are failing after retries.',
+            metric: agentDlq.metricApproximateNumberOfMessagesVisible({
+                period: cdk.Duration.minutes(5),
+            }),
+            threshold: 1,
+            evaluationPeriods: 1,
+            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+        });
+        dlqAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+
+        // Alarm: Webhook security - token verification skipped (log-based)
+        const webhookSecurityFilter = new logs.MetricFilter(this, 'WebhookSecurityFilter', {
+            logGroup: appLogGroup,
             metricNamespace: 'AiDriven/WebhookSecurity',
-            metricName: 'JiraWebhookTokenVerificationSkipped',
+            metricName: 'TokenVerificationSkipped',
             filterPattern: logs.FilterPattern.literal('"webhook token verification skipped"'),
             metricValue: '1',
             defaultValue: 0,
         });
 
-        // Metric filter: Agent webhook Jira token verification skipped
-        const agentJiraTokenSkippedFilter = new logs.MetricFilter(this, 'AgentJiraTokenSkippedFilter', {
-            logGroup: agentWebhookHandler.logGroup,
-            metricNamespace: 'AiDriven/WebhookSecurity',
-            metricName: 'AgentJiraTokenVerificationSkipped',
-            filterPattern: logs.FilterPattern.literal('"webhook token verification skipped"'),
-            metricValue: '1',
-            defaultValue: 0,
-        });
-
-        // Metric filter: GitHub HMAC signature verification skipped
-        const githubHmacSkippedFilter = new logs.MetricFilter(this, 'GitHubHmacSkippedFilter', {
-            logGroup: agentWebhookHandler.logGroup,
-            metricNamespace: 'AiDriven/WebhookSecurity',
-            metricName: 'GitHubSignatureVerificationSkipped',
-            filterPattern: logs.FilterPattern.literal('"GitHub signature verification skipped"'),
-            metricValue: '1',
-            defaultValue: 0,
-        });
-
-        // Alarm: Jira pipeline webhook token skipped — endpoint may be unprotected
-        const jiraTokenSkippedAlarm = new cloudwatch.Alarm(this, 'JiraWebhookTokenSkippedAlarm', {
-            alarmName: 'ai-driven-jira-webhook-token-skipped',
+        const webhookSecurityAlarm = new cloudwatch.Alarm(this, 'WebhookSecurityAlarm', {
+            alarmName: 'ai-driven-webhook-security',
             alarmDescription:
-                'Jira pipeline webhook (/jira-webhook) token verification is being skipped. ' +
-                'JIRA_WEBHOOK_SECRET_ARN is set but the secret value may be blank in Secrets Manager. ' +
-                'Run: aws secretsmanager put-secret-value --secret-id <JiraWebhookTokenSecretArn> --secret-string "<token>"',
-            metric: jiraTokenSkippedFilter.metric({ period: cdk.Duration.minutes(5) }),
+                'Webhook token verification is being skipped. ' +
+                'Check that secrets are properly configured in Secrets Manager.',
+            metric: webhookSecurityFilter.metric({ period: cdk.Duration.minutes(5) }),
             threshold: 1,
             evaluationPeriods: 1,
             comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
         });
-        jiraTokenSkippedAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
+        webhookSecurityAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
 
-        // Alarm: Agent webhook Jira token skipped
-        const agentJiraTokenSkippedAlarm = new cloudwatch.Alarm(this, 'AgentJiraTokenSkippedAlarm', {
-            alarmName: 'ai-driven-agent-jira-token-skipped',
-            alarmDescription:
-                'Agent webhook (/agent-webhook) Jira token verification is being skipped for Jira-sourced events. ' +
-                'Jira agent comments are arriving without signature verification.',
-            metric: agentJiraTokenSkippedFilter.metric({ period: cdk.Duration.minutes(5) }),
-            threshold: 1,
-            evaluationPeriods: 1,
-            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        });
-        agentJiraTokenSkippedAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
-
-        // Alarm: GitHub HMAC verification skipped
-        const githubHmacSkippedAlarm = new cloudwatch.Alarm(this, 'GitHubHmacSkippedAlarm', {
-            alarmName: 'ai-driven-github-hmac-skipped',
-            alarmDescription:
-                'GitHub agent webhook HMAC verification is being skipped. ' +
-                'GITHUB_AGENT_WEBHOOK_SECRET_ARN is set but the secret value may be blank in Secrets Manager. ' +
-                'GitHub-sourced @ai comments are arriving without HMAC verification.',
-            metric: githubHmacSkippedFilter.metric({ period: cdk.Duration.minutes(5) }),
-            threshold: 1,
-            evaluationPeriods: 1,
-            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        });
-        githubHmacSkippedAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
-
-        // Alarm: JiraWebhookRouter Lambda errors
-        const jiraRouterErrorsAlarm = new cloudwatch.Alarm(this, 'JiraRouterErrorsAlarm', {
-            alarmName: 'ai-driven-jira-router-errors',
-            alarmDescription: 'JiraWebhookRouter Lambda errors exceed threshold. Check CloudWatch logs.',
-            metric: jiraWebhookRouter.metricErrors({ period: cdk.Duration.minutes(5) }),
-            threshold: 3,
-            evaluationPeriods: 2,
-            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        });
-        jiraRouterErrorsAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
-
-        // Alarm: JiraWebhookProcessor Lambda errors
-        const jiraProcessorErrorsAlarm = new cloudwatch.Alarm(this, 'JiraProcessorErrorsAlarm', {
-            alarmName: 'ai-driven-jira-processor-errors',
-            alarmDescription: 'JiraWebhookProcessor Lambda errors exceed threshold. Check CloudWatch logs.',
-            metric: jiraWebhookProcessor.metricErrors({ period: cdk.Duration.minutes(5) }),
-            threshold: 3,
-            evaluationPeriods: 2,
-            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        });
-        jiraProcessorErrorsAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
-
-        // Alarm: AgentWebhookHandler Lambda errors
-        const agentWebhookErrorsAlarm = new cloudwatch.Alarm(this, 'AgentWebhookErrorsAlarm', {
-            alarmName: 'ai-driven-agent-webhook-errors',
-            alarmDescription: 'AgentWebhookHandler Lambda errors exceed threshold. Check CloudWatch logs.',
-            metric: agentWebhookHandler.metricErrors({ period: cdk.Duration.minutes(5) }),
-            threshold: 3,
-            evaluationPeriods: 2,
-            comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-            treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-        });
-        agentWebhookErrorsAlarm.addAlarmAction(new cwActions.SnsAction(alertsTopic));
-
-        // Row 5 of dashboard: Security alarm status panel
+        // Dashboard: Alarm status panel
         dashboard.addWidgets(
             new cloudwatch.AlarmStatusWidget({
-                title: 'Webhook Security & Error Alarms',
+                title: 'Operational & Security Alarms',
                 width: 24,
                 alarms: [
-                    jiraTokenSkippedAlarm,
-                    agentJiraTokenSkippedAlarm,
-                    githubHmacSkippedAlarm,
-                    jiraRouterErrorsAlarm,
-                    jiraProcessorErrorsAlarm,
-                    agentWebhookErrorsAlarm,
+                    ecsUnhealthyAlarm,
+                    cpuAlarm,
+                    alb5xxAlarm,
+                    latencyAlarm,
+                    dlqAlarm,
+                    webhookSecurityAlarm,
                 ],
             }),
         );
 
         // ==================== OUTPUTS ====================
-        new cdk.CfnOutput(this, 'JiraWebhookUrl', {
-            value: `${api.url}jira-webhook`,
-            description: 'Jira Webhook URL',
+        new cdk.CfnOutput(this, 'ApiUrl', {
+            value: api.url,
+            description: 'API Gateway base URL (webhook endpoints)',
         });
 
-        new cdk.CfnOutput(this, 'MergeWebhookUrl', {
-            value: `${api.url}merge-webhook`,
-            description: 'Bitbucket Merge Webhook URL',
+        new cdk.CfnOutput(this, 'AlbDnsName', {
+            value: alb.loadBalancerDnsName,
+            description: 'Application Load Balancer DNS name',
         });
 
-        new cdk.CfnOutput(this, 'AgentWebhookUrl', {
-            value: `${api.url}agent-webhook`,
-            description: 'Agent Webhook URL',
+        new cdk.CfnOutput(this, 'EcsClusterName', {
+            value: cluster.clusterName,
+            description: 'ECS Cluster name',
         });
 
-        new cdk.CfnOutput(this, 'AgentQueueUrl', {
-            value: agentQueue.queueUrl,
-            description: 'Agent Tasks SQS FIFO Queue URL',
+        new cdk.CfnOutput(this, 'EcsServiceName', {
+            value: fargateService.serviceName,
+            description: 'ECS Service name - use with: aws ecs update-service --force-new-deployment',
+        });
+
+        new cdk.CfnOutput(this, 'EcrRepositoryUri', {
+            value: ecrRepo.repositoryUri,
+            description: 'ECR repository URI - push Docker image here',
         });
 
         new cdk.CfnOutput(this, 'DynamoDBTableName', {
@@ -875,32 +850,34 @@ export class AiDrivenStack extends cdk.Stack {
             description: 'DynamoDB State Table Name',
         });
 
-        new cdk.CfnOutput(this, 'StateMachineArn', {
-            value: stateMachine.stateMachineArn,
-            description: 'Step Functions State Machine ARN',
+        new cdk.CfnOutput(this, 'AgentQueueUrl', {
+            value: agentQueue.queueUrl,
+            description: 'Agent Tasks SQS FIFO Queue URL',
         });
 
-        // ── Operator setup: after deploy, populate these secrets then configure webhooks ──
+        new cdk.CfnOutput(this, 'StateMachineArn', {
+            value: stateMachine.stateMachineArn,
+            description: 'Step Functions workflow state machine ARN',
+        });
+
         new cdk.CfnOutput(this, 'JiraWebhookTokenSecretArn', {
             value: jiraWebhookTokenSecret.secretArn,
-            description: 'Jira webhook token Secret ARN — run: aws secretsmanager put-secret-value --secret-id <arn> --secret-string "<token>", then set the same token in Jira webhook config (Authorization: Bearer <token>)',
+            description: 'Jira webhook token Secret ARN',
         });
 
         new cdk.CfnOutput(this, 'GitHubAgentWebhookSecretArn', {
             value: githubAgentWebhookSecret.secretArn,
-            description: 'GitHub agent webhook HMAC secret ARN — run: aws secretsmanager put-secret-value --secret-id <arn> --secret-string "<secret>", then set the same secret in the GitHub repo webhook settings',
+            description: 'GitHub agent webhook HMAC secret ARN',
         });
 
         new cdk.CfnOutput(this, 'AlertsTopicArn', {
             value: alertsTopic.topicArn,
-            description:
-                'SNS topic ARN for security and operational alerts. ' +
-                'Subscribe your ops email: aws sns subscribe --topic-arn <AlertsTopicArn> --protocol email --notification-endpoint ops@example.com',
+            description: 'SNS topic ARN for operational alerts',
         });
 
         new cdk.CfnOutput(this, 'McpGatewayUrl', {
             value: mcpGatewayUrl.url,
-            description: 'MCP Gateway Lambda Function URL - provides unified access to Context7, GitHub, and Jira MCP tools',
+            description: 'MCP Gateway Lambda Function URL',
         });
     }
 }

@@ -51,7 +51,7 @@ Repository info is currently hardcoded or passed as a single config value. Every
 | Action | File |
 |--------|------|
 | NEW | `core/src/main/java/com/aidriven/core/util/RepositoryResolver.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/FetchTicketHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/PrCreatorHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/FetchTicketHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/BitbucketFetchHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/PrCreatorHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

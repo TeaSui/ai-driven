@@ -1,15 +1,22 @@
-# Implementation 21: BedRock Claude Client
+# Implementation 21: Claude Client Providers (Bedrock + Spring AI)
 
 ## Summary
-Added support for AWS BedRock as an alternative Claude provider to avoid Anthropic API rate limits.
+Added support for multiple Claude providers. Originally introduced AWS Bedrock as an alternative to direct Anthropic API. Subsequently migrated to **Spring AI** (`SpringAiClientAdapter`) as the default provider, replacing the custom `ClaudeClient`. The `ANTHROPIC_API` provider has been removed.
 
 ## Changes Made
 
 ### 1. New Files Created
 
 #### `/application/claude-client/src/main/java/com/aidriven/claude/ClaudeProvider.java`
-- Enum defining available Claude providers: `ANTHROPIC_API` and `BEDROCK`
-- Includes `fromString()` method for parsing with safe defaults
+- Enum defining available Claude providers: `SPRING_AI` (default) and `BEDROCK`
+- Includes `fromString()` method for parsing, defaults to `SPRING_AI`
+
+#### `/application/claude-client/src/main/java/com/aidriven/claude/SpringAiClientAdapter.java`
+- Implements `AiClient` and `AiProvider` interfaces using Spring AI 1.1.2
+- Uses `AnthropicChatModel` for simple chat with built-in retry and prompt caching
+- Uses low-level `AnthropicApi` for tool-use calls maintaining raw content block format
+- Prompt caching via `AnthropicCacheOptions` (SYSTEM_AND_TOOLS) and `CacheControl` markers
+- `RetryTemplate` with exponential backoff (3 attempts, 1s-30s)
 
 #### `/application/claude-client/src/main/java/com/aidriven/claude/BedrockClient.java`
 - Implements `AiClient` and `AiProvider` interfaces
@@ -38,7 +45,7 @@ Added support for AWS BedRock as an alternative Claude provider to avoid Anthrop
 - Added `withModel(String model)` method
 
 #### `/application/core/src/main/java/com/aidriven/core/config/ClaudeConfig.java`
-- Added `provider` field (default: "ANTHROPIC_API")
+- Added `provider` field (default: "SPRING_AI")
 - Added `bedrockRegion` field (default: "us-east-1")
 - Added convenience methods `provider()` and `bedrockRegion()` with defaults
 
@@ -48,32 +55,27 @@ Added support for AWS BedRock as an alternative Claude provider to avoid Anthrop
 - Updated `getClaudeConfig()` to pass new fields
 
 #### `/application/core/src/main/java/com/aidriven/core/config/ConfigLoader.java`
-- Added loading of `CLAUDE_PROVIDER` env var (default: "ANTHROPIC_API")
+- Added loading of `CLAUDE_PROVIDER` env var (default: "SPRING_AI")
 - Added loading of `BEDROCK_REGION` env var (default: "us-east-1")
 
-#### `/application/lambda-handlers/src/main/java/com/aidriven/lambda/factory/ExternalClientFactory.java`
-- Changed `claudeClient()` return type from `ClaudeClient` to `AiClient`
-- Added `createAnthropicClient()` method for ANTHROPIC_API provider
-- Added `createBedrockClient()` method for BEDROCK provider
-- Uses switch expression based on `ClaudeProvider` to instantiate correct client
+#### `/application/spring-boot-app/src/main/java/com/aidriven/app/config/ExternalClientConfig.java`
+- Routes to `createBedrockClient()` or `createSpringAiClient()` based on `CLAUDE_PROVIDER` env var
+- `createSpringAiClient()` calls `SpringAiClientAdapter.fromSecrets()`
+- Provider selection now happens at Spring Boot startup time
 
-#### `/application/lambda-handlers/src/main/java/com/aidriven/lambda/factory/ServiceFactory.java`
-- Changed `getClaudeClient()` return type from `ClaudeClient` to `AiClient`
-- Updated `getProviderRegistry()` to cast to `AiProvider`
+#### `/application/spring-boot-app/src/main/java/com/aidriven/app/config/AgentConfig.java`
+- Registers the selected `AiClient` bean for injection into agent services
+- Provides `AiProvider` cast to the provider registry
 
-#### `/application/lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java`
-- Changed `claudeClient` field type from `ClaudeClient` to `AiClient`
-- Changed `resolveActiveClient()` return type to `AiClient`
-- Changed `activeClient` local variable type to `AiClient`
+#### `/application/spring-boot-app/src/main/java/com/aidriven/app/PipelineService.java`
+- Uses injected `AiClient` for code generation via Spring Boot constructor injection
+- Supports both `SPRING_AI` and `BEDROCK` providers transparently
 
-#### `/application/lambda-handlers/src/main/java/com/aidriven/lambda/AgentProcessorHandler.java`
-- Changed `claudeClient` local variable type from `ClaudeClient` to `AiClient`
+#### `/application/spring-boot-app/src/test/.../AiClientIntegrationTest.java`
+- Integration tests validating both provider implementations
 
-#### `/application/lambda-handlers/src/test/java/com/aidriven/lambda/AgentEndToEndTest.java`
-- Changed `claudeClient` mock type from `ClaudeClient` to `AiClient`
-
-#### `/application/lambda-handlers/src/test/java/com/aidriven/lambda/ClaudeInvokeHandlerTest.java`
-- Changed `claudeClient` mock type from `ClaudeClient` to `AiClient`
+#### Tests
+- `/application/spring-boot-app/src/test/.../PipelineServiceTest.java` — Unit tests validating both provider implementations
 
 ## Configuration
 
@@ -81,7 +83,7 @@ Added support for AWS BedRock as an alternative Claude provider to avoid Anthrop
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CLAUDE_PROVIDER` | Claude provider to use (`ANTHROPIC_API` or `BEDROCK`) | `ANTHROPIC_API` |
+| `CLAUDE_PROVIDER` | Claude provider to use (`SPRING_AI` or `BEDROCK`) | `SPRING_AI` |
 | `BEDROCK_REGION` | AWS region for BedRock (when using BEDROCK provider) | `us-east-1` |
 
 ### Model Mapping
@@ -128,12 +130,12 @@ Run tests with:
 
 ## Migration Path
 
-1. **Phase 1**: Deploy with `CLAUDE_PROVIDER=ANTHROPIC_API` (current behavior)
-2. **Phase 2**: Set up BedRock access in AWS account
-3. **Phase 3**: Update Secrets Manager secret with AWS credentials if needed
-4. **Phase 4**: Change `CLAUDE_PROVIDER=BEDROCK` and redeploy
-5. **Phase 5**: Monitor for any issues and adjust model mappings if needed
+1. **Phase 1** (Delivered): `SPRING_AI` is the default provider — uses `SpringAiClientAdapter` with prompt caching and retry
+2. **Phase 2**: Set up Bedrock access if needed for regions without direct Anthropic API access
+3. **Phase 3**: Change `CLAUDE_PROVIDER=BEDROCK` and redeploy
+
+> **Note:** The original `ANTHROPIC_API` provider (custom `ClaudeClient`) has been removed. All deployments now use `SPRING_AI` by default.
 
 ## Backward Compatibility
 
-All changes are backward compatible. The default provider is `ANTHROPIC_API`, so existing deployments will continue to work without any configuration changes.
+The default provider changed from `ANTHROPIC_API` to `SPRING_AI` as of the Spring AI migration. The custom `ClaudeClient` has been removed. Existing deployments must update to use `SPRING_AI` (default) or `BEDROCK`.

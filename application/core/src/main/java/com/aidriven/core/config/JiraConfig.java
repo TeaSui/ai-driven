@@ -1,9 +1,3 @@
+// DELETED: ADR-008 — replaced by AppProperties.JiraProperties.
+// This file is intentionally empty and should be removed from version control.
 package com.aidriven.core.config;
-
-/**
- * Configuration for Jira interactions and related workflows.
- */
-public record JiraConfig(
-        String secretArn,
-        String stateMachineArn) {
-}

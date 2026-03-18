@@ -89,6 +89,23 @@ public class SystemPromptBuilder {
                 sb.append("The user is responding to a pending approval request.\n");
                 sb.append("Simply acknowledge their decision; the orchestrator handles execution.\n\n");
             }
+            case REVIEW -> {
+                sb.append("## Intent: Peer Review\n");
+                sb.append("1. Review the code changes made by the Coder Agent.\n");
+                sb.append("2. Look for bugs, security issues, style violations, and missed edge cases.\n");
+                sb.append("3. Provide actionable, specific feedback if changes are needed.\n");
+                sb.append("4. If the changes are perfect, start your response with 'APPROVED'.\n");
+                sb.append("5. If changes are needed, start your response with 'REJECTED' followed by details.\n\n");
+            }
+            case TEST -> {
+                sb.append("## Intent: Automated Testing\n");
+                sb.append("1. Verify code changes by generating and running test cases.\n");
+                sb.append("2. Look for edge cases, performance issues, and contract violations.\n");
+                sb.append("3. If tests fail, provide relevant diagnostics and error logs.\n");
+                sb.append("4. If all tests pass and coverage is sufficient, start your response with 'PASSED'.\n");
+                sb.append(
+                        "5. If tests fail or coverage is lacking, start your response with 'FAILED' followed by details.\n\n");
+            }
             default -> {
                 sb.append("## Guidelines\n");
                 sb.append("1. Use tools to investigate before acting.\n");

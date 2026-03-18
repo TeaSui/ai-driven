@@ -1,6 +1,5 @@
 package com.aidriven.core.audit;
 
-import com.aidriven.core.config.AppConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -25,10 +24,6 @@ public class AuditService {
     private final S3Client s3Client;
     private final ObjectMapper objectMapper;
     private final String auditBucketName;
-
-    public AuditService(S3Client s3Client, ObjectMapper objectMapper, AppConfig appConfig) {
-        this(s3Client, objectMapper, System.getenv("AUDIT_BUCKET_NAME"));
-    }
 
     public AuditService(S3Client s3Client, ObjectMapper objectMapper, String auditBucketName) {
         this.s3Client = s3Client;

@@ -1,6 +1,6 @@
 # impl-22: Bedrock Large Context Optimization
 
-## Status: 🚧 DESIGN (Phase 1 partially superseded by impl-18)
+## Status: ✅ DELIVERED
 
 ## Overview
 

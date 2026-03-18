@@ -33,9 +33,9 @@ Allow selecting the Claude model per ticket via Jira labels:
 - [x] Override `claudeModel` field with per-ticket model when provided
 - [x] Log which model is being used for observability
 
-### ClaudeClient
-- [x] Already supports model as constructor param — no changes needed
-- [x] May need per-request model override (new `chat()` overload)
+### SpringAiClientAdapter (formerly ClaudeClient)
+- [x] Supports model via constructor param and `withModel()` builder method
+- [x] Per-request model override via immutable builder pattern (`withModel`, `withMaxTokens`, `withTemperature`)
 
 ### CDK Stack
 - [x] No changes needed (model is resolved at runtime from labels)
@@ -51,5 +51,5 @@ Allow selecting the Claude model per ticket via Jira labels:
 | Action | File |
 |--------|------|
 | NEW | `core/src/main/java/com/aidriven/core/model/ModelSelector.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/FetchTicketHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/FetchTicketHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/ClaudeInvokeHandler.java` |

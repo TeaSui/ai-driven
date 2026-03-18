@@ -10,33 +10,41 @@ import static org.junit.jupiter.api.Assertions.*;
 class ClaudeProviderTest {
 
     @Test
-    void testFromString_anthropicApi() {
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("ANTHROPIC_API"));
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("anthropic_api"));
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("Anthropic_Api"));
+    void should_parse_spring_ai_from_string() {
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("SPRING_AI"));
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("spring_ai"));
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("Spring_Ai"));
     }
 
     @Test
-    void testFromString_bedrock() {
+    void should_parse_bedrock_from_string() {
         assertEquals(ClaudeProvider.BEDROCK, ClaudeProvider.fromString("BEDROCK"));
         assertEquals(ClaudeProvider.BEDROCK, ClaudeProvider.fromString("bedrock"));
         assertEquals(ClaudeProvider.BEDROCK, ClaudeProvider.fromString("Bedrock"));
     }
 
     @Test
-    void testFromString_null_defaultsToAnthropic() {
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString(null));
+    void should_default_to_spring_ai_when_null() {
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString(null));
     }
 
     @Test
-    void testFromString_empty_defaultsToAnthropic() {
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString(""));
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("   "));
+    void should_default_to_spring_ai_when_empty() {
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString(""));
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("   "));
     }
 
     @Test
-    void testFromString_invalid_defaultsToAnthropic() {
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("invalid"));
-        assertEquals(ClaudeProvider.ANTHROPIC_API, ClaudeProvider.fromString("openai"));
+    void should_default_to_spring_ai_when_invalid() {
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("invalid"));
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("openai"));
+        assertEquals(ClaudeProvider.SPRING_AI, ClaudeProvider.fromString("ANTHROPIC_API"));
+    }
+
+    @Test
+    void should_only_have_two_enum_values() {
+        assertEquals(2, ClaudeProvider.values().length);
+        assertNotNull(ClaudeProvider.valueOf("BEDROCK"));
+        assertNotNull(ClaudeProvider.valueOf("SPRING_AI"));
     }
 }

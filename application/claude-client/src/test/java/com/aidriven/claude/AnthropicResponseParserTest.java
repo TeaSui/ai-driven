@@ -124,20 +124,6 @@ class AnthropicResponseParserTest {
                 .hasMessageContaining("missing 'content' array");
     }
 
-    // ─── continuationPrompt ──────────────────────────────────────────────────
-
-    @Test
-    void continuation_prompt_for_json_text() {
-        String prompt = parser.continuationPrompt("{\"key\": \"some partial json");
-        assertThat(prompt).isEqualTo(AnthropicResponseParser.JSON_CONTINUATION_PROMPT);
-    }
-
-    @Test
-    void continuation_prompt_for_plain_text() {
-        String prompt = parser.continuationPrompt("Here is my analysis of the code");
-        assertThat(prompt).isEqualTo(AnthropicResponseParser.TEXT_CONTINUATION_PROMPT);
-    }
-
     // ─── toChatResponse ──────────────────────────────────────────────────────
 
     @Test

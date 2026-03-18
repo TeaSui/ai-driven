@@ -2,6 +2,7 @@ package com.aidriven.jira;
 
 import com.aidriven.core.model.TicketInfo;
 import com.aidriven.core.exception.ConfigurationException;
+import com.aidriven.core.exception.HttpClientException;
 import com.aidriven.core.service.SecretsService;
 import com.aidriven.core.tracker.IssueTrackerClient;
 import com.aidriven.core.util.HttpResponseHandler;
@@ -72,7 +73,7 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
             return new JiraClient(secret.baseUrl(), secret.email(), secret.apiToken());
         } catch (ConfigurationException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
             throw new ConfigurationException("JiraClient init failed for secret: " + secretArn, e);
         }
     }
@@ -131,9 +132,16 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
                     "getTicketDetails", circuitBreaker);
             HttpResponseHandler.checkResponse(response, "Jira", "getTicketDetails");
             return objectMapper.readValue(response.body(), Map.class);
+        } catch (HttpClientException | IllegalArgumentException | NullPointerException e) {
+            throw e;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException("Jira getTicketDetails failed: JSON parsing error", e);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Jira getTicketDetails failed: I/O error", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Jira getTicketDetails interrupted", e);
         } catch (Exception e) {
-            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
-                throw (RuntimeException) e;
             throw new RuntimeException("Jira getTicketDetails failed", e);
         }
     }
@@ -144,9 +152,14 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
             validateOperationContext(context);
             validateTicketKey(ticketKey);
             addComment(context, ticketKey, body);
+        } catch (HttpClientException | IllegalArgumentException | NullPointerException e) {
+            throw e;
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Jira addComment failed: I/O error", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Jira addComment interrupted", e);
         } catch (Exception e) {
-            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
-                throw (RuntimeException) e;
             throw new RuntimeException("Jira addComment failed", e);
         }
     }
@@ -204,9 +217,16 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
                     () -> httpClient.send(buildPutRequest(url, body), HttpResponse.BodyHandlers.ofString()), "Jira",
                     "updateLabels", circuitBreaker);
             HttpResponseHandler.checkResponse(response, "Jira", "updateLabels");
+        } catch (HttpClientException | IllegalArgumentException | NullPointerException e) {
+            throw e;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException("Jira updateLabels failed: JSON serialization error", e);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Jira updateLabels failed: I/O error", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Jira updateLabels interrupted", e);
         } catch (Exception e) {
-            if (e instanceof IllegalArgumentException || e instanceof RuntimeException)
-                throw (RuntimeException) e;
             throw new RuntimeException("Jira updateLabels failed", e);
         }
     }
@@ -237,10 +257,15 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
             validateTicketKey(ticketKey);
             Objects.requireNonNull(statusName, "statusName must not be null");
             updateStatus_internal(context, ticketKey, statusName);
+        } catch (HttpClientException | IllegalArgumentException | NullPointerException
+                | IllegalStateException e) {
+            throw e;
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Jira updateStatus failed: I/O error", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Jira updateStatus interrupted", e);
         } catch (Exception e) {
-            if (e instanceof IllegalArgumentException || e instanceof NullPointerException
-                    || e instanceof IllegalStateException || e instanceof RuntimeException)
-                throw (RuntimeException) e;
             throw new RuntimeException("Jira updateStatus failed", e);
         }
     }
@@ -307,6 +332,7 @@ public class JiraClient implements IssueTrackerClient, IssueTrackerProvider {
                 : "";
 
         return TicketInfo.builder()
+                .ticketId(json.get("id").asText())
                 .ticketKey(json.get("key").asText())
                 .summary(fields.get("summary").asText())
                 .status(fields.has("status") && !fields.get("status").isNull()

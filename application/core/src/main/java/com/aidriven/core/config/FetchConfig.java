@@ -1,11 +1,3 @@
+// DELETED: ADR-008 — replaced by AppProperties.ContextProperties.
+// This file is intentionally empty and should be removed from version control.
 package com.aidriven.core.config;
-
-/**
- * Configuration for fetching repository content and building context.
- */
-public record FetchConfig(
-        int maxFileSizeChars,
-        long maxTotalContextChars,
-        long maxFileSizeBytes,
-        String contextMode) {
-}

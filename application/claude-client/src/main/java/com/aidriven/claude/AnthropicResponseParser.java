@@ -13,8 +13,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Shared Anthropic message-format parser used by both {@link ClaudeClient} and
- * {@link BedrockClient}.
+ * Shared Anthropic message-format parser used by both {@link SpringAiClientAdapter}
+ * and {@link BedrockClient}.
  *
  * <p>
  * Centralises all JSON response parsing and continuation-prompt generation so
@@ -23,16 +23,6 @@ import java.util.Map;
 @Slf4j
 @RequiredArgsConstructor
 class AnthropicResponseParser {
-
-    /** Continuation prompt sent when Claude's JSON output was truncated. */
-    static final String JSON_CONTINUATION_PROMPT = "Your JSON response was truncated. Continue the JSON output from EXACTLY "
-            + "where it stopped. Output ONLY the remaining JSON characters. "
-            + "Do NOT add any text, explanation, or markdown before or after the JSON continuation. "
-            + "The output will be concatenated directly to your previous response to form valid JSON.";
-
-    /** Continuation prompt sent when plain text was truncated. */
-    static final String TEXT_CONTINUATION_PROMPT = "Your response was truncated. Continue EXACTLY from where you left off. "
-            + "Do not repeat any content. Do not add any preamble.";
 
     private final ObjectMapper objectMapper;
 
@@ -101,21 +91,9 @@ class AnthropicResponseParser {
         return new ParsedChatResponse(text, stopReason);
     }
 
-    // ─── Continuation helpers ────────────────────────────────────────────────
-
-    /**
-     * Returns the appropriate continuation prompt given the accumulated response
-     * so far.
-     */
-    String continuationPrompt(String accumulatedText) {
-        return accumulatedText.trim().startsWith("{")
-                ? JSON_CONTINUATION_PROMPT
-                : TEXT_CONTINUATION_PROMPT;
-    }
-
     /**
      * Builds the AiProvider.ChatResponse adapter for a tool-use response.
-     * Shared by ClaudeClient and BedrockClient.
+     * Shared by SpringAiClientAdapter and BedrockClient.
      */
     AiProvider.ChatResponse toChatResponse(AiClient.ToolUseResponse response) {
         return new AnthropicChatResponse(response, objectMapper);

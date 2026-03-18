@@ -12,28 +12,42 @@ An intelligent automation platform that transforms Jira tickets into production-
 
 ```mermaid
 graph TD
-    A[Jira<br>(Tracker)] -->|webhooks| Core[AI-Driven Development System]
-    B[Bitbucket<br>(Source)] -->|REST API| Core
-    C[GitHub<br>(Source)] -->|REST API| Core
-    D[Slack<br>(Comms)] -->|REST API| Core
+    A["Jira<br>(Tracker)"] -->|webhooks| Core["AI-Driven Development System"]
+    B["Bitbucket<br>(Source)"] -->|REST API| Core
+    C["GitHub<br>(Source)"] -->|REST API| Core
+    D["Slack<br>(Comms)"] -->|REST API| Core
 
-    subgraph Core
+    subgraph "Core: AI-Driven Development System"
         direction TB
-        P[Pipeline Mode<br>Step Functions] --> SF[SQS FIFO<br>Orchestrator]
-        AM[Agent Mode] --> SF
-        SI[Shared Infrastructure<br>DynamoDB • S3 • Secrets Mgr<br>CloudWatch • X-Ray] --> SF
+        
+        P["Pipeline Mode<br>Step Functions"]
+        SF["SQS FIFO<br>Orchestrator"]
+        AM["Agent Mode"]
+        SI["Shared Infrastructure<br>DynamoDB • S3 • Secrets Mgr<br>CloudWatch • X-Ray"]
 
-        subgraph Domain Clients
-            SCC[SourceControlClient]
-            ITC[IssueTrackerClient]
-            CC[ClaudeClient]
-            MC[MonitoringClient]
-            MsgC[MessagingClient]
-            DC[DataClient]
+        P --> SF
+        AM --> SF
+        SI --> SF
+
+        subgraph "Domain Clients"
+            SCC["SourceControlClient"]
+            ITC["IssueTrackerClient"]
+            CC["ClaudeClient"]
+            MC["MonitoringClient"]
+            MsgC["MessagingClient"]
+            DC["DataClient"]
         end
     end
 
-    Core --> Claude[Claude AI<br>(Anthropic API)]
+    Core --> Claude["Claude AI<br>(Anthropic API)"]
+
+    %% Kết nối Domain Clients vào Orchestrator (tùy chọn, để rõ ràng hơn)
+    SCC --> SF
+    ITC --> SF
+    CC --> SF
+    MC --> SF
+    MsgC --> SF
+    DC --> SF
 ```
 
 ### Technology Stack
@@ -49,8 +63,8 @@ Built on AWS-native services for scalability, security, and observability, with 
 | Code Context      | AWS S3 (KMS Encrypted, 30-day lifecycle)                                   |
 | State Management  | AWS DynamoDB (single-table)                                                |
 | Long-Term Memory  | Amazon OpenSearch Serverless (RAG)                                         |
-| Compute           | AWS Lambda (Java 21) & ECS Fargate (long-running agents)                   |
-| API Gateway       | AWS API Gateway                                                            |
+| Compute           | ECS Fargate (Java 21 Spring Boot application)                             |
+| API Gateway       | AWS Application Load Balancer (ALB) on ECS Fargate                         |
 | Secrets           | AWS Secrets Manager                                                        |
 | Infrastructure    | AWS CDK (TypeScript)                                                       |
 | Observability     | CloudWatch Dashboards + AWS X-Ray + custom cost/token/usage metrics       |
@@ -73,11 +87,12 @@ ai-driven/
     mcp-bridge/                   # ToolProvider → MCP client integration
     mcp-server-github/            # Headless MCP GitHub tools (Push, PR, Search)
     mcp-server-jira/              # Headless MCP Jira tools (Transitions, Labels)
-    lambda-handlers/              # Lambda entry points + ServiceFactory + fat JAR
+    spi/                          # Service Provider Interface (client abstractions)
+    spring-boot-app/              # Spring Boot 3.5 application (ECS Fargate deployment)
   infrastructure/                 # AWS CDK (TypeScript)
     lib/ai-driven-stack.ts        # Full stack definition
   docs/                           # Documentation + implementation specs
-    impl/                         # Numbered implementation documents (impl-01 to impl-20)
+    impl/                         # Numbered implementation documents (impl-01 to impl-20+)
     STRATEGY.md                   # System architecture, vision, and roadmap
   tests/                          # E2E / integration tests (TypeScript)
 ```

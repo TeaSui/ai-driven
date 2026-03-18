@@ -12,7 +12,7 @@ import java.util.List;
  * <ul>
  * <li>{@code DynamoConversationRepository} — DynamoDB single-table
  * (production)</li>
- * <li>{@code InMemoryConversationRepository} — in-memory (unit tests)</li>
+ * <li>{@code InMemoryConversationRepository} — in-memory (test source only)</li>
  * </ul>
  */
 public interface ConversationRepository {

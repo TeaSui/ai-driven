@@ -25,6 +25,7 @@ out/
 *.swp
 *.swo
 *~
+*.bak
 
 # Node.js
 node_modules/
@@ -37,4 +38,5 @@ cdk.out/
 
 # OS
 .DS_Store
+**/.DS_Store
 Thumbs.db

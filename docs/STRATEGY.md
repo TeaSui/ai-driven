@@ -2,7 +2,7 @@
 
 > **Status:** Active — consolidated as of February 2026. Includes Vision, Roadmap, Principles, and Security Posture.
 
-## Vision (2026–2027)
+## Vision
 
 We are building the most reliable, auditable, and cost-effective AI-driven development platform — reducing developer toil by 60–80% on routine tasks (code generation, bug fixes, refactors) while preserving full human oversight for architecture, security, and business-critical decisions.  
 
@@ -12,21 +12,27 @@ By Q4 2026, the system should support multi-agent collaboration (Planner → Cod
 
 ```mermaid
 graph TD
-    A[Jira<br>(Issue Tracker)] -->|Webhooks| Core
-    B[Bitbucket<br>(Source Control)] -->|REST API| Core
-    C[GitHub<br>(Source Control)] -->|REST API| Core
-    D[Slack<br>(Notifications)] -->|REST API| Core
+    subgraph "External Integrations"
+        A["Jira<br>(Issue Tracker)"] -->|Webhooks| Core
+        B["Bitbucket<br>(Source Control)"] -->|REST API| Core
+        C["GitHub<br>(Source Control)"] -->|REST API| Core
+        D["Slack<br>(Notifications)"] -->|REST API| Core
+    end
 
     subgraph "AI-Driven Development System (Core)"
         direction TB
-        PM[Pipeline Mode<br>AWS Step Functions]
-        AM[Agent Mode<br>SQS FIFO + ReAct Orchestrator]
-        SI[Shared Infrastructure<br>DynamoDB • S3 (KMS) • Secrets Mgr<br>CloudWatch • X-Ray]
-        DC[Domain Client Layer<br>SourceControlClient • IssueTrackerClient<br>ClaudeClient • ToolRegistry • ...]
+        PM["Pipeline Mode<br>AWS Step Functions"]
+        AM["Agent Mode<br>SQS FIFO + ReAct Orchestrator"]
+        SI["Shared Infrastructure<br>DynamoDB • S3 (KMS) • Secrets Mgr<br>CloudWatch • X-Ray"]
+        DC["Domain Client Layer<br>SourceControlClient • IssueTrackerClient<br>SpringAiClientAdapter • ToolRegistry • ..."]
+        
+        PM --> AM
+        AM --> SI
+        SI --> DC
     end
 
-    Core --> E[Claude AI<br>Anthropic API<br>(Sonnet 4.6 default, Opus 4.6 for complex)]
-    Core --> F[Amazon OpenSearch Serverless<br>(RAG for long-term / cross-ticket memory)]
+    Core --> E["Claude AI<br>Spring AI + Anthropic API<br>(Sonnet 4.6 default, Opus 4.6 for complex)"]
+    Core --> F["Amazon OpenSearch Serverless<br>(RAG for long-term / cross-ticket memory)"]
 ```
 
 ---
@@ -51,6 +57,7 @@ We have evolved from a fragile single-turn generator to a production-grade, even
 - Replaced monolithic Lambda with SQS FIFO + DynamoDB state for reliable agent loops.
 - Implemented HMAC-SHA256 + pre-shared token webhook security.
 - Adopted ToolProvider / ToolRegistry pattern + MCP (Model Context Protocol) integration for extensible tools.
+- **Spring AI Adoption** — Library-only integration of Spring AI 1.1.2 replacing custom ClaudeClient; enables prompt caching, built-in retry, and structured API access.
 - Enabled context sharing between pipeline generations and agent conversations.
 - Added structured logging, EMF metrics, X-Ray tracing.
 - **AST-based Context** — `view_file_outline` extracts Java class/method signatures; `search_grep` for pattern search.
@@ -75,7 +82,7 @@ We have evolved from a fragile single-turn generator to a production-grade, even
 | **Security First, AI Second** | Agent has repo write access — never bypass HMAC/token validation for speed. |
 | **Immutable Traceability** | Every AI decision/action logged in DynamoDB. Must always answer ""why this change?"". |
 | **Fail Loudly, Recover Gracefully** | Exponential backoff + explicit errors on API failures (Claude, GitHub, Jira). Avoid silent corruption. |
-| **SOLID Clean Architecture** | Thin handlers, core business logic in core module, infra in lambda-handlers. New tools via injection. |
+| **SOLID Clean Architecture** | Thin controllers/listeners, core business logic in core module, infra in spring-boot-app. New tools via Spring configuration injection. |
 | **Observability by Default** | Every agent step emits structured events (EMF/JSON) for cost, latency, quality, debugging. |   
 
 ---
@@ -89,8 +96,8 @@ Focus shifting from infra stability → agent intelligence & collaboration. Each
 ```mermaid
 graph TD
     subgraph "Priority 1–2: Foundation & AI Quality (Done)"
-        P1[Reliability & Observability<br>impl-01 → impl-05]:::done
-        P2[AI Quality<br>impl-06 Incremental Context<br>impl-07 Multi-Model<br>impl-08 Prompt Feedback]:::done
+        P1["Reliability & Observability<br>impl-01 → impl-05"]:::done
+        P2["AI Quality<br>impl-06 Incremental Context<br>impl-07 Multi-Model<br>impl-08 Prompt Feedback"]:::done
     end
 
     subgraph "Priority 3–4: Expansion & Safety"
@@ -99,10 +106,10 @@ graph TD
     end
 
     subgraph "Priority 5–8: Agentic Intelligence"
-        P5[Conversational Agent<br>impl-15 Agent Mode Phases]:::partial
+        P5["Conversational Agent<br>impl-15 Agent Mode Phases"]:::done
         P6["Q2: Multi-Actor<br>impl-16 Approval Workflows ✅<br>impl-17 Self-Correction ✅"]:::done
         P7["Q3: Advanced Context & Tools<br>impl-18 AST Context ✅<br>impl-19 CloudWatch Observability ✅"]:::done
-        P8["Q4: Cross-Agent Swarm<br>impl-20 Multi-Agent Swarm<br>(Design Complete)"]:::partial
+        P8["Q4: Cross-Agent Swarm<br>impl-20 Multi-Agent Swarm ✅"]:::done
     end
 
     P1 --> P2
@@ -160,10 +167,11 @@ graph TD
 - [x] 7.1 AST/LSP Context (JavaParser + Caffeine + view_file_outline tool) → impl-18
 - [x] 7.2 CloudWatch Observability (Logs Insights + EMF Metrics + query tools) → impl-19
 
-### Priority 8 — Q4 2026 Cross-Agent Swarm (Design Complete)
-- [~] 8.1 Specialized Sub-Agents (Planner → Coder → Reviewer → Tester) → impl-20
-  - Design spike complete (Mermaid + role definitions)
-  - Implementation deferred until metrics show need
+### Priority 8 — Q4 2026 Cross-Agent Swarm (Delivered)
+- [x] 8.1 Multi-Agent Swarm Swarm (Phases 1-5) → impl-20 ✅
+  - CoderAgent, ResearcherAgent, ReviewerAgent, and TesterAgent roles implemented.
+  - SwarmOrchestrator routes tasks and manages recursive feedback loops.
+  - Cost-efficient model assignment (Haiku for specialized workers).
 
 ---
 

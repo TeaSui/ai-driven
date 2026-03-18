@@ -45,7 +45,7 @@ import java.util.Map;
  *
  * <p>
  * Shared JSON parsing logic lives in {@link AnthropicResponseParser} to avoid
- * duplication with {@link ClaudeClient}.
+ * duplication with {@link SpringAiClientAdapter}.
  *
  * <p>
  * BedRock model IDs:
@@ -182,6 +182,15 @@ public class BedrockClient implements AiClient, AiProvider {
                     context != null ? context.getTenantId() : "none");
             AiClient.ToolUseResponse response = chatWithTools(systemPrompt, messages, tools);
             return responseParser.toChatResponse(response);
+        } catch (BedrockRuntimeException e) {
+            log.error("Bedrock SPI chat failed: {}", e.getMessage());
+            throw new RuntimeException("Bedrock chat failed", e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            log.error("Bedrock SPI chat failed: {}", e.getMessage());
+            throw new RuntimeException("Bedrock chat failed: JSON serialization error", e);
+        } catch (RuntimeException e) {
+            log.error("Bedrock SPI chat failed: {}", e.getMessage());
+            throw e;
         } catch (Exception e) {
             log.error("Bedrock SPI chat failed: {}", e.getMessage());
             throw new RuntimeException("Bedrock chat failed", e);
@@ -217,7 +226,7 @@ public class BedrockClient implements AiClient, AiProvider {
     public String chat(String systemPrompt, String userMessage) throws Exception {
         try {
             return chatViaConverseApi(systemPrompt, userMessage);
-        } catch (Exception e) {
+        } catch (RuntimeException | java.io.IOException e) {
             log.warn("Bedrock converse API failed, falling back to invokeModel: {}", e.getMessage());
             return chatBlocking(systemPrompt, userMessage);
         }
@@ -342,8 +351,10 @@ public class BedrockClient implements AiClient, AiProvider {
             Region region = regionName != null ? Region.of(regionName) : Region.US_EAST_1;
             return new BedrockClient(model, DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE,
                     region, accessKey, secretKey);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create BedrockClient from secrets", e);
+        } catch (software.amazon.awssdk.services.secretsmanager.model.SecretsManagerException e) {
+            throw new RuntimeException("Failed to create BedrockClient from secrets: AWS Secrets Manager error", e);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new RuntimeException("Failed to create BedrockClient from secrets: JSON parsing error", e);
         }
     }
 

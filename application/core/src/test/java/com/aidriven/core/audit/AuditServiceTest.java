@@ -1,6 +1,5 @@
 package com.aidriven.core.audit;
 
-import com.aidriven.core.config.AppConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,9 +26,6 @@ class AuditServiceTest {
 
     @Mock
     private S3Client s3Client;
-
-    @Mock
-    private AppConfig appConfig;
 
     private ObjectMapper objectMapper = new ObjectMapper();
     private AuditService auditService;

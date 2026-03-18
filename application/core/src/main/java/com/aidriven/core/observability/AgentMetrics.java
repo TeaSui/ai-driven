@@ -111,15 +111,7 @@ public class AgentMetrics {
         emfPayload.put("_aws", awsObj);
 
         try {
-            // Must print directly without standard logging prefixes so CloudWatch can parse
-            // it natively
-            // If we use slf4j logger, the log format might prefix it with timestamps which
-            // works if it's
-            // JSON matching, but printing raw is safer for EMF depending on lambda log
-            // setup.
-            // Actually, AWS Lambda parses JSON lines even with slf4j if the log format is
-            // JSON.
-            // But just in case, typical EMF logs are printed to stdout directly.
+            // EMF requires raw JSON on stdout for CloudWatch to parse natively.
             System.out.println(MAPPER.writeValueAsString(emfPayload));
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize EMF metrics payload", e);

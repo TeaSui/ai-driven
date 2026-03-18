@@ -54,6 +54,6 @@
 | Action | File |
 |--------|------|
 | NEW | `core/src/main/java/com/aidriven/core/audit/AuditService.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/PrCreatorHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/ClaudeInvokeHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/PrCreatorHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

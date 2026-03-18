@@ -246,7 +246,7 @@ public class McpConnectionFactory {
      * {@link McpBridgeToolProvider}.
      * This keeps {@link McpSyncClient} internal to the mcp-bridge module, so
      * consumers
-     * (e.g., lambda-handlers) don't need the MCP SDK on their classpath.
+     * (e.g., spring-boot-app) don't need the MCP SDK on their classpath.
      *
      * @param config MCP server configuration
      * @return Ready-to-use McpBridgeToolProvider

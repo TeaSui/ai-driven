@@ -61,7 +61,7 @@
 | NEW | `core/src/main/java/com/aidriven/core/security/InputSanitizer.java` |
 | NEW | `core/src/main/java/com/aidriven/core/security/RateLimiter.java` |
 | NEW | `core/src/main/java/com/aidriven/core/security/WebhookValidator.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/JiraWebhookHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/FetchTicketHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/MergeWaitHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/JiraWebhookHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/FetchTicketHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/MergeWaitHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

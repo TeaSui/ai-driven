@@ -1,1 +1,0 @@
-{"errorMessage":"Failed to process message","errorType":"java.lang.RuntimeException","stackTrace":["com.aidriven.lambda.AgentProcessorHandler.handleRequest(AgentProcessorHandler.java:78)","java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(Unknown Source)","java.base/java.lang.reflect.Method.invoke(Unknown Source)"]}

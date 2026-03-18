@@ -21,6 +21,16 @@ public enum CommentIntent {
     /** Approval or sign-off (e.g., "@ai LGTM, proceed with PR"). */
     APPROVAL,
 
+    /**
+     * Internal intent for reviewing code changes.
+     */
+    REVIEW,
+
+    /**
+     * Internal intent for testing code changes.
+     */
+    TEST,
+
     /** Comment not directed at the agent. */
     IRRELEVANT
 }

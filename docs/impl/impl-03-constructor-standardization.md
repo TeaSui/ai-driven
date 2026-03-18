@@ -8,8 +8,8 @@
 
 ## Changes
 
-- [x] Add package-private test constructor to `FetchTicketHandler`
-- [x] Migrated to `@RequiredArgsConstructor` across all 6 handlers
+- [x] Migrated to `@RequiredArgsConstructor` (or equivalent explicit DI) across all handlers
+- [x] Ensure `@RequiredArgsConstructor` is supplemented by an explicit no-arg constructor for AWS Lambda runtime
 
 ## Pattern
 
@@ -38,10 +38,10 @@ public class MyHandler implements RequestHandler<...> {
 
 ## Files Modified
 
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/FetchTicketHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/PrCreatorHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/JiraWebhookHandler.java`
-- `application/lambda-handlers/src/main/java/com/aidriven/lambda/MergeWaitHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/FetchTicketHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/ClaudeInvokeHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/PrCreatorHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/JiraWebhookHandler.java`
+- `application/spring-boot-app/src/main/java/com/aidriven/lambda/MergeWaitHandler.java`
 

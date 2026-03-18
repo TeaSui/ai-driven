@@ -8,8 +8,8 @@ import com.aidriven.core.exception.AgentExecutionException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * The main orchestrator for the Cross-Agent Swarm.
@@ -22,6 +22,10 @@ public class SwarmOrchestrator {
     private final AiClient routingClient;
     private final WorkerAgent coderAgent;
     private final WorkerAgent researcherAgent;
+    private final WorkerAgent reviewerAgent;
+    private final WorkerAgent testerAgent;
+
+    private static final int MAX_REVIEW_LOOPS = 2;
 
     /**
      * Processes an agent request by routing it to the appropriate specialized
@@ -42,8 +46,52 @@ public class SwarmOrchestrator {
         if ("RESEARCH".equals(swarmIntent)) {
             return researcherAgent.process(request);
         } else {
-            return coderAgent.process(request);
+            return handleImplementationWithFullLoop(request);
         }
+    }
+
+    private AgentResponse handleImplementationWithFullLoop(AgentRequest request) throws AgentExecutionException {
+        AgentResponse coderResponse = coderAgent.process(request);
+
+        // Start full sequence: Coder -> Reviewer -> Tester
+        for (int i = 0; i < MAX_REVIEW_LOOPS; i++) {
+            log.info("SwarmOrchestrator starting sequence turn {} for ticket={}", i + 1, request.ticketKey());
+
+            // 1. Review
+            AgentResponse reviewResponse = reviewerAgent.process(request);
+            if (!reviewResponse.text().trim().toUpperCase().startsWith("APPROVED")) {
+                log.info("Review REJECTED for ticket={}, looping back to Coder", request.ticketKey());
+                coderResponse = coderAgent.process(request);
+                continue;
+            }
+
+            log.info("Review APPROVED for ticket={}, proceeding to Test", request.ticketKey());
+
+            // 2. Test
+            AgentResponse testResponse = testerAgent.process(request);
+            if (testResponse.text().trim().toUpperCase().startsWith("PASSED")) {
+                log.info("Testing PASSED for ticket={}", request.ticketKey());
+                return new AgentResponse(
+                        coderResponse.text() + "\n\n### 🔍 Peer Review\n" + reviewResponse.text()
+                                + "\n\n### 🧪 Automated Testing\n" + testResponse.text(),
+                        mergeTools(coderResponse, reviewResponse, testResponse),
+                        coderResponse.tokenCount() + reviewResponse.tokenCount() + testResponse.tokenCount(),
+                        coderResponse.turnCount() + reviewResponse.turnCount() + testResponse.turnCount());
+            }
+
+            log.info("Testing FAILED for ticket={}, looping back to Coder", request.ticketKey());
+            coderResponse = coderAgent.process(request);
+        }
+
+        return coderResponse;
+    }
+
+    private List<String> mergeTools(AgentResponse... responses) {
+        List<String> combined = new ArrayList<>();
+        for (AgentResponse r : responses) {
+            combined.addAll(r.toolsUsed());
+        }
+        return combined.stream().distinct().toList();
     }
 
     /**

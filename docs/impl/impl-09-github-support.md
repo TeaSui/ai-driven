@@ -33,7 +33,7 @@ Add GitHub as an alternative source control platform:
   - [x] Repository archive download
   - [x] Pull request creation
   - [x] File tree listing
-- [x] Add `github-client` to `lambda-handlers` dependencies
+- [x] Add `github-client` to `spring-boot-app` dependencies
 
 ### Secrets & Auth
 - [x] Add `GITHUB_SECRET_ARN` to CDK stack
@@ -67,6 +67,6 @@ Add GitHub as an alternative source control platform:
 | NEW | `github-client/src/main/java/com/aidriven/github/GitHubClient.java` |
 | NEW | `core/src/main/java/com/aidriven/core/util/PlatformResolver.java` |
 | MODIFY | `bitbucket-client/src/main/java/com/aidriven/bitbucket/BitbucketClient.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/BitbucketFetchHandler.java` |
-| MODIFY | `lambda-handlers/src/main/java/com/aidriven/lambda/PrCreatorHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/BitbucketFetchHandler.java` |
+| MODIFY | `spring-boot-app/src/main/java/com/aidriven/app/PrCreatorHandler.java` |
 | MODIFY | `infrastructure/lib/ai-driven-stack.ts` |

@@ -28,7 +28,7 @@ Located in each module's `src/test/java/` directory. Uses constructor injection 
 | `claude-client` | `PromptBuilderTest` |
 | `bitbucket-client` | *(via integration tests)* |
 | `jira-client` | *(via integration tests)* |
-| `lambda-handlers` | `JiraWebhookHandlerTest`, `BitbucketFetchHandlerTest`, `ClaudeInvokeHandlerTest`, `PrCreatorHandlerTest`, `MergeWaitHandlerTest`, `DryRunModeTest` |
+| `spring-boot-app` | `JiraWebhookControllerTest`, `BitbucketFetchServiceTest`, `ClaudeInvokeServiceTest`, `PrCreatorServiceTest`, `MergeWaitListenerTest` |
 
 ### TypeScript Integration Tests (Jest + nock)
 
