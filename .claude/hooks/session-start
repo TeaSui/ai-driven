@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# SessionStart hook - zero-cost by default
+# Agent context is NOT injected here. Agent definitions are loaded
+# on-demand only when the Agent tool dispatches them.
+
+set -euo pipefail
+
+printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": ""\n  }\n}\n'
