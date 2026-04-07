@@ -1,0 +1,12 @@
+bin/
+coverage.out
+coverage.html
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+.env
+.env.*
+vendor/

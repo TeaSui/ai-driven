@@ -24,14 +24,14 @@ graph TD
         PM["Pipeline Mode<br>AWS Step Functions"]
         AM["Agent Mode<br>SQS FIFO + ReAct Orchestrator"]
         SI["Shared Infrastructure<br>DynamoDB • S3 (KMS) • Secrets Mgr<br>CloudWatch • X-Ray"]
-        DC["Domain Client Layer<br>SourceControlClient • IssueTrackerClient<br>SpringAiClientAdapter • ToolRegistry • ..."]
+        DC["Domain Client Layer<br>SourceControlProvider • IssueTrackerProvider<br>Claude Client/Bedrock Adapter • ToolRegistry • ..."]
         
         PM --> AM
         AM --> SI
         SI --> DC
     end
 
-    Core --> E["Claude AI<br>Spring AI + Anthropic API<br>(Sonnet 4.6 default, Opus 4.6 for complex)"]
+    Core --> E["Claude AI<br>Go HTTP Client + Bedrock SDK<br>(Sonnet 4.6 default, Opus 4.6 for complex)"]
     Core --> F["Amazon OpenSearch Serverless<br>(RAG for long-term / cross-ticket memory)"]
 ```
 
@@ -44,7 +44,7 @@ The system supports two complementary modes:
 - **Pipeline Mode** — Deterministic: ai-generate label triggers → Jira webhook → Step Functions → Fetch ticket/context → Claude code generation → Create PR → Wait for merge/timeout.
 - **Agent Mode** — Interactive/conversational: ai-agent label + @ai comments → Agent webhook → SQS FIFO → ReAct loop (reason + tool calls) → Post response/comment/PR update.
 
-**Runtime & Infra**: Java 21 (Lambda + ECS Fargate for long-running agents), Gradle multi-module, AWS CDK v2 (TypeScript), serverless-first with event-driven design.
+**Runtime & Infra**: Go 1.24 (Lambda for webhooks + ECS Fargate for long-running agents), AWS CDK v2 (Go), serverless-first with event-driven design. Migrated from Java 21/Spring Boot in Q2 2026 ([ADR-009](adr/ADR-009-java-to-go-migration.md)).
 
 ---
 
@@ -57,12 +57,12 @@ We have evolved from a fragile single-turn generator to a production-grade, even
 - Replaced monolithic Lambda with SQS FIFO + DynamoDB state for reliable agent loops.
 - Implemented HMAC-SHA256 + pre-shared token webhook security.
 - Adopted ToolProvider / ToolRegistry pattern + MCP (Model Context Protocol) integration for extensible tools.
-- **Spring AI Adoption** — Library-only integration of Spring AI 1.1.2 replacing custom ClaudeClient; enables prompt caching, built-in retry, and structured API access.
+- **Go Migration (Q2 2026)** — Full platform rewrite from Java 21/Spring Boot to Go 1.24. Cold start: <100ms (was 5-15s). Memory: 64MB (was 512MB). See [ADR-009](adr/ADR-009-java-to-go-migration.md).
 - Enabled context sharing between pipeline generations and agent conversations.
-- Added structured logging, EMF metrics, X-Ray tracing.
-- **AST-based Context** — `view_file_outline` extracts Java class/method signatures; `search_grep` for pattern search.
+- Added structured logging (zerolog), EMF metrics, CloudWatch tracing.
+- **File Outline & Grep** — `view_file_outline` extracts structural summaries across languages; `search_grep` for content search.
 - **CloudWatch Observability** — Agent can query live logs and metrics via tools; EMF publishes turns/tokens/latency.
-- **Multi-Agent Design** — Architecture designed for Orchestrator → Coder → Reviewer → Tester swarm (implementation deferred).
+- **Multi-Agent Swarm** — Orchestrator → Coder → Reviewer → Tester swarm with recursive feedback loops.
 
 ### Success Metrics Target (EOY 2026)
 | Metric | Current (Q1 2026) | Target (EOY 2026) |
@@ -82,7 +82,7 @@ We have evolved from a fragile single-turn generator to a production-grade, even
 | **Security First, AI Second** | Agent has repo write access — never bypass HMAC/token validation for speed. |
 | **Immutable Traceability** | Every AI decision/action logged in DynamoDB. Must always answer ""why this change?"". |
 | **Fail Loudly, Recover Gracefully** | Exponential backoff + explicit errors on API failures (Claude, GitHub, Jira). Avoid silent corruption. |
-| **SOLID Clean Architecture** | Thin controllers/listeners, core business logic in core module, infra in spring-boot-app. New tools via Spring configuration injection. |
+| **Clean Architecture** | Thin HTTP handlers, core business logic in `internal/agent`, infra in `internal/http`. New tools via ToolProvider interface registration. |
 | **Observability by Default** | Every agent step emits structured events (EMF/JSON) for cost, latency, quality, debugging. |   
 
 ---
@@ -164,7 +164,7 @@ graph TD
 - [x] 6.2 Self-Correction Loops (CI failure → iterate) → impl-17
 
 ### Priority 7 — Q3 2026 Advanced Context & Tooling (Delivered)
-- [x] 7.1 AST/LSP Context (JavaParser + Caffeine + view_file_outline tool) → impl-18
+- [x] 7.1 AST/LSP Context (regex-based FileSummarizer + in-memory cache + view_file_outline tool) → impl-18
 - [x] 7.2 CloudWatch Observability (Logs Insights + EMF Metrics + query tools) → impl-19
 
 ### Priority 8 — Q4 2026 Cross-Agent Swarm (Delivered)

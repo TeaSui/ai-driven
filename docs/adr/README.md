@@ -13,12 +13,14 @@ These ADRs document the major architectural decisions shaping the system's runti
 | ADR | Title | Status | Date |
 |-----|-------|--------|------|
 | [ADR-001](./ADR-001-step-functions-pipeline-orchestration.md) | Step Functions for Pipeline Orchestration | ACCEPTED | 2026-01-15 |
-| [ADR-002](./ADR-002-servicefactory-over-spring-di.md) | ServiceFactory over Spring DI | SUPERSEDED | 2026-01-20 |
+| [ADR-002](./ADR-002-servicefactory-over-spring-di.md) | ServiceFactory over Spring DI | SUPERSEDED by ADR-009 | 2026-01-20 |
 | [ADR-003](./ADR-003-sqs-fifo-dynamodb-agent-state.md) | SQS FIFO + DynamoDB for Agent State | ACCEPTED | 2026-02-10 |
 | [ADR-004](./ADR-004-custom-resilience-over-resilience4j.md) | Custom Resilience over Resilience4j | ACCEPTED | 2026-02-15 |
 | [ADR-005](./ADR-005-toolprovider-toolregistry-pattern.md) | ToolProvider and ToolRegistry Pattern | ACCEPTED | 2026-02-20 |
-| [ADR-006](./ADR-006-spring-ai-library-only-adoption.md) | Spring AI Library-Only Adoption | SUPERSEDED | 2026-03-20 |
+| [ADR-006](./ADR-006-spring-ai-library-only-adoption.md) | Spring AI Library-Only Adoption | SUPERSEDED by ADR-009 | 2026-03-20 |
 | [ADR-007](./ADR-007-hybrid-lambda-fargate-architecture.md) | Hybrid Lambda + Fargate Architecture | PROPOSED | 2026-03-21 |
+| [ADR-008](./ADR-008-all-in-spring-boot.md) | All-in Spring Boot | SUPERSEDED by ADR-009 | 2026-03-25 |
+| [ADR-009](./ADR-009-java-to-go-migration.md) | Java-to-Go Full Migration | ACCEPTED | 2026-04-07 |
 
 ---
 

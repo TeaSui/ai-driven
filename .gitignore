@@ -3,40 +3,31 @@
 .env.local
 .env.*.local
 
-# Java / Gradle
-*.class
-*.jar
-*.war
-*.ear
-.gradle/
-build/
-out/
-!gradle/wrapper/gradle-wrapper.jar
+# Go
+go-app/server
+go-app/mcp-github
+go-app/mcp-jira
+go-app/shadowcompare
+go-app/coverage.out
+go-app/coverage.html
 
 # IDE
 .idea/
 *.iml
-*.iws
-*.ipr
 .vscode/
-.settings/
-.project
-.classpath
 *.swp
 *.swo
 *~
 *.bak
 
-# Node.js
-node_modules/
-dist/
-coverage/
-*.tsbuildinfo
-
 # CDK
 cdk.out/
+go-app/infrastructure/cdk.out/
 
 # OS
 .DS_Store
 **/.DS_Store
 Thumbs.db
+
+# Node.js (CDK dependencies)
+node_modules/
