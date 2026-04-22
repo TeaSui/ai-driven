@@ -1,0 +1,159 @@
+/* GoTyme-X AI — design tokens
+ * Inspired by the GoTyme-X mark: teal (#86B8BE) on white.
+ * Banking-grade polish, dev-tool clarity.
+ */
+
+:root {
+  /* Brand — pulled from GoTyme-X mark */
+  --brand-teal-50:  #f0f7f8;
+  --brand-teal-100: #dfecee;
+  --brand-teal-200: #bcd8dc;
+  --brand-teal-300: #9cc7cd;
+  --brand-teal-400: #86b8be;   /* primary — the logo teal */
+  --brand-teal-500: #5fa0a8;
+  --brand-teal-600: #47858d;
+  --brand-teal-700: #386a71;
+  --brand-teal-800: #2b5156;
+  --brand-teal-900: #1d373b;
+  --brand-ink:      #0b1416;   /* near-black tinted teal */
+
+  /* Accent hooks (Tweaks overrides these) */
+  --accent-400: var(--brand-teal-400);
+  --accent-500: var(--brand-teal-500);
+  --accent-600: var(--brand-teal-600);
+  --accent-soft: var(--brand-teal-50);
+  --accent-contrast: #0b1416;
+}
+
+/* Light (default) */
+.gtx-app, .gtx-light {
+  --bg:            #ffffff;
+  --bg-elev:       #ffffff;
+  --bg-muted:      #f7f6f3;
+  --bg-subtle:     #fbfaf7;
+  --bg-hover:      #f1efea;
+  --panel:         #fdfcfa;
+  --panel-border:  #ebe7df;
+  --border:        #e6e1d7;
+  --border-strong: #d5cebf;
+  --divider:       #efeae0;
+
+  --text:          #0b1416;
+  --text-muted:    #4e5659;
+  --text-subtle:   #7a7f82;
+  --text-faint:    #a5a8aa;
+  --text-inverse:  #ffffff;
+
+  --status-success:#2f9e6a;
+  --status-success-bg:#e6f4ec;
+  --status-warn:   #c28a2a;
+  --status-warn-bg:#faf1dd;
+  --status-danger: #c94a4a;
+  --status-danger-bg:#fae6e6;
+  --status-info:   var(--brand-teal-600);
+  --status-info-bg:var(--brand-teal-50);
+
+  --shadow-sm: 0 1px 2px rgba(10,20,22,.04), 0 0 0 .5px rgba(10,20,22,.04);
+  --shadow-md: 0 2px 4px rgba(10,20,22,.04), 0 8px 24px rgba(10,20,22,.06);
+  --shadow-lg: 0 8px 24px rgba(10,20,22,.08), 0 24px 64px rgba(10,20,22,.10);
+
+  --code-bg:       #f7f6f3;
+  --code-text:     #1a2325;
+  --diff-add-bg:   #e6f4ec;
+  --diff-add-line: #2f9e6a;
+  --diff-del-bg:   #fae6e6;
+  --diff-del-line: #c94a4a;
+}
+
+/* Dark — midnight teal */
+.gtx-dark {
+  --bg:            #0b1416;
+  --bg-elev:       #0f1a1d;
+  --bg-muted:      #10191c;
+  --bg-subtle:     #0d1517;
+  --bg-hover:      #172326;
+  --panel:         #0f1a1d;
+  --panel-border:  #1b2a2e;
+  --border:        #1d2c31;
+  --border-strong: #2a3e44;
+  --divider:       #1a282c;
+
+  --text:          #eaf2f3;
+  --text-muted:    #a1b0b3;
+  --text-subtle:   #7a8a8e;
+  --text-faint:    #556367;
+  --text-inverse:  #0b1416;
+
+  --status-success:#4fbf8c;
+  --status-success-bg:#14302a;
+  --status-warn:   #e3b055;
+  --status-warn-bg:#342a15;
+  --status-danger: #e0706e;
+  --status-danger-bg:#3a1d1d;
+  --status-info:   var(--brand-teal-400);
+  --status-info-bg:#14262a;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.3), 0 0 0 .5px rgba(255,255,255,.04);
+  --shadow-md: 0 2px 4px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.35), 0 24px 64px rgba(0,0,0,.4);
+
+  --code-bg:       #0a1214;
+  --code-text:     #d6e3e5;
+  --diff-add-bg:   #123024;
+  --diff-add-line: #4fbf8c;
+  --diff-del-bg:   #301818;
+  --diff-del-line: #e0706e;
+}
+
+/* Density */
+.gtx-density-compact  { --gtx-row-h: 28px; --gtx-pad: 8px;  --gtx-gap: 8px;  --gtx-fs-body: 12.5px; --gtx-fs-sm: 11.5px; }
+.gtx-density-balanced { --gtx-row-h: 36px; --gtx-pad: 12px; --gtx-gap: 12px; --gtx-fs-body: 13.5px; --gtx-fs-sm: 12px;   }
+.gtx-density-spacious { --gtx-row-h: 44px; --gtx-pad: 16px; --gtx-gap: 16px; --gtx-fs-body: 14.5px; --gtx-fs-sm: 12.5px; }
+
+/* Utility */
+.gtx-app {
+  color: var(--text);
+  background: var(--bg);
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-size: var(--gtx-fs-body);
+  line-height: 1.45;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+}
+.gtx-mono { font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.gtx-serif { font-family: 'Instrument Serif', Georgia, serif; letter-spacing: -0.01em; }
+
+.gtx-app ::selection { background: var(--accent-400); color: var(--accent-contrast); }
+
+/* Scrollbars (subtle) */
+.gtx-app *::-webkit-scrollbar { width: 6px; height: 6px; }
+.gtx-app *::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; }
+.gtx-app *::-webkit-scrollbar-track { background: transparent; }
+
+/* Keyframes */
+@keyframes gtx-pulse {
+  0%,100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+@keyframes gtx-blink {
+  0%,100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes gtx-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+@keyframes gtx-fadein {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes gtx-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes gtx-ring {
+  0% { transform: scale(1); opacity: .6; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+@keyframes gtx-dash {
+  to { stroke-dashoffset: -24; }
+}

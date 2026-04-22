@@ -1,0 +1,77 @@
+{
+  "title": "AI-Driven Platform Overview",
+  "description": "Monitoring dashboard for the AI-Driven development platform",
+  "widgets": [
+    {
+      "title": "Tasks by Status (Timeseries)",
+      "type": "timeseries",
+      "query": "sum:ai.agent.task.count{*} by {success}.as_count()"
+    },
+    {
+      "title": "Claude API Cost per Team (Top List)",
+      "type": "toplist",
+      "query": "sum:ai.claude.cost.usd{*} by {team_id}"
+    },
+    {
+      "title": "Token Usage - Input vs Output",
+      "type": "timeseries",
+      "queries": [
+        "sum:ai.claude.tokens.input{*}.as_count()",
+        "sum:ai.claude.tokens.output{*}.as_count()"
+      ]
+    },
+    {
+      "title": "Agent Task Duration (Heatmap)",
+      "type": "heatmap",
+      "query": "avg:ai.agent.task.duration{*} by {agent_type}"
+    },
+    {
+      "title": "Tool Call Frequency (Top List)",
+      "type": "toplist",
+      "query": "sum:ai.agent.task.tool_calls{*} by {agent_type}.as_count()"
+    },
+    {
+      "title": "Review Bot - Issues Found",
+      "type": "timeseries",
+      "queries": [
+        "sum:ai.review.issues_found{*}.as_count()",
+        "sum:ai.review.critical_issues{*}.as_count()"
+      ]
+    },
+    {
+      "title": "Error Rate by Agent Type",
+      "type": "timeseries",
+      "query": "sum:ai.agent.task.count{success:false} by {agent_type}.as_count()"
+    },
+    {
+      "title": "Cache Hit Ratio",
+      "type": "query_value",
+      "query": "sum:ai.claude.tokens.cache_read{*}.as_count() / (sum:ai.claude.tokens.input{*}.as_count() + sum:ai.claude.tokens.cache_read{*}.as_count()) * 100"
+    },
+    {
+      "title": "Review Verdict Distribution",
+      "type": "toplist",
+      "query": "sum:ai.review.verdict{*} by {verdict}.as_count()"
+    }
+  ],
+  "monitors": [
+    {
+      "name": "Agent Failure Rate >10%",
+      "type": "metric alert",
+      "query": "sum(last_15m):sum:ai.agent.task.count{success:false}.as_count() / sum:ai.agent.task.count{*}.as_count() > 0.1",
+      "message": "Agent failure rate exceeds 10% over the last 15 minutes. @slack-oncall"
+    },
+    {
+      "name": "Claude API Error Rate >5%",
+      "type": "metric alert",
+      "query": "avg(last_5m):avg:trace.http.request.errors{service:ai-driven} > 0.05",
+      "message": "Claude API error rate exceeds 5%. Check provider status. @slack-oncall"
+    },
+    {
+      "name": "Daily Budget 80% Warning",
+      "type": "metric alert",
+      "query": "sum(last_1d):sum:ai.claude.cost.usd{*} by {team_id} > 40",
+      "message": "Team approaching daily budget limit (80%). @slack-alerts"
+    }
+  ]
+}

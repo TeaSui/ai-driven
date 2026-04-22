@@ -1,0 +1,93 @@
+/* ── Accessibility utilities (WCAG 2.2 AA) ─────────────────────────────────── */
+
+/* Screen-reader-only text — visually hidden but announced by AT */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Reveal sr-only when focused (used by skip links) */
+.sr-only.focus\:not-sr-only:focus,
+.focus\:not-sr-only:focus {
+  position: static;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+}
+
+/* ── Focus rings ─────────────────────────────────────────────────────────────
+   Extends globals.css which already covers <a> and <button>.
+   These rules cover additional interactive elements.
+*/
+.gtx-app input:focus-visible,
+.gtx-app select:focus-visible,
+.gtx-app textarea:focus-visible {
+  outline: 2px solid var(--brand-teal-800);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Skip-to-content link — visually hidden until focused (Tab key).
+   Uses clip-rect + sr-only pattern for bulletproof hiding across all
+   layout contexts (flex, grid, absolute). */
+.gtx-skip-link {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+  z-index: 9999;
+}
+
+.gtx-skip-link:focus {
+  position: fixed;
+  top: 0;
+  left: 16px;
+  width: auto;
+  height: auto;
+  padding: 10px 16px;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  white-space: normal;
+  background: var(--brand-teal-800, #2b5156);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 0 0 8px 8px;
+  text-decoration: none;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────────
+   Disable all non-essential animations for users who have requested it.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -3,15 +3,24 @@
 .env.local
 .env.*.local
 
-# Java / Gradle
-*.class
-*.jar
-*.war
-*.ear
-.gradle/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
 build/
-out/
-!gradle/wrapper/gradle-wrapper.jar
+.eggs/
+*.whl
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
 
 # IDE
 .idea/
@@ -31,10 +40,19 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+.next/
 
 # CDK
 cdk.out/
 
+# Docker
+docker/data/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
