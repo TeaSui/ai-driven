@@ -41,6 +41,120 @@ class BaseAgent(ABC):
         self._task_id: str | None = None
         self._redis_client: Any | None = None
         self._register_tools()
+        self._register_ask_human()
+
+    def _register_ask_human(self) -> None:
+        """Register the universal human-in-the-loop clarification tool.
+
+        The agent invokes this when it's genuinely uncertain and a human
+        decision would save iterations/cost. The tool:
+          1. publishes a `human_input_required` event with the question,
+          2. marks the task `awaiting_input` via the control key,
+          3. long-polls Redis for `task:{id}:human_answer`,
+          4. returns the answer so the agent loop continues.
+
+        Humans respond via POST /api/chat/tasks/{id}/respond or via the UI's
+        clarification dialog. Use sparingly — prefer acting on best-guess
+        when a reasonable default exists.
+        """
+        @self._registry.tool(
+            name="human.ask_clarification",
+            description=(
+                "Ask the human operator a question and wait for their answer. "
+                "Use ONLY when the Jira ticket or context is genuinely ambiguous "
+                "AND a wrong guess would waste significant effort (e.g. breaking API "
+                "changes, schema choices, undocumented product decisions). Do NOT "
+                "use for clarifying easy defaults — pick a sensible default and "
+                "note the assumption in your Jira comment instead."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The specific question to ask the human, in plain English.",
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "One-sentence context on why you're stuck and what you've tried.",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of concrete choices (will render as buttons).",
+                    },
+                    "timeout_seconds": {
+                        "type": "integer",
+                        "description": "How long to wait for an answer before giving up (default 600 = 10 min).",
+                        "default": 600,
+                    },
+                },
+                "required": ["question"],
+            },
+        )
+        async def ask_human(
+            question: str,
+            context: str = "",
+            options: list[str] | None = None,
+            timeout_seconds: int = 600,
+        ) -> dict[str, Any]:
+            import asyncio
+            import json
+
+            client = await self._get_redis_client()
+            if client is None or not self._task_id:
+                # No Redis / no task context: can't block. Return a sentinel
+                # so the model falls back to its best guess.
+                return {
+                    "answered": False,
+                    "reason": "human clarification unavailable (no session)",
+                    "suggestion": "proceed with best-guess default",
+                }
+
+            # Stamp a marker so the UI knows to show the dialog.
+            await client.set(f"task:{self._task_id}:control", "awaiting_input", ex=timeout_seconds)
+            await client.set(
+                f"task:{self._task_id}:pending_question",
+                json.dumps({"question": question, "context": context, "options": options or []}),
+                ex=timeout_seconds,
+            )
+            # Reflect on the task row so list endpoints show the state.
+            try:
+                import uuid as _uuid
+                from ai_driven.db.postgres.repository import TaskRepository
+                from ai_driven.db.postgres.session import async_session_factory
+                async with async_session_factory() as session:
+                    repo = TaskRepository(session)
+                    await repo.update_status(_uuid.UUID(self._task_id), "awaiting_input")
+                    await session.commit()
+            except Exception:
+                logger.debug("could not persist awaiting_input status (non-fatal)")
+
+            # Publish the event so UI can render the dialog in real time.
+            await self._publish_event(
+                "human_input_required",
+                {"question": question, "context": context, "options": options or [], "timeout": timeout_seconds},
+            )
+
+            # Long-poll for the answer.
+            answer_key = f"task:{self._task_id}:human_answer"
+            deadline = asyncio.get_event_loop().time() + timeout_seconds
+            while asyncio.get_event_loop().time() < deadline:
+                answer = await client.get(answer_key)
+                if answer:
+                    await client.delete(answer_key)
+                    await client.delete(f"task:{self._task_id}:pending_question")
+                    return {"answered": True, "answer": answer}
+                await asyncio.sleep(1.5)
+
+            # Timed out — clear state and let the agent proceed on best guess.
+            await client.delete(f"task:{self._task_id}:pending_question")
+            await client.delete(f"task:{self._task_id}:control")
+            return {
+                "answered": False,
+                "reason": "no response within timeout",
+                "suggestion": "proceed with best-guess default",
+            }
 
     @abstractmethod
     def _register_tools(self) -> None:
@@ -211,12 +325,18 @@ class BaseAgent(ABC):
                 "tool_call_start",
                 extra={"tool": name, "call_number": tool_call_count, "iteration": iteration_count + 1},
             )
-            # Include truncated input for visibility
-            input_summary = json.dumps(input_data)[:2000] if input_data else ""
+            # Serialize full input. file.write payloads can be large (full file
+            # contents); truncating them breaks JSON parsing downstream and the
+            # UI code pane can't render the real file. Cap only at 64k as a
+            # safety net to prevent a single pathological event from exploding
+            # the Redis list.
+            input_json = json.dumps(input_data) if input_data else ""
+            if len(input_json) > 65536:
+                input_json = input_json[:65536]
             await self._publish_event("tool_call_start", {
                 "tool": name,
                 "call_number": tool_call_count,
-                "input_data": input_summary,
+                "input_data": input_json,
             })
             # Transition to testing when sandbox/test commands are run
             if name in ("sandbox.execute", "shell.run", "run_tests"):
@@ -275,13 +395,26 @@ class BaseAgent(ABC):
                 conversation.total_input_tokens += response.usage.input_tokens
                 conversation.total_output_tokens += response.usage.output_tokens
 
+        # Collect tool call history for evaluation context
+        tool_call_history: list[str] = []
+
         async def on_tool_result(name: str, duration: float, success: bool, result_data: str = "") -> None:
+            # Same reasoning as on_tool_call_async: keep the full result JSON
+            # (with a 64k safety cap) so the UI can render real shell stdout,
+            # PR metadata, read_file contents, etc. Truncating at 2k was
+            # corrupting JSON and the code pane showed empty contents.
+            result_json = result_data if result_data else ""
+            if len(result_json) > 65536:
+                result_json = result_json[:65536]
             await self._publish_event("tool_call_end", {
                 "tool": name,
                 "duration_ms": int(duration * 1000),
                 "success": success,
-                "result_data": result_data[:2000] if result_data else "",
+                "result_data": result_json,
             })
+            # Track tool results for evaluation
+            status = "OK" if success else "FAILED"
+            tool_call_history.append(f"  {name}: {status} ({int(duration*1000)}ms) → {result_data[:200]}")
             # Transition to pr_created when PR is created
             if success and name in ("github.create_pr", "create_pr", "github.createPR"):
                 await self._update_task_status("pr_created")
@@ -378,8 +511,19 @@ class BaseAgent(ABC):
             # Fire-and-forget post-task evaluation
             if self._task_id and response.text:
                 import asyncio
+                # Enrich the output with tool call evidence so the grader
+                # can see what actually happened (code written, PRs created, etc.)
+                eval_output = response.text
+                if tool_call_history:
+                    evidence = "\n".join(tool_call_history)
+                    eval_output = (
+                        f"{response.text}\n\n"
+                        f"--- Tool Execution Evidence ({tool_call_count} calls, "
+                        f"{iteration_count} iterations, {round(duration, 1)}s) ---\n"
+                        f"{evidence}"
+                    )
                 asyncio.create_task(self._run_evaluation(
-                    self._task_id, user_message, response.text, self.agent_type,
+                    self._task_id, user_message, eval_output, self.agent_type,
                 ))
 
             return AgentResult(

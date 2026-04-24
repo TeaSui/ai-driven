@@ -499,12 +499,32 @@ class CodingAgent(BaseAgent):
         """Build comprehensive initial message with task context."""
         jira_key = task_input.get("jira_key", "")
         repo = task_input.get("repo_full_name", "")
+        # User's original chat message — the primary intent
+        user_message = task_input.get("message", "")
         extra = task_input.get("instructions", "")
         from_status = task_input.get("from_status", "")
         to_status = task_input.get("to_status", "")
 
-        parts = [
-            f"Implement the Jira ticket {jira_key} in repository {repo}.",
+        parts: list[str] = []
+
+        # Lead with the user's own words so the model treats them as the
+        # primary objective, not just Jira metadata.
+        if user_message:
+            parts.append(f"**User request:** {user_message}")
+            parts.append("")
+
+        if jira_key:
+            parts.append(
+                f"Jira ticket: {jira_key}  ·  Repository: {repo}"
+            )
+            parts.append(
+                "Use jira.get_issue to fetch the ticket details — but the user's request above "
+                "takes priority when it conflicts with or goes beyond the Jira description."
+            )
+        elif repo:
+            parts.append(f"Repository: {repo}")
+
+        parts += [
             "",
             "Follow this workflow:",
             "1. UNDERSTAND: Use jira.get_issue to fetch the ticket details, acceptance criteria, and comments.",
@@ -515,11 +535,14 @@ class CodingAgent(BaseAgent):
             "",
             "Important rules:",
             "- Follow existing code patterns and conventions found in the repository.",
-            f"- Create a feature branch named `feature/{jira_key}` from the default branch.",
+            f"- Create a feature branch named `feature/{jira_key}` from the default branch." if jira_key else "",
             "- Write clean, tested code that matches the acceptance criteria.",
-            f"- The PR title should be `{jira_key}: <summary>` where summary comes from Jira.",
-            "- Post a Jira comment with the PR link when done.",
+            f"- The PR title should be `{jira_key}: <summary>` where summary comes from Jira." if jira_key else "",
+            "- Post a Jira comment with the PR link when done." if jira_key else "",
         ]
+
+        # Remove empty strings from conditional lines
+        parts = [p for p in parts if p or p == ""]
 
         if from_status and to_status:
             parts.append(

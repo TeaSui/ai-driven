@@ -53,7 +53,14 @@ class AgentSessionStore:
 
 
 class WebhookEventStore:
-    """Webhook event deduplication and audit trail."""
+    """Webhook event deduplication and audit trail.
+
+    Dedup is best-effort: if DynamoDB is unavailable (e.g. local dev without a
+    configured table), we log a warning and treat the event as accepted so the
+    downstream handler still runs. This prevents a missing infra dep from
+    silently breaking every webhook-driven feature (F1 Coding, F2 Review,
+    F4 DevOps).
+    """
 
     def __init__(self) -> None:
         self._table = _get_table("webhook-events")
@@ -62,6 +69,8 @@ class WebhookEventStore:
         self, event_id: str, source: str, event_type: str, payload: dict[str, Any]
     ) -> bool:
         """Record a webhook event. Returns False if duplicate."""
+        import logging
+        log = logging.getLogger(__name__)
         try:
             self._table.put_item(
                 Item={
@@ -75,6 +84,17 @@ class WebhookEventStore:
             return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
+        except self._table.meta.client.exceptions.ResourceNotFoundException:
+            log.warning(
+                "DynamoDB table '%s' not found — webhook dedup disabled. "
+                "Run `alembic upgrade head` then `scripts/create-dynamodb-tables.sh` "
+                "or set AI_DRIVEN_DYNAMODB_ENDPOINT_URL to a local stub.",
+                self._table.name,
+            )
+            return True
+        except Exception as ex:  # pragma: no cover — defensive for local dev
+            log.warning("DynamoDB record_event failed (%s); continuing without dedup", ex)
+            return True
 
 
 class TaskStateMachineStore:
@@ -86,13 +106,20 @@ class TaskStateMachineStore:
     def record_transition(
         self, task_id: str, from_state: str, to_state: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        self._table.put_item(Item={
-            "task_id": task_id,
-            "state_timestamp": f"{to_state}#{datetime.now(timezone.utc).isoformat()}",
-            "from_state": from_state,
-            "to_state": to_state,
-            "metadata": metadata or {},
-        })
+        import logging
+        log = logging.getLogger(__name__)
+        try:
+            self._table.put_item(Item={
+                "task_id": task_id,
+                "state_timestamp": f"{to_state}#{datetime.now(timezone.utc).isoformat()}",
+                "from_state": from_state,
+                "to_state": to_state,
+                "metadata": metadata or {},
+            })
+        except self._table.meta.client.exceptions.ResourceNotFoundException:
+            log.warning("DynamoDB table '%s' not found — state transition lost (local dev)", self._table.name)
+        except Exception as ex:  # pragma: no cover
+            log.warning("state_transition failed: %s", ex)
 
     def get_transitions(self, task_id: str) -> list[dict[str, Any]]:
         response = self._table.query(

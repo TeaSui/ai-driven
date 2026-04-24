@@ -80,7 +80,7 @@ class ClaudeClient:
         max_iterations: int | None = None,
         on_tool_call: Callable[[str, dict], None] | None = None,
         on_response: Callable[[MessageResponse], None] | None = None,
-        on_tool_result: Callable[[str, float, bool], Any] | None = None,
+        on_tool_result: Callable[[str, float, bool, str], Any] | None = None,
         on_text_chunk: OnTextChunk | None = None,
         stop_sequences: list[str] | None = None,
         should_continue: Callable[[], Awaitable[bool]] | None = None,
@@ -302,7 +302,7 @@ class ClaudeClient:
         self,
         tool_blocks: list[ToolUseBlock],
         on_tool_call: Callable[[str, dict], None] | None = None,
-        on_tool_result: Callable[[str, float, bool], Any] | None = None,
+        on_tool_result: Callable[[str, float, bool, str], Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Execute tool calls and return tool_result blocks."""
         results: list[dict[str, Any]] = []

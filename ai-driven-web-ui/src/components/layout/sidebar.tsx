@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import useSWR from 'swr'
 import { useSidebar } from './sidebar-context'
 import { authFetch, clearApiKey } from '@/lib/auth'
+import { getDashboardSummary, type DashboardSummary } from '@/lib/api'
 import { BrandMark, Wordmark } from '@/components/ui/brand-mark'
 import { Avatar } from '@/components/ui/avatar'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -168,14 +170,22 @@ interface SubNavItem {
   icon: React.ReactNode
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'timeline', label: 'Timeline',     href: '/dashboard/timeline',  icon: <IconZap size={15}/>,   count: 3 },
-  { id: 'agent',    label: 'Coding Agent', href: '/dashboard/tasks',     icon: <IconBot size={15}/>,   pulse: true },
-  { id: 'review',   label: 'Code Review',  href: '/dashboard/reviews',   icon: <IconGitPr size={15}/>, count: 12 },
-  { id: 'devops',   label: 'DevOps',       href: '/dashboard/incidents', icon: <IconAlert size={15}/>, count: 2, tone: 'warn' },
-  { id: 'metrics',  label: 'Metrics',      href: '/dashboard/insights',  icon: <IconEye size={15}/> },
-  { id: 'slack',    label: 'Slack',        href: '/dashboard/slack',     icon: <IconSlack size={15}/> },
-]
+function buildNavItems(summary?: DashboardSummary): NavItem[] {
+  const active = summary?.activeAgents
+  const totalActive = active ? Object.values(active).reduce((a, b) => a + b, 0) : 0
+  const codingActive = active?.coding ?? 0
+  const reviewActive = active?.review ?? 0
+  const devopsActive = active?.devops ?? 0
+
+  return [
+    { id: 'timeline', label: 'Timeline',     href: '/dashboard/timeline',  icon: <IconZap size={15}/>,   count: totalActive || undefined },
+    { id: 'agent',    label: 'Coding Agent', href: '/dashboard/tasks',     icon: <IconBot size={15}/>,   pulse: codingActive > 0, count: codingActive || undefined },
+    { id: 'review',   label: 'Code Review',  href: '/dashboard/reviews',   icon: <IconGitPr size={15}/>, count: reviewActive || undefined },
+    { id: 'devops',   label: 'DevOps',       href: '/dashboard/incidents', icon: <IconAlert size={15}/>, count: devopsActive || undefined, tone: devopsActive > 0 ? 'warn' : undefined },
+    { id: 'metrics',  label: 'Metrics',      href: '/dashboard/insights',  icon: <IconEye size={15}/> },
+    { id: 'slack',    label: 'Slack',        href: '/dashboard/slack',     icon: <IconSlack size={15}/> },
+  ]
+}
 
 const SUB_ITEMS: SubNavItem[] = [
   { id: 'repos', label: 'Repositories', href: '/dashboard/admin/repos', icon: <IconFolder size={14}/> },
@@ -262,6 +272,13 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const w = collapsed ? 56 : 220
+
+  const { data: summary } = useSWR<DashboardSummary>('sidebar-summary', getDashboardSummary, {
+    refreshInterval: 30_000,
+    revalidateOnFocus: false,
+    shouldRetryOnError: false,
+  })
+  const NAV_ITEMS = buildNavItems(summary)
 
   const [teamName, setTeamName] = useState<string | null>(null)
 

@@ -40,6 +40,8 @@ An AI-powered platform that automates the SDLC using Claude API. It integrates w
 | 7 | — | Claude API integration: RAG, MCP, evaluation, extended thinking, prompt engineering, real-time visibility, Bedrock Invoke API | COMPLETE |
 | 8 | [07-severity-taxonomy-migration.md](07-severity-taxonomy-migration.md) | Severity enum + DB CHECK + normalization (fixes cross-writer data-corruption risk) | PLANNED |
 | 9 | [08-auth-and-ws-security.md](08-auth-and-ws-security.md) | Cognito login, `middleware.ts`, WebSocket team-scoped authz, `cancelled` terminal state, debug banner | PLANNED |
+| 10a | [10-ui-polish-and-scm-dual-support.md](10-ui-polish-and-scm-dual-support.md) | Task-page UX correctness pass (BUG-21 → BUG-29), live GitHub file + diff endpoints, friendly thinking stream, clickable file tabs | COMPLETE |
+| 10b | [10-ui-polish-and-scm-dual-support.md](10-ui-polish-and-scm-dual-support.md) | BitBucket Cloud dual-support: `SCMClient` protocol, `BitbucketClient`, provider factory (`get_scm_client_from_settings`), per-repo provider selection via `Repository.scm_type`, admin `/file` + `/diff` endpoints route by provider, frontend `PR_TOOLS` + `describeTool` recognise bitbucket tool names, Playwright regression test | COMPLETE |
 
 > **Launch blocker:** sprints 8 and 9 must ship before the second customer. See `docs/review/findings-final.md` and `docs/vision/01-roadmap.md`.
 | 8 | — | GoTyme-X AI dashboard (Next.js 14), MockProvider with scripted tool_use sequences, full pipeline verification | COMPLETE |

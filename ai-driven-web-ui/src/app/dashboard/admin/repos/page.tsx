@@ -5,6 +5,7 @@ import { GitBranch, Plus } from 'lucide-react'
 import { Pill } from '@/components/ui/pill'
 import { Btn } from '@/components/ui/btn'
 import { Spinner } from '@/components/ui/spinner'
+import { notify } from '@/lib/notify'
 
 interface Repo {
   id: string
@@ -77,7 +78,7 @@ export default function ReposPage() {
           tone="brand"
           size="sm"
           icon={<Plus size={13} />}
-          onClick={() => alert('Add repository form coming soon.')}
+          onClick={() => notify('Add-repository form is on the roadmap (see docs/implementation/09 §9.3).', 'info')}
         >
           Add repository
         </Btn>

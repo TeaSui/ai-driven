@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Pill } from '@/components/ui/pill'
 import { Btn } from '@/components/ui/btn'
+import { notify } from '@/lib/notify'
 import { Avatar } from '@/components/ui/avatar'
 import { Card } from '@/components/ui/card'
 import { StatusDot } from '@/components/ui/status-dot'
@@ -413,7 +414,7 @@ function IncidentDetail({ alert }: { alert: AlertItem }) {
             position: 'relative',
           }}
         >
-          <Btn size="sm" tone="brand" icon={<CircleDot size={11} />} onClick={() => window.alert('Incident ticket creation requires Jira integration. Configure in Admin > Repositories.')}>
+          <Btn size="sm" tone="brand" icon={<CircleDot size={11} />} onClick={() => notify('Incident ticket creation requires Jira integration. Configure in Admin > Repositories.', 'warn')}>
             Create incident ticket
           </Btn>
           {rca?.relatedPR ? (
@@ -425,11 +426,11 @@ function IncidentDetail({ alert }: { alert: AlertItem }) {
               PR #{rca.relatedPR.number}
             </Btn>
           ) : (
-            <Btn size="sm" icon={<GitPullRequest size={11} />} onClick={() => window.alert('Rollback PR drafting requires SCM integration. Configure in Admin > Repositories.')}>
+            <Btn size="sm" icon={<GitPullRequest size={11} />} onClick={() => notify('Rollback PR drafting requires SCM integration. Configure in Admin > Repositories.', 'warn')}>
               Draft rollback PR
             </Btn>
           )}
-          <Btn size="sm" icon={<MessageCircle size={11} />} onClick={() => window.alert('Slack posting requires Slack bot configuration.')}>
+          <Btn size="sm" icon={<MessageCircle size={11} />} onClick={() => notify('Slack posting requires Slack bot configuration.', 'warn')}>
             Post to #incidents
           </Btn>
         </div>
@@ -561,7 +562,7 @@ export default function IncidentsPage() {
             <Btn size="sm" icon={<Activity size={12} />} onClick={() => window.open('https://app.datadoghq.com', '_blank')}>
               Open DataDog
             </Btn>
-            <Btn size="sm" tone="brand" icon={<Bot size={12} />} onClick={() => window.alert('DevOps agent triggered. Check the Tasks page for status.')}>
+            <Btn size="sm" tone="brand" icon={<Bot size={12} />} onClick={() => notify('DevOps agent triggered. Check the Tasks page for status.', 'info')}>
               Run agent
             </Btn>
           </div>

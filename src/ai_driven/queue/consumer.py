@@ -119,6 +119,11 @@ class TaskConsumer:
             result = await agent.run(payload)
 
             # Update task status
+            # Estimate cost: ~$3/M input + ~$15/M output for Sonnet
+            input_tokens = result.conversation.total_input_tokens
+            output_tokens = result.conversation.total_output_tokens
+            cost_usd = (input_tokens * 3.0 / 1_000_000) + (output_tokens * 15.0 / 1_000_000)
+
             async with async_session_factory() as session:
                 task_repo = TaskRepository(session)
                 status = "completed" if result.success else "failed"
@@ -132,6 +137,8 @@ class TaskConsumer:
                         "error": result.error,
                     },
                     total_tokens=result.total_tokens,
+                    total_cost_usd=round(cost_usd, 4),
+                    iterations=result.iterations,
                 )
                 await session.commit()
 

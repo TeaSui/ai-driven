@@ -269,9 +269,30 @@ class GitHubClient:
     ) -> dict[str, Any]:
         """Create or update a file via the Contents API.
 
-        If *sha* is provided the file is updated; otherwise it is created.
+        When *sha* is not provided, we first check whether the file already
+        exists on the target branch. GitHub's Contents API rejects updates
+        to existing files without the current blob SHA ("sha wasn't supplied"),
+        so auto-detecting it means callers don't have to do two round trips.
         """
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+        # Auto-detect sha for existing files on the branch.
+        if sha is None:
+            try:
+                probe = await self._request(
+                    "GET",
+                    f"/repos/{repo_full_name}/contents/{path}",
+                    params={"ref": branch},
+                )
+                if probe.status_code == 200:
+                    probe_json = probe.json()
+                    if isinstance(probe_json, dict) and probe_json.get("type") == "file":
+                        sha = probe_json.get("sha")
+            except Exception:
+                # File doesn't exist yet (404) or probe failed — fall through
+                # and attempt a create (no sha).
+                pass
+
         body: dict[str, Any] = {
             "message": message,
             "content": encoded,
@@ -300,11 +321,23 @@ class GitHubClient:
         )
         sha = ref_resp.json()["object"]["sha"]
 
-        await self._request(
-            "POST",
-            f"/repos/{repo_full_name}/git/refs",
-            json={"ref": f"refs/heads/{branch_name}", "sha": sha},
-        )
+        try:
+            await self._request(
+                "POST",
+                f"/repos/{repo_full_name}/git/refs",
+                json={"ref": f"refs/heads/{branch_name}", "sha": sha},
+            )
+        except SCMValidationError as e:
+            if "already exists" in str(e).lower():
+                # Branch exists — update it to point at the latest base ref SHA
+                logger.info("Branch %s already exists, updating to %s", branch_name, sha[:8])
+                await self._request(
+                    "PATCH",
+                    f"/repos/{repo_full_name}/git/refs/heads/{branch_name}",
+                    json={"sha": sha, "force": True},
+                )
+            else:
+                raise
 
     # ------------------------------------------------------------------
     # Pull request operations

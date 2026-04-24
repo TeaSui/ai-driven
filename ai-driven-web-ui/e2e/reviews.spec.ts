@@ -78,7 +78,7 @@ async function stubReviewsRoute(page: import('@playwright/test').Page) {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ data: MOCK_REVIEWS }),
+      body: JSON.stringify(MOCK_REVIEWS),
     }),
   )
 }
@@ -96,8 +96,8 @@ test.describe('Reviews', () => {
     const tabList = page.getByRole('tablist', { name: /review queue filter/i })
     await expect(tabList).toBeVisible()
 
-    await expect(tabList.getByRole('tab', { name: /all reviews/i })).toBeVisible()
-    await expect(tabList.getByRole('tab', { name: /awaiting action/i })).toBeVisible()
+    await expect(tabList.getByRole('tab', { name: /^all/i })).toBeVisible()
+    await expect(tabList.getByRole('tab', { name: /awaiting me/i })).toBeVisible()
     await expect(tabList.getByRole('tab', { name: /completed/i })).toBeVisible()
   })
 
@@ -115,12 +115,12 @@ test.describe('Reviews', () => {
     const reviewList = page.getByRole('list', { name: /review queue/i })
     await expect(reviewList).toBeVisible()
 
-    // "All Reviews" tab — all 3 reviews should be present
-    await tabList.getByRole('tab', { name: /all reviews/i }).click()
+    // "All" tab — all 3 reviews should be present
+    await tabList.getByRole('tab', { name: /^all/i }).click()
     await expect(reviewList.getByRole('listitem')).toHaveCount(3)
 
-    // "Awaiting Action" tab — only pending + in_progress (rev-1 and rev-3)
-    await tabList.getByRole('tab', { name: /awaiting action/i }).click()
+    // "Awaiting me" tab — only pending + in_progress (rev-1 and rev-3)
+    await tabList.getByRole('tab', { name: /awaiting me/i }).click()
     await expect(reviewList.getByRole('listitem')).toHaveCount(2)
 
     // "Completed" tab — only approved (rev-2)

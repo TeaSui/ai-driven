@@ -185,6 +185,10 @@ Source: `src/ai_driven/claude/provider.py` — `MockProvider._TOOL_SCRIPTS`
 | `AI_DRIVEN_JIRA_API_TOKEN` | empty | Real token | |
 | `AI_DRIVEN_GITHUB_TOKEN` | empty | Real PAT or App installation token | |
 | `AI_DRIVEN_GITHUB_WEBHOOK_SECRET` | `test-secret` | Real HMAC secret | |
+| `AI_DRIVEN_BITBUCKET_USERNAME` | empty | BitBucket Cloud account username | Dual-SCM support (see `impl/10`) |
+| `AI_DRIVEN_BITBUCKET_APP_PASSWORD` | empty | App password with `repository:write`, `pullrequest:write` scopes | |
+| `AI_DRIVEN_BITBUCKET_WORKSPACE` | empty | e.g. `origination1` | |
+| `AI_DRIVEN_BITBUCKET_WEBHOOK_SECRET` | empty | Optional HMAC-SHA256 secret | |
 | `AI_DRIVEN_SLACK_BOT_TOKEN` | empty | Real bot token | |
 | `AI_DRIVEN_SLACK_DEFAULT_CHANNEL` | empty | `#ai-driven-alerts` | |
 

@@ -658,6 +658,210 @@ async def get_task_events(task_id: str) -> list[dict[str, Any]]:
         return []
 
 
+async def _load_task_events(task_id: str) -> list[dict[str, Any]]:
+    """Load all persisted agent events for a task from Redis."""
+    import json as _json
+
+    import redis.asyncio as aioredis
+    from ai_driven.config import get_settings
+
+    settings = get_settings()
+    client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        raw_events = await client.lrange(f"task:{task_id}:event_log", 0, -1)
+    except Exception:
+        return []
+    out: list[dict[str, Any]] = []
+    for raw in raw_events:
+        try:
+            out.append(_json.loads(raw))
+        except Exception:
+            continue
+    return out
+
+
+async def _resolve_task_scm_type(task_id: str) -> str:
+    """Return ``"github"`` or ``"bitbucket"`` for a task.
+
+    Priority:
+      1. The ``Repository.scm_type`` row the task is linked to in Postgres.
+      2. A hint in the event stream (explicit ``scm_type`` key in tool input).
+      3. Fallback ``"github"`` for backwards compatibility.
+    """
+    try:
+        parsed = uuid.UUID(task_id)
+    except ValueError:
+        return "github"
+    from ai_driven.db.postgres.session import async_session_factory
+    from ai_driven.db.postgres.models import Task as TaskRow, Repository as RepoRow
+
+    async with async_session_factory() as session:
+        res = await session.execute(
+            select(RepoRow.scm_type).join(TaskRow, TaskRow.repo_id == RepoRow.id)
+            .where(TaskRow.id == parsed)
+        )
+        row = res.scalar_one_or_none()
+        if row:
+            return row
+    return "github"
+
+
+def _extract_repo_and_ref_for_path(
+    events: list[dict[str, Any]], path: str
+) -> tuple[str | None, str | None]:
+    """Walk events backwards, find the most recent file.write for `path`."""
+    import json as _json
+
+    repo_full_name: str | None = None
+    ref: str | None = None
+    for e in reversed(events):
+        if e.get("type") != "tool_call_start":
+            continue
+        d = e.get("data", {}) or {}
+        tool = d.get("tool") or d.get("tool_name") or ""
+        raw_input = d.get("input_data") or "{}"
+        try:
+            inp = _json.loads(raw_input) if isinstance(raw_input, str) else raw_input
+        except Exception:
+            inp = {}
+        if tool in ("file.write", "repo.write_file") and inp.get("path") == path:
+            repo_full_name = inp.get("repo_full_name") or repo_full_name
+            ref = inp.get("branch") or ref
+            if repo_full_name and ref:
+                break
+        if tool in ("git.create_branch", "create_branch") and not ref:
+            ref = inp.get("branch_name") or inp.get("branch")
+        if tool in ("file.write", "repo.write_file") and not repo_full_name:
+            repo_full_name = inp.get("repo_full_name")
+    return repo_full_name, ref
+
+
+def _extract_repo_and_pr(events: list[dict[str, Any]]) -> tuple[str | None, int | None]:
+    """Walk events, find the repo + PR number. Handles github + bitbucket tool names."""
+    import json as _json
+
+    repo_full_name: str | None = None
+    pr_number: int | None = None
+    pr_tools = {
+        "github.create_pr", "create_pr", "bitbucket.create_pr", "scm.create_pr",
+    }
+    for e in reversed(events):
+        d = e.get("data", {}) or {}
+        tool = d.get("tool") or d.get("tool_name") or ""
+        if e.get("type") == "tool_call_end" and tool in pr_tools:
+            try:
+                r = _json.loads(d.get("result_data") or "{}")
+                pr_number = r.get("pr_number") or r.get("number") or r.get("id") or pr_number
+            except Exception:
+                pass
+        if e.get("type") == "tool_call_start":
+            try:
+                inp = _json.loads(d.get("input_data") or "{}")
+            except Exception:
+                inp = {}
+            repo_full_name = inp.get("repo_full_name") or repo_full_name
+        if repo_full_name and pr_number:
+            break
+    return repo_full_name, pr_number
+
+
+@router.get("/tasks/{task_id}/diff")
+async def get_task_diff(
+    task_id: str,
+    path: str,
+) -> dict[str, Any]:
+    """Return the unified diff patch for `path` in this task's PR.
+
+    Picks GitHub or Bitbucket based on the linked `Repository.scm_type`.
+    Falls back to GitHub for tasks without a repo row (legacy).
+    """
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    events = await _load_task_events(task_id)
+    repo_full_name, pr_number = _extract_repo_and_pr(events)
+
+    if not repo_full_name or not pr_number:
+        raise HTTPException(status_code=404, detail="Could not determine repo/PR for this task")
+
+    scm_type = await _resolve_task_scm_type(task_id)
+    try:
+        scm = get_scm_client_from_settings(scm_type)
+    except Exception as ex:
+        raise HTTPException(status_code=503, detail=str(ex))
+
+    try:
+        diff = await scm.get_pr_diff(repo_full_name, pr_number)
+    except Exception as ex:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{scm_type} get_pr_diff failed: {type(ex).__name__}: {str(ex)[:200]}",
+        )
+    finally:
+        await scm.close()
+
+    match = next((f for f in diff.files if f.path == path), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail=f"file {path} not in PR #{pr_number}")
+
+    return {
+        "path": match.path,
+        "status": match.status,
+        "additions": match.additions,
+        "deletions": match.deletions,
+        "patch": match.patch,
+        "repo": repo_full_name,
+        "pr_number": pr_number,
+        "provider": scm_type,
+    }
+
+
+@router.get("/tasks/{task_id}/file")
+async def get_task_file(
+    task_id: str,
+    path: str,
+) -> dict[str, Any]:
+    """Return the live contents of a file the agent touched.
+
+    Reads from the actual SCM provider the task's repo is registered under
+    (GitHub or Bitbucket Cloud). For legacy tasks with no `Repository` row,
+    falls back to GitHub.
+    """
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    events = await _load_task_events(task_id)
+    repo_full_name, ref = _extract_repo_and_ref_for_path(events, path)
+    if not repo_full_name or not ref:
+        raise HTTPException(
+            status_code=404,
+            detail="Could not determine repo/branch for this task from event log",
+        )
+
+    scm_type = await _resolve_task_scm_type(task_id)
+    try:
+        scm = get_scm_client_from_settings(scm_type)
+    except Exception as ex:
+        raise HTTPException(status_code=503, detail=str(ex))
+
+    try:
+        file_content = await scm.read_file(repo_full_name, path, ref=ref)
+    except Exception as ex:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{scm_type} read_file failed: {type(ex).__name__}: {str(ex)[:200]}",
+        )
+    finally:
+        await scm.close()
+
+    return {
+        "path": file_content.path,
+        "content": file_content.content,
+        "size": file_content.size,
+        "repo": repo_full_name,
+        "ref": ref,
+        "provider": scm_type,
+    }
+
+
 # ---- Session / identity ----
 
 
@@ -952,17 +1156,31 @@ async def get_usage(
 
 
 _STATUS_TO_STAGE: dict[str, str] = {
-    "queued": "code",
-    "planning": "code",
+    "queued": "jira",
+    "planning": "jira",
     "running": "code",
     "coding": "code",
-    "testing": "review",
+    "testing": "code",
     "pr_created": "review",
+    "reviewing": "review",
+    "review_passed": "deploy",
     "review_failed": "review",
+    "deploying": "deploy",
     "deploy_failed": "deploy",
-    "completed": "monitor",
-    "failed": "monitor",
-    "cancelled": "monitor",
+    "deployed": "monitor",
+    "monitoring": "monitor",
+    "completed": "deploy",    # coding agent done = PR ready for review/deploy
+    "failed": "code",         # failed stays at code stage (not monitor)
+    "cancelled": "code",
+}
+
+# Per-agent stage override: coding agent "completed" means PR opened (review stage),
+# workflow agent "completed" means full pipeline done (monitor stage).
+_AGENT_COMPLETED_STAGE: dict[str, str] = {
+    "coding": "review",
+    "review": "review",
+    "devops": "monitor",
+    "workflow": "monitor",
 }
 
 _STATUS_TO_STAGE_STATUS: dict[str, str] = {
@@ -972,8 +1190,13 @@ _STATUS_TO_STAGE_STATUS: dict[str, str] = {
     "coding": "active",
     "testing": "active",
     "pr_created": "active",
+    "reviewing": "active",
+    "review_passed": "passed",
     "review_failed": "failed",
+    "deploying": "active",
     "deploy_failed": "failed",
+    "deployed": "passed",
+    "monitoring": "active",
     "completed": "passed",
     "failed": "failed",
     "cancelled": "cancelled",
@@ -1031,6 +1254,13 @@ async def list_pipeline_runs(
         additions: int | None = output.get("additions")
         deletions: int | None = output.get("deletions")
 
+        # Determine pipeline stage — completed tasks use per-agent mapping
+        # so a coding agent stops at "review" while a workflow agent reaches "monitor".
+        if t.status in ("completed", "failed", "cancelled"):
+            stage = _AGENT_COMPLETED_STAGE.get(t.agent_type, _STATUS_TO_STAGE.get(t.status, "code"))
+        else:
+            stage = _STATUS_TO_STAGE.get(t.status, "code")
+
         runs.append(PipelineRunResponse(
             id=str(t.id),
             jira_key=t.jira_key or "",
@@ -1038,7 +1268,7 @@ async def list_pipeline_runs(
             repo=t.input_data.get("repo_full_name", ""),
             branch=t.input_data.get("branch", f"agent/{t.jira_key or t.id}"),
             agent=t.agent_type,
-            stage=_STATUS_TO_STAGE.get(t.status, "code"),
+            stage=stage,
             stage_status=_STATUS_TO_STAGE_STATUS.get(t.status, "running"),
             pr_url=output.get("pr_url"),
             pr_number=output.get("pr_number"),

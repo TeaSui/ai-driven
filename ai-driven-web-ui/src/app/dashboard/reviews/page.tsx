@@ -45,57 +45,6 @@ type QueueTab = 'all' | 'awaiting' | 'completed'
 /** Tab for the detail panel */
 type ReviewTab = 'conversation' | 'review' | 'commits' | 'checks'
 
-// ── Static data (matches design) ──────────────────────────────────────────────
-
-const REVIEW_COMMENTS: ReviewComment[] = [
-  {
-    line: 47,
-    severity: 'warn',
-    title: 'Potential nil deref',
-    body: 'If `c.loader` is nil (possible during tests with a zero-value cache), this will panic. Consider a guard or documented precondition.',
-    confidence: 82,
-    category: 'safety',
-  },
-  {
-    line: 53,
-    severity: 'info',
-    title: 'Consider context cancellation',
-    body: "`singleflight.Do` doesn't respect `ctx`. If the caller cancels, the in-flight call still completes. Use `DoChan` + `select` if cancellation matters here.",
-    confidence: 91,
-    category: 'correctness',
-    suggestion:
-      'ch := c.sf.DoChan(accountID, fn)\nselect {\ncase <-ctx.Done(): return nil, ctx.Err()\ncase r := <-ch: return r.Val.(*Balance), r.Err\n}',
-  },
-  {
-    line: 57,
-    severity: 'nit',
-    title: 'Consider typed return',
-    body: 'The `interface{}` to `*Balance` assertion is safe but noisy. Since Go 1.21, `singleflight` has generic variants.',
-    confidence: 68,
-    category: 'style',
-  },
-]
-
-const DIFF_LINES: { n: number; t: string; add?: boolean; comment?: ReviewComment }[] = [
-  { n: 42, t: 'func (c *BalanceCache) Get(ctx context.Context, accountID string) (*Balance, error) {' },
-  { n: 43, t: '\tv, err, _ := c.sf.Do(accountID, func() (interface{}, error) {', add: true },
-  { n: 44, t: '\t\tif v, ok := c.m.Load(accountID); ok {', add: true },
-  { n: 45, t: '\t\t\treturn v.(*Balance), nil', add: true },
-  { n: 46, t: '\t\t}', add: true },
-  { n: 47, t: '\t\tb, err := c.loader.Load(ctx, accountID)', add: true, comment: REVIEW_COMMENTS[0] },
-  { n: 48, t: '\t\tif err != nil {', add: true },
-  { n: 49, t: '\t\t\treturn nil, err', add: true },
-  { n: 50, t: '\t\t}', add: true },
-  { n: 51, t: '\t\tc.m.Store(accountID, b)', add: true },
-  { n: 52, t: '\t\treturn b, nil', add: true },
-  { n: 53, t: '\t})', add: true, comment: REVIEW_COMMENTS[1] },
-  { n: 54, t: '\tif err != nil {', add: true },
-  { n: 55, t: '\t\treturn nil, err', add: true },
-  { n: 56, t: '\t}', add: true },
-  { n: 57, t: '\treturn v.(*Balance), nil', add: true, comment: REVIEW_COMMENTS[2] },
-  { n: 58, t: '}', add: true },
-]
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function toLocalSeverity(severity: string): Severity {
@@ -401,12 +350,30 @@ function InlineComment({ c }: { c: ReviewComment }) {
 
 function FileReviewBlock({ review }: { review?: ReviewDetail }) {
   const apiFile = review?.files[0]
-  const filePath = apiFile?.path ?? 'internal/cache/balance.go'
-  const additions = apiFile?.additions ?? 17
-  const deletions = apiFile?.deletions ?? 17
-  const diffLines =
-    apiFile && apiFile.comments.length > 0 ? mapApiComments(apiFile) : DIFF_LINES
-  const commentCount = apiFile ? apiFile.comments.length : REVIEW_COMMENTS.length
+  if (!apiFile) {
+    return (
+      <div
+        style={{
+          background: 'var(--bg-elev)',
+          border: '1px dashed var(--panel-border)',
+          borderRadius: 12,
+          padding: '40px 20px',
+          textAlign: 'center',
+          color: 'var(--text-faint)',
+          fontSize: 13,
+        }}
+      >
+        Select a review from the queue to see the PR diff and AI comments. Review
+        file contents and comments are pulled from the live GitHub API — nothing
+        is rendered until a real review is open.
+      </div>
+    )
+  }
+  const filePath = apiFile.path
+  const additions = apiFile.additions
+  const deletions = apiFile.deletions
+  const diffLines = mapApiComments(apiFile)
+  const commentCount = apiFile.comments.length
 
   return (
     <div
@@ -984,10 +951,10 @@ export default function ReviewsPage() {
 
   // ── Detail panel ─────────────────────────────────────────────────────────────
 
-  const repoLabel = selectedReview ? selectedReview.repo : 'go-tyme/ledger-core'
+  const repoLabel = selectedReview ? selectedReview.repo : '—'
   const prLabel = selectedReview
     ? `PR #${selectedReview.prNumber} — ${selectedReview.title}`
-    : 'PR #2419 — fix(ledger): guard BalanceCache.Get() with singleflight'
+    : 'No review selected'
   const prUrl = selectedReview?.prUrl
 
   const detailTabs: {
@@ -1145,7 +1112,7 @@ export default function ReviewsPage() {
                     {prLabel}
                   </h1>
                   <span style={{ fontSize: 12.5, color: 'var(--text-subtle)' }}>
-                    fix(ledger): guard BalanceCache.Get() with singleflight
+                    {selectedReview ? (selectedReview.jiraKey ?? repoLabel) : 'Select a review from the queue'}
                   </span>
                 </div>
               </div>

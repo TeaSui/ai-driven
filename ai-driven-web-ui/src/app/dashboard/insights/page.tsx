@@ -456,7 +456,10 @@ function Heatmap({ heatmap }: { heatmap?: InsightsData['heatmap'] }) {
                   flex: 1,
                   height: 18,
                   borderRadius: 2,
-                  background: `rgba(134,184,190,${0.08 + v * 0.9})`,
+                  // Round alpha to 3 decimals so server- and client-rendered
+                  // strings match exactly (avoids Next.js hydration mismatch on
+                  // float serialization across platforms).
+                  background: `rgba(134,184,190,${(0.08 + v * 0.9).toFixed(3)})`,
                 }}
               />
             )

@@ -53,9 +53,14 @@ You are an expert code evaluator. Grade the AI agent's output on a specific dime
 
 <instructions>
 1. Analyze the task input (what was asked) and the agent output (what was produced).
-2. Grade on the specified dimension using a 1-10 scale.
-3. Provide specific reasoning, strengths, and weaknesses.
-4. Be rigorous — avoid defaulting to mid-range scores. Use the full scale.
+2. The agent output may include a "Tool Execution Evidence" section at the end showing
+   actual tool calls and their results (files written, PRs created, tests run, etc.).
+   This evidence is critical — it shows what the agent actually DID, not just what it said.
+   Weight tool evidence heavily: an agent that created real files, passed tests, and opened
+   a PR deserves high scores even if its text summary is brief.
+3. Grade on the specified dimension using a 1-10 scale.
+4. Provide specific reasoning, strengths, and weaknesses.
+5. Be rigorous — avoid defaulting to mid-range scores. Use the full scale.
 </instructions>
 
 <scale>
@@ -112,18 +117,26 @@ class TaskGrader:
         user_message = (
             f"<dimension>{dimension}: {description}</dimension>\n\n"
             f"<task_input>\n{task_input[:3000]}\n</task_input>\n\n"
-            f"<agent_output>\n{agent_output[:5000]}\n</agent_output>"
+            f"<agent_output>\n{agent_output[:8000]}\n</agent_output>"
         )
 
+        # Use prefill + stop_sequences for reliable structured JSON output
+        # per Claude API best practice (avoids brittle markdown extraction).
         response = await self._provider.create_message(
             model=model,
             max_tokens=1024,
-            messages=[{"role": "user", "content": user_message}],
+            messages=[
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": "```json\n{"},
+            ],
             system=GRADER_SYSTEM_PROMPT,
             temperature=0.0,
+            stop_sequences=["```"],
         )
 
-        return self._parse_grade(response.text, dimension, model)
+        # The prefill started with "{", so prepend it to the response text
+        raw_json = "{" + response.text
+        return self._parse_grade(raw_json, dimension, model)
 
     async def grade_all(
         self,
@@ -148,25 +161,33 @@ class TaskGrader:
 
     @staticmethod
     def _parse_grade(text: str, dimension: str, model: str) -> EvalResult:
-        """Parse the grader's JSON response."""
-        # Extract JSON from response (handle markdown code blocks)
-        json_str = text.strip()
-        if "```json" in json_str:
-            json_str = json_str.split("```json")[1].split("```")[0].strip()
-        elif "```" in json_str:
-            json_str = json_str.split("```")[1].split("```")[0].strip()
+        """Parse the grader's JSON response.
 
+        Primary path: text is clean JSON from prefill + stop_sequences.
+        Fallback: extract from markdown code blocks (legacy/non-prefill callers).
+        """
+        json_str = text.strip()
+
+        # Try direct parse first (prefill path produces clean JSON)
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            return EvalResult(
-                dimension=dimension,
-                score=5,
-                reasoning=f"Failed to parse grader response: {text[:200]}",
-                strengths=[],
-                weaknesses=["Grader response was not valid JSON"],
-                grader_model=model,
-            )
+            # Fallback: extract from markdown code blocks
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                return EvalResult(
+                    dimension=dimension,
+                    score=5,
+                    reasoning=f"Failed to parse grader response: {text[:200]}",
+                    strengths=[],
+                    weaknesses=["Grader response was not valid JSON"],
+                    grader_model=model,
+                )
 
         return EvalResult(
             dimension=dimension,

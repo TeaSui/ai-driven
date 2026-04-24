@@ -25,11 +25,15 @@ import {
   pauseTask,
   resumeTask,
   stopTask,
+  respondToTask,
+  extractPendingQuestion,
+  getTaskFile,
+  getTaskDiff,
 } from '@/lib/api'
-import type { AgentEvent, TaskEvaluation } from '@/lib/api'
+import type { AgentEvent, TaskEvaluation, PendingQuestion } from '@/lib/api'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'coding', 'planning', 'testing'])
+const ACTIVE_STATUSES = new Set(['queued', 'running', 'coding', 'planning', 'testing', 'awaiting_input'])
 const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === 'true'
 
 // ── Step types ────────────────────────────────────────────────────────────────
@@ -73,39 +77,6 @@ const DEMO_STEPS: AgentStep[] = [
   { kind: 'tool', t: 7300, name: 'github.openPR', args: 'fix/GTX-4829-ledger-race → main', result: 'PR #2419 opened' },
 ]
 
-// ── Diff lines ────────────────────────────────────────────────────────────────
-
-const DIFF_LINES: { n: number; t: string; add?: boolean; del?: boolean }[] = [
-  { n: 42, t: 'func (c *BalanceCache) Get(ctx context.Context, accountID string) (*Balance, error) {', del: true },
-  { n: 42, t: 'func (c *BalanceCache) Get(ctx context.Context, accountID string) (*Balance, error) {', add: true },
-  { n: 43, t: '\tif v, ok := c.m.Load(accountID); ok {', del: true },
-  { n: 43, t: '\tv, err, _ := c.sf.Do(accountID, func() (interface{}, error) {', add: true },
-  { n: 44, t: '\t\treturn v.(*Balance), nil', del: true },
-  { n: 44, t: '\t\tif v, ok := c.m.Load(accountID); ok {', add: true },
-  { n: 45, t: '\t}', del: true },
-  { n: 45, t: '\t\t\treturn v.(*Balance), nil', add: true },
-  { n: 46, t: '\tb, err := c.loader.Load(ctx, accountID)', del: true },
-  { n: 46, t: '\t\t}', add: true },
-  { n: 47, t: '\tif err != nil {', del: true },
-  { n: 47, t: '\t\tb, err := c.loader.Load(ctx, accountID)', add: true },
-  { n: 48, t: '\t\treturn nil, err', del: true },
-  { n: 48, t: '\t\tif err != nil {', add: true },
-  { n: 49, t: '\t}', del: true },
-  { n: 49, t: '\t\t\treturn nil, err', add: true },
-  { n: 50, t: '\tc.m.Store(accountID, b)', del: true },
-  { n: 50, t: '\t\t}', add: true },
-  { n: 51, t: '\treturn b, nil', del: true },
-  { n: 51, t: '\t\tc.m.Store(accountID, b)', add: true },
-  { n: 52, t: '}', del: true },
-  { n: 52, t: '\t\treturn b, nil', add: true },
-  { n: 53, t: '\t})', add: true },
-  { n: 54, t: '\tif err != nil {', add: true },
-  { n: 55, t: '\t\treturn nil, err', add: true },
-  { n: 56, t: '\t}', add: true },
-  { n: 57, t: '\treturn v.(*Balance), nil', add: true },
-  { n: 58, t: '}', add: true },
-]
-
 // ── FileTab ───────────────────────────────────────────────────────────────────
 
 function FileTab({
@@ -114,21 +85,28 @@ function FileTab({
   active,
   dirty,
   added,
+  onClick,
 }: {
   file: string
   dir: string
   active?: boolean
   dirty?: boolean
   added?: boolean
+  onClick?: () => void
 }) {
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={`View ${dir}/${file}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
         padding: '10px 14px',
         borderRight: '1px solid var(--panel-border)',
+        borderTop: 'none', borderLeft: 'none',
         background: active ? 'var(--bg)' : 'transparent',
         borderBottom: active ? '2px solid var(--accent-500)' : '2px solid transparent',
         fontSize: 12,
@@ -136,6 +114,7 @@ function FileTab({
         cursor: 'pointer',
         position: 'relative',
         marginBottom: -1,
+        font: 'inherit',
       }}
     >
       <FileCode size={11} />
@@ -160,76 +139,452 @@ function FileTab({
           }}
         />
       )}
-    </div>
+    </button>
   )
 }
 
-// ── CodeBlock ─────────────────────────────────────────────────────────────────
+// ── Real-work artifacts extractor ─────────────────────────────────────────────
+// Derive file edits + shell runs from the live event stream. No more hardcoded
+// balance.go / balance_test.go / "gh pr create --fill" demo content.
 
-function CodeBlock() {
+const FILE_WRITE_TOOLS = new Set([
+  'file.write', 'file_write', 'repo.write_file', 'repo_write_file', 'write_file',
+])
+const SHELL_TOOLS = new Set([
+  'sandbox.execute', 'sandbox_execute', 'shell.run', 'shell_run', 'sandbox.run_tests',
+])
+const GIT_BRANCH_TOOLS = new Set(['git.create_branch', 'git_create_branch', 'create_branch'])
+const PR_TOOLS = new Set([
+  'github.create_pr', 'github_create_pr', 'create_pr', 'scm.create_pr',
+  'bitbucket.create_pr', 'bitbucket.create_pull_request',
+])
+
+interface FileEdit { path: string; content: string; message?: string; branch?: string }
+interface ShellRun { command: string; exitCode?: number; stdout?: string; stderr?: string }
+
+function extractWorkArtifacts(events: AgentEvent[]): {
+  edits: FileEdit[]; runs: ShellRun[]; branch?: string; prNumber?: number; prUrl?: string
+} {
+  const edits: FileEdit[] = []
+  const runs: ShellRun[] = []
+  let branch: string | undefined
+  let prNumber: number | undefined
+  let prUrl: string | undefined
+  const pendingByName: Record<string, Record<string, unknown>> = {}
+
+  // Best-effort extraction of key=value from a JSON-ish string even if it's
+  // truncated mid-stream. Older tasks have input_data capped at 2000 chars by
+  // a now-fixed backend bug, so JSON.parse fails. We still want to surface at
+  // least the path so the file tab renders — and as much content as survived.
+  function salvage(raw: string): Record<string, unknown> {
+    const out: Record<string, unknown> = {}
+    // Match `"key": "value"` allowing escaped chars in value. Greedy so we
+    // pick up as much of a truncated string as possible when the closing
+    // quote isn't there.
+    for (const key of ['path', 'content', 'branch', 'commit_message', 'message', 'branch_name', 'command', 'args']) {
+      const m = raw.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)`, 's'))
+      if (m) {
+        try {
+          out[key] = JSON.parse(`"${m[1]}"`)
+        } catch {
+          out[key] = m[1].replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"')
+        }
+      }
+    }
+    return out
+  }
+
+  for (const e of events) {
+    const d = (e.data || {}) as Record<string, unknown>
+    const toolName = (d.tool || d.tool_name || d.name || '') as string
+    if (!toolName) continue
+    let input = (d.input_data || d.input || {}) as unknown
+    if (typeof input === 'string') {
+      try {
+        input = JSON.parse(input as string)
+      } catch {
+        input = salvage(input as string)
+      }
+    }
+    if (e.type === 'tool_call_start') {
+      pendingByName[toolName] = (input as Record<string, unknown>) ?? {}
+      continue
+    }
+    if (e.type !== 'tool_call_end') continue
+
+    const merged = { ...(pendingByName[toolName] || {}), ...(input as Record<string, unknown>) }
+    // result_data is emitted as a JSON string by the backend; parse if needed.
+    let resultRaw: unknown = d.result_data ?? d.result ?? {}
+    if (typeof resultRaw === 'string') {
+      try { resultRaw = JSON.parse(resultRaw as string) } catch { resultRaw = salvage(resultRaw as string) }
+    }
+    const result = (resultRaw || {}) as Record<string, unknown>
+
+    if (FILE_WRITE_TOOLS.has(toolName)) {
+      const p = (merged.path as string) || (result.path as string) || ''
+      const c = (merged.content as string) || ''
+      if (p) edits.push({
+        path: p, content: c,
+        message: (merged.commit_message || merged.message) as string | undefined,
+        branch: merged.branch as string | undefined,
+      })
+    } else if (SHELL_TOOLS.has(toolName)) {
+      runs.push({
+        command: (merged.command || merged.args || toolName) as string,
+        exitCode: result.exit_code as number | undefined,
+        stdout: result.stdout as string | undefined,
+        stderr: result.stderr as string | undefined,
+      })
+    } else if (GIT_BRANCH_TOOLS.has(toolName)) {
+      branch = (merged.branch_name || merged.branch || result.branch) as string | undefined
+    } else if (PR_TOOLS.has(toolName)) {
+      // GitHub uses pr_number/number, Bitbucket uses id
+      prNumber = (result.pr_number ?? result.number ?? result.id) as number | undefined
+      prUrl = (result.pr_url || result.html_url || result.url) as string | undefined
+    }
+  }
+  return { edits, runs, branch, prNumber, prUrl }
+}
+
+function splitDir(path: string): { dir: string; name: string } {
+  const i = path.lastIndexOf('/')
+  return i < 0 ? { dir: '', name: path } : { dir: path.slice(0, i), name: path.slice(i + 1) }
+}
+
+function RealCodeContent({ content }: { content: string | undefined | null }) {
+  const lines = (content ?? '').split('\n')
   return (
-    <div style={{ minWidth: 'max-content' }}>
-      {DIFF_LINES.map((l, i) => (
-        <div
-          key={i}
-          style={{
-            display: 'flex',
-            background: l.add
-              ? 'var(--diff-add-bg)'
-              : l.del
-                ? 'var(--diff-del-bg)'
-                : 'transparent',
-            borderLeft: `2px solid ${
-              l.add
-                ? 'var(--diff-add-line)'
-                : l.del
-                  ? 'var(--diff-del-line)'
-                  : 'transparent'
-            }`,
-          }}
-        >
-          <span
-            style={{
-              width: 48,
-              padding: '0 10px',
-              textAlign: 'right',
-              color: 'var(--text-faint)',
-              fontSize: 11,
-              userSelect: 'none',
-              flexShrink: 0,
-            }}
-          >
-            {l.n}
-          </span>
-          <span
-            style={{
-              width: 14,
-              textAlign: 'center',
-              color: l.add
-                ? 'var(--status-success)'
-                : l.del
-                  ? 'var(--status-danger)'
-                  : 'transparent',
-              flexShrink: 0,
-            }}
-          >
-            {l.add ? '+' : l.del ? '−' : ' '}
-          </span>
-          <span
-            style={{ flex: 1, color: 'var(--code-text)', whiteSpace: 'pre' }}
-          >
-            {l.t}
-          </span>
+    <div style={{ minWidth: 'max-content', padding: '8px 0' }}>
+      {lines.map((line, i) => (
+        <div key={i} style={{ display: 'flex' }}>
+          <span style={{
+            width: 48, padding: '0 10px', textAlign: 'right',
+            color: 'var(--text-faint)', fontSize: 11, userSelect: 'none', flexShrink: 0,
+          }}>{i + 1}</span>
+          <span style={{ flex: 1, color: 'var(--code-text)', whiteSpace: 'pre' }}>{line || '\u00a0'}</span>
         </div>
       ))}
-      <div style={{ height: 40 }} />
     </div>
   )
 }
+
+/**
+ * Fetches the file from GitHub via the backend and renders its full content.
+ * The event-stream `content` is kept as a fallback: older tasks had truncated
+ * content in their event log, but the backend's /file endpoint reads from
+ * GitHub using the repo + branch captured in the events. So live content is
+ * always correct, regardless of event-stream fidelity.
+ */
+function LiveFileContent({
+  taskId,
+  path,
+  fallback,
+}: {
+  taskId: string
+  path: string
+  fallback: string
+}) {
+  const { data, error, isLoading } = useSWR(
+    ['task-file', taskId, path],
+    () => getTaskFile(taskId, path),
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  )
+
+  if (isLoading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100%', color: 'var(--text-faint)', fontSize: 12.5,
+        padding: 32, gap: 8,
+      }}>
+        <Spinner size={12} />
+        Loading {path} from GitHub…
+      </div>
+    )
+  }
+  // If the live fetch failed (no token, branch deleted, private repo, etc.)
+  // fall back to whatever content the event stream captured — partial is
+  // better than blank.
+  if (error || !data) return <RealCodeContent content={fallback || ''} />
+  return <RealCodeContent content={data.content} />
+}
+
+/**
+ * Renders a GitHub-style unified diff with red/green line coloring.
+ * Parses the `patch` field (standard unified-diff format) into rows:
+ *   - hunk headers `@@ -a,b +c,d @@`  → blue bar
+ *   - context lines starting with ' ' → neutral
+ *   - additions starting with '+'     → green
+ *   - deletions starting with '-'     → red
+ */
+type DiffRow =
+  | { kind: 'hunk'; text: string }
+  | { kind: 'ctx' | 'add' | 'del'; oldNo: number | null; newNo: number | null; text: string }
+
+function parsePatch(patch: string): DiffRow[] {
+  const rows: DiffRow[] = []
+  let oldNo = 0
+  let newNo = 0
+  for (const raw of patch.split('\n')) {
+    if (raw.startsWith('@@')) {
+      const m = raw.match(/@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/)
+      if (m) { oldNo = parseInt(m[1], 10); newNo = parseInt(m[2], 10) }
+      rows.push({ kind: 'hunk', text: raw })
+      continue
+    }
+    if (raw.startsWith('+') && !raw.startsWith('+++')) {
+      rows.push({ kind: 'add', oldNo: null, newNo: newNo++, text: raw.slice(1) })
+    } else if (raw.startsWith('-') && !raw.startsWith('---')) {
+      rows.push({ kind: 'del', oldNo: oldNo++, newNo: null, text: raw.slice(1) })
+    } else if (raw.startsWith(' ')) {
+      rows.push({ kind: 'ctx', oldNo: oldNo++, newNo: newNo++, text: raw.slice(1) })
+    } else if (raw === '') {
+      rows.push({ kind: 'ctx', oldNo: null, newNo: null, text: '' })
+    }
+    // Silently drop diff headers like `diff --git`, `index ...`, `+++ `, `--- `.
+  }
+  return rows
+}
+
+function DiffRenderer({ rows }: { rows: DiffRow[] }) {
+  return (
+    <div style={{ minWidth: 'max-content', padding: '8px 0' }}>
+      {rows.map((r, i) => {
+        if (r.kind === 'hunk') {
+          return (
+            <div key={i} style={{
+              padding: '4px 12px', fontSize: 11.5,
+              background: 'var(--diff-hunk-bg, rgba(56,139,253,0.12))',
+              color: 'var(--diff-hunk-fg, #58a6ff)', whiteSpace: 'pre',
+            }}>{r.text}</div>
+          )
+        }
+        const bg =
+          r.kind === 'add' ? 'var(--diff-add-bg, rgba(46,160,67,0.15))' :
+          r.kind === 'del' ? 'var(--diff-del-bg, rgba(248,81,73,0.15))' :
+          'transparent'
+        const leftBar =
+          r.kind === 'add' ? 'var(--diff-add-line, rgb(46,160,67))' :
+          r.kind === 'del' ? 'var(--diff-del-line, rgb(248,81,73))' :
+          'transparent'
+        const sign = r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' '
+        const signColor =
+          r.kind === 'add' ? 'var(--status-success, rgb(46,160,67))' :
+          r.kind === 'del' ? 'var(--status-danger, rgb(248,81,73))' :
+          'var(--text-faint)'
+        return (
+          <div key={i} style={{
+            display: 'flex', background: bg,
+            borderLeft: `2px solid ${leftBar}`,
+          }}>
+            <span style={{
+              width: 44, padding: '0 8px', textAlign: 'right',
+              color: 'var(--text-faint)', fontSize: 11, userSelect: 'none', flexShrink: 0,
+            }}>{r.oldNo ?? ''}</span>
+            <span style={{
+              width: 44, padding: '0 8px', textAlign: 'right',
+              color: 'var(--text-faint)', fontSize: 11, userSelect: 'none', flexShrink: 0,
+            }}>{r.newNo ?? ''}</span>
+            <span style={{
+              width: 14, color: signColor, flexShrink: 0, textAlign: 'center',
+              userSelect: 'none',
+            }}>{sign}</span>
+            <span style={{ flex: 1, color: 'var(--code-text)', whiteSpace: 'pre' }}>
+              {r.text || '\u00a0'}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Preferred code-pane renderer: shows the PR diff with red/green coloring.
+ * Falls back to full-file view if the task has no PR yet (e.g. still running)
+ * or if the diff endpoint returns 404.
+ */
+function LiveFileDiff({
+  taskId,
+  path,
+  fallback,
+}: {
+  taskId: string
+  path: string
+  fallback: string
+}) {
+  const { data, error, isLoading } = useSWR(
+    ['task-diff', taskId, path],
+    () => getTaskDiff(taskId, path),
+    { revalidateOnFocus: false, shouldRetryOnError: false },
+  )
+
+  if (isLoading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100%', color: 'var(--text-faint)', fontSize: 12.5,
+        padding: 32, gap: 8,
+      }}>
+        <Spinner size={12} />
+        Loading diff…
+      </div>
+    )
+  }
+  if (error || !data || !data.patch) {
+    // No PR yet, or the file isn't in the PR (e.g. still streaming).
+    return <LiveFileContent taskId={taskId} path={path} fallback={fallback} />
+  }
+  const rows = parsePatch(data.patch)
+  return <DiffRenderer rows={rows} />
+}
+
+// ── ClarificationCard ────────────────────────────────────────────────────────
+//
+// Renders when the agent invoked `human.ask_clarification` and hasn't received
+// an answer yet. The UI shows the question, any offered options as quick
+// buttons, and a free-text reply field. Submitting calls
+// POST /api/chat/tasks/{id}/respond, which resolves the agent's pending future.
+
+function ClarificationCard({
+  taskId,
+  events,
+  taskStatus,
+}: {
+  taskId: string
+  events: AgentEvent[]
+  taskStatus?: string
+}) {
+  const pending: PendingQuestion | null = useMemo(
+    () => extractPendingQuestion(events, taskStatus), [events, taskStatus],
+  )
+  const [answer, setAnswer] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // Clear local draft whenever a new question arrives or the current one is answered.
+  useEffect(() => { setAnswer(''); setError(null) }, [pending?.question])
+
+  if (!pending) return null
+
+  const submit = async (value: string) => {
+    const trimmed = value.trim()
+    if (!trimmed) { setError('Please enter a reply.'); return }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await respondToTask(taskId, trimmed)
+      setAnswer('')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to send reply')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-live="polite"
+      style={{
+        margin: '12px 20px 0',
+        padding: '14px 16px',
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--brand-teal-200)',
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <Pill tone="warn" size="xs" dot>Awaiting your input</Pill>
+        <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
+          The agent paused to ask you a question.
+        </span>
+      </div>
+      <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>
+        {pending.question}
+      </div>
+      {pending.context && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+          {pending.context}
+        </div>
+      )}
+
+      {pending.options && pending.options.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {pending.options.map((opt) => (
+            <Btn
+              key={opt}
+              size="sm"
+              tone="brand"
+              disabled={submitting}
+              onClick={() => submit(opt)}
+            >
+              {opt}
+            </Btn>
+          ))}
+        </div>
+      )}
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); submit(answer) }}
+        style={{ display: 'flex', gap: 8 }}
+      >
+        <input
+          type="text"
+          value={answer}
+          onChange={(e) => setAnswer(e.target.value)}
+          placeholder="Type your reply…"
+          disabled={submitting}
+          autoFocus
+          aria-label="Reply to agent question"
+          style={{
+            flex: 1,
+            padding: '8px 10px',
+            fontSize: 13,
+            border: '1px solid var(--border)',
+            borderRadius: 6,
+            background: 'var(--bg)',
+            color: 'var(--text)',
+            outline: 'none',
+          }}
+        />
+        <Btn type="submit" tone="brand" size="sm" disabled={submitting || !answer.trim()}>
+          {submitting ? 'Sending…' : 'Send'}
+        </Btn>
+      </form>
+      {error && (
+        <div style={{ marginTop: 6, fontSize: 12, color: 'var(--status-danger)' }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 // ── MainCodePane ──────────────────────────────────────────────────────────────
 
-function MainCodePane() {
+function MainCodePane({ events, taskId }: { events: AgentEvent[]; taskId: string }) {
+  const { edits, branch, prNumber, prUrl } = useMemo(
+    () => extractWorkArtifacts(events), [events],
+  )
+  // Deduplicate by path — if the agent writes the same file twice, keep only
+  // the latest content for that path. Preserve the order of first appearance.
+  const uniqueEdits = useMemo(() => {
+    const map = new Map<string, FileEdit>()
+    const order: string[] = []
+    for (const e of edits) {
+      if (!map.has(e.path)) order.push(e.path)
+      map.set(e.path, e)
+    }
+    return order.map((p) => map.get(p)!)
+  }, [edits])
+
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  // Auto-select the most recently written file until the user picks one.
+  const effectivePath = selectedPath ?? uniqueEdits[uniqueEdits.length - 1]?.path ?? null
+  const selected = uniqueEdits.find((e) => e.path === effectivePath)
+
   return (
     <div
       style={{
@@ -240,7 +595,7 @@ function MainCodePane() {
         overflow: 'hidden',
       }}
     >
-      {/* File tabs */}
+      {/* File tabs — each tab is a button; clicking swaps the code pane */}
       <div
         style={{
           display: 'flex',
@@ -248,30 +603,49 @@ function MainCodePane() {
           borderBottom: '1px solid var(--panel-border)',
           background: 'var(--panel)',
           paddingLeft: 8,
+          overflowX: 'auto',
         }}
       >
-        <FileTab file="balance.go" dir="internal/cache" active dirty />
-        <FileTab file="balance_test.go" dir="internal/cache" added />
+        {uniqueEdits.length > 0 ? uniqueEdits.map((e) => {
+          const { dir, name } = splitDir(e.path)
+          return (
+            <FileTab
+              key={e.path}
+              file={name}
+              dir={dir}
+              active={e.path === effectivePath}
+              dirty
+              onClick={() => setSelectedPath(e.path)}
+            />
+          )
+        }) : (
+          <div style={{ padding: '10px 14px', fontSize: 12, color: 'var(--text-faint)' }}>
+            No files written yet
+          </div>
+        )}
         <div style={{ flex: 1 }} />
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '0 12px',
-            fontSize: 11.5,
-            color: 'var(--text-subtle)',
-          }}
-        >
-          <span className="gtx-mono">main</span>
-          <ArrowRight size={10} />
-          <span className="gtx-mono" style={{ color: 'var(--accent-600)' }}>
-            fix/GTX-4829-ledger-race
-          </span>
-        </div>
+        {(branch || prUrl) && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '0 12px', fontSize: 11.5, color: 'var(--text-subtle)',
+            whiteSpace: 'nowrap',
+          }}>
+            <span className="gtx-mono">main</span>
+            <ArrowRight size={10} />
+            {prUrl ? (
+              <a href={prUrl} target="_blank" rel="noreferrer"
+                 className="gtx-mono"
+                 style={{ color: 'var(--accent-600)', textDecoration: 'none' }}>
+                {branch ?? 'branch'}{prNumber ? ` · PR #${prNumber}` : ''}
+              </a>
+            ) : (
+              <span className="gtx-mono" style={{ color: 'var(--accent-600)' }}>{branch}</span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Diff view */}
+      {/* Code view — shows whichever file tab is currently selected */}
       <div
         style={{
           flex: 1,
@@ -282,7 +656,22 @@ function MainCodePane() {
           lineHeight: 1.65,
         }}
       >
-        <CodeBlock />
+        {!selected ? (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: '100%', color: 'var(--text-faint)', fontSize: 12.5,
+            padding: 32, textAlign: 'center',
+          }}>
+            The agent hasn&apos;t written any files yet. File contents will
+            appear here as the workflow runs.
+          </div>
+        ) : (
+          <LiveFileDiff
+            taskId={taskId}
+            path={selected.path}
+            fallback={selected.content}
+          />
+        )}
       </div>
 
       {/* Terminal strip */}
@@ -306,13 +695,23 @@ function MainCodePane() {
           <Terminal size={12} />
           Terminal
           <span style={{ color: 'var(--text-faint)' }}>·</span>
-          <span className="gtx-mono" style={{ fontSize: 11 }}>
-            sandbox-e4c9
-          </span>
-          <div style={{ flex: 1 }} />
-          <Pill tone="success" size="xs" dot>
-            PASS
-          </Pill>
+          {(() => {
+            const { runs } = extractWorkArtifacts(events)
+            const latest = runs[runs.length - 1]
+            return (
+              <>
+                <span className="gtx-mono" style={{ fontSize: 11 }}>
+                  {runs.length > 0 ? `${runs.length} commands` : 'idle'}
+                </span>
+                <div style={{ flex: 1 }} />
+                {latest?.exitCode != null && (
+                  <Pill tone={latest.exitCode === 0 ? 'success' : 'danger'} size="xs" dot>
+                    {latest.exitCode === 0 ? 'PASS' : `exit ${latest.exitCode}`}
+                  </Pill>
+                )}
+              </>
+            )
+          })()}
         </div>
         <div
           className="gtx-mono"
@@ -321,44 +720,38 @@ function MainCodePane() {
             fontSize: 11.5,
             lineHeight: 1.7,
             color: 'var(--text-muted)',
-            maxHeight: 140,
+            maxHeight: 160,
             overflow: 'auto',
           }}
         >
-          <div>
-            <span style={{ color: 'var(--accent-500)' }}>$</span> go test -race
-            ./internal/cache/...
-          </div>
-          <div style={{ color: 'var(--text-subtle)' }}>
-            ok&nbsp;&nbsp;internal/cache&nbsp;&nbsp;0.842s{' '}
-            <span style={{ color: 'var(--status-success)' }}>(-race)</span>
-          </div>
-          <div>
-            <span style={{ color: 'var(--accent-500)' }}>$</span> go test ./...
-          </div>
-          <div style={{ color: 'var(--text-subtle)' }}>
-            ok&nbsp;&nbsp;./...{' '}
-            <span style={{ color: 'var(--status-success)' }}>312/312 tests</span>
-          </div>
-          <div>
-            <span style={{ color: 'var(--accent-500)' }}>$</span> git commit -m
-            &quot;fix(ledger): guard BalanceCache.Get() with singleflight&quot;
-          </div>
-          <div style={{ color: 'var(--text-subtle)' }}>
-            [fix/GTX-4829-ledger-race a3f21c8] fix(ledger)...
-          </div>
-          <div>
-            <span style={{ color: 'var(--accent-500)' }}>$</span> gh pr create
-            --fill
-            <span
-              style={{
-                animation: 'gtx-blink 1s step-end infinite',
-                marginLeft: 2,
-              }}
-            >
-              ▋
-            </span>
-          </div>
+          {(() => {
+            const { runs } = extractWorkArtifacts(events)
+            if (runs.length === 0) {
+              return (
+                <div style={{ color: 'var(--text-faint)' }}>
+                  No shell commands executed yet.
+                </div>
+              )
+            }
+            return runs.slice(-6).map((r, i) => (
+              <div key={i}>
+                <div>
+                  <span style={{ color: 'var(--accent-500)' }}>$</span>{' '}
+                  {r.command}
+                </div>
+                {r.stdout && (
+                  <div style={{ color: 'var(--text-subtle)', whiteSpace: 'pre-wrap' }}>
+                    {r.stdout.split('\n').slice(0, 3).join('\n')}
+                  </div>
+                )}
+                {r.stderr && (
+                  <div style={{ color: 'var(--status-danger)', whiteSpace: 'pre-wrap' }}>
+                    {r.stderr.split('\n').slice(0, 2).join('\n')}
+                  </div>
+                )}
+              </div>
+            ))
+          })()}
         </div>
       </div>
     </div>
@@ -366,6 +759,144 @@ function MainCodePane() {
 }
 
 // ── StepCard ──────────────────────────────────────────────────────────────────
+
+// ── ToolStepCard ─────────────────────────────────────────────────────────────
+//
+// Replaces the raw `jira.get_issue ("{\"issue_key\": \"KAN-4\"}")` rendering
+// with a friendly, icon-tagged summary. Full raw JSON moves into a
+// collapsible "details" section — still auditable, no longer visual noise.
+
+const TOOL_ICONS: Record<string, string> = {
+  jira: '🎫', github: '🐙', git: '🌿', repo: '📁', file: '📝',
+  code: '🔍', sandbox: '🧪', shell: '💻', human: '💬',
+}
+
+function describeTool(name: string, rawArgs: string): { title: string; subtitle?: string } {
+  // Try to parse the args blob as JSON; if it's not JSON, use as-is.
+  let args: Record<string, unknown> = {}
+  if (typeof rawArgs === 'string') {
+    const s = rawArgs.trim()
+    if (s.startsWith('{')) {
+      try { args = JSON.parse(s) } catch { /* fallthrough */ }
+    }
+  }
+  const n = name.toLowerCase()
+  const short = (v: unknown, max = 60) => {
+    const s = String(v ?? '')
+    return s.length > max ? s.slice(0, max) + '…' : s
+  }
+  if (n === 'jira.get_issue')       return { title: `Read Jira ticket`, subtitle: short(args.issue_key) }
+  if (n === 'jira.add_comment')     return { title: `Comment on Jira`, subtitle: short(args.issue_key) }
+  if (n === 'jira.update_status' || n === 'jira.transition_issue')
+    return { title: `Move Jira ticket`, subtitle: `${args.issue_key ?? ''} → ${args.status ?? args.transition_name ?? ''}` }
+  if (n === 'repo.list_files')      return { title: `List files`, subtitle: short(args.path || args.repo_full_name) }
+  if (n === 'repo.read_file')       return { title: `Read file`, subtitle: short(args.path) }
+  if (n === 'code.search' || n === 'repo.search_code')
+    return { title: `Search code`, subtitle: short(args.query) }
+  if (n === 'file.write' || n === 'repo.write_file')
+    return { title: `Write file`, subtitle: short(args.path) }
+  if (n === 'git.create_branch')    return { title: `Create branch`, subtitle: short(args.branch_name || args.branch) }
+  if (n === 'github.create_pr' || n === 'bitbucket.create_pr' || n === 'bitbucket.create_pull_request')
+    return { title: `Open pull request`, subtitle: short(args.title) }
+  if (n === 'github.get_pr_diff' || n === 'bitbucket.get_pr_diff')
+    return { title: `Read PR diff`, subtitle: `#${args.pr_number ?? '?'}` }
+  if (n === 'github.post_pr_comment' || n === 'bitbucket.post_pr_comment')
+    return { title: `Comment on PR`, subtitle: `#${args.pr_number ?? '?'}` }
+  if (n === 'sandbox.execute' || n === 'shell.run')
+    return { title: `Run command`, subtitle: short(args.command || args.cmd) }
+  if (n === 'human.ask_clarification')
+    return { title: `Ask for clarification`, subtitle: short(args.question) }
+  // Fallback — just humanize the dotted name
+  const pretty = name.replace(/[_.]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return { title: pretty, subtitle: Object.keys(args).length ? short(JSON.stringify(args), 80) : short(rawArgs, 80) }
+}
+
+function ToolStepCard({ step }: { step: AgentStep }) {
+  const [expanded, setExpanded] = useState(false)
+  const toolName = step.name ?? ''
+  const { title, subtitle } = describeTool(toolName, step.args ?? '')
+  const domain = (toolName.split('.')[0] ?? '').toLowerCase()
+  const icon = TOOL_ICONS[domain] ?? '⚙️'
+  const hasResult = step.result !== undefined && step.result !== ''
+  const resultStr = typeof step.result === 'string' ? step.result : JSON.stringify(step.result, null, 2)
+  const resultPreview = resultStr
+    ? resultStr.length > 120 ? resultStr.slice(0, 120) + '…' : resultStr
+    : 'Running…'
+  return (
+    <div style={{
+      marginBottom: 8, padding: '8px 10px',
+      background: 'var(--bg-muted)', border: '1px solid var(--border)',
+      borderRadius: 6, animation: 'gtx-fadein .25s',
+    }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          border: 'none', background: 'transparent', padding: 0,
+          cursor: 'pointer', textAlign: 'left', font: 'inherit',
+        }}
+      >
+        <span style={{ fontSize: 13, width: 18, textAlign: 'center' }} aria-hidden>
+          {icon}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)', lineHeight: 1.3 }}>
+            {title}
+            {subtitle && (
+              <span className="gtx-mono" style={{
+                fontWeight: 400, color: 'var(--text-subtle)', fontSize: 11.5, marginLeft: 8,
+              }}>
+                {subtitle}
+              </span>
+            )}
+          </div>
+          {hasResult && (
+            <div style={{
+              fontSize: 11, color: 'var(--text-faint)', marginTop: 2,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              → {resultPreview}
+            </div>
+          )}
+        </div>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>
+          {expanded ? '▾' : '▸'}
+        </span>
+      </button>
+      {expanded && (
+        <div style={{
+          marginTop: 8, padding: 8, background: 'var(--code-bg)',
+          border: '1px solid var(--border)', borderRadius: 4,
+          fontFamily: 'Geist Mono, monospace', fontSize: 10.5, lineHeight: 1.45,
+          color: 'var(--text-muted)',
+        }}>
+          <div style={{
+            fontSize: 9.5, fontWeight: 600, color: 'var(--text-subtle)',
+            textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4,
+          }}>
+            Tool · {toolName}
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ color: 'var(--text-faint)' }}>input</div>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {step.args || '{}'}
+            </pre>
+          </div>
+          {hasResult && (
+            <div>
+              <div style={{ color: 'var(--text-faint)' }}>output</div>
+              <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {resultStr}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function StepCard({
   step,
@@ -422,46 +953,7 @@ function StepCard({
   }
 
   if (step.kind === 'tool') {
-    return (
-      <div style={{ marginBottom: 10, animation: 'gtx-fadein .25s' }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginBottom: 4,
-          }}
-        >
-          <Sparkles size={11} color="var(--accent-500)" />
-          <span
-            className="gtx-mono"
-            style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500 }}
-          >
-            {step.name}
-          </span>
-          <span
-            className="gtx-mono"
-            style={{ fontSize: 10.5, color: 'var(--text-subtle)' }}
-          >
-            ({step.args})
-          </span>
-        </div>
-        <div
-          style={{
-            marginLeft: 17,
-            fontSize: 11.5,
-            color: 'var(--text-subtle)',
-            padding: '4px 8px',
-            background: 'var(--bg-muted)',
-            borderRadius: 4,
-            border: '1px solid var(--border)',
-            fontFamily: 'Geist Mono, monospace',
-          }}
-        >
-          ← {step.result}
-        </div>
-      </div>
-    )
+    return <ToolStepCard step={step} />
   }
 
   if (step.kind === 'edit') {
@@ -1066,13 +1558,16 @@ export default function CodingAgentPage({
       const ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
-      // First-message auth: send API key immediately on open
+      // First-message auth: send token immediately on open.
+      // Send an empty-token auth frame even without credentials — in debug
+      // mode the backend accepts it; in prod it triggers 4401 which is handled
+      // in ws.onclose. Without this, backend waits 5s for the auth timeout,
+      // which creates a visible dead period on every task-detail page.
       ws.onopen = () => {
         const match = document.cookie.match(/(?:^|; )api_key=([^;]*)/)
-        const apiKey = match ? decodeURIComponent(match[1]) : null
-        if (apiKey) {
-          ws.send(JSON.stringify({ type: 'auth', token: apiKey }))
-        }
+        const envKey = process.env.NEXT_PUBLIC_DEV_API_KEY
+        const apiKey = match ? decodeURIComponent(match[1]) : envKey || ''
+        ws.send(JSON.stringify({ type: 'auth', token: apiKey }))
       }
 
       ws.onmessage = (ev) => {
@@ -1360,6 +1855,9 @@ export default function CodingAgentPage({
         </div>
       </div>
 
+      {/* Clarification dialog — renders only when agent invoked human.ask_clarification */}
+      <ClarificationCard taskId={id} events={allEvents} taskStatus={task?.status} />
+
       {/* Split pane */}
       <div
         style={{
@@ -1369,7 +1867,7 @@ export default function CodingAgentPage({
           minHeight: 0,
         }}
       >
-        <MainCodePane />
+        <MainCodePane events={allEvents} taskId={id} />
         <ThinkingPanel
           steps={visible}
           liveChar={isRealMode ? Infinity : liveChar}

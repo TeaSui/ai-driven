@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Claude
     claude_provider: ClaudeProviderType = ClaudeProviderType.ANTHROPIC
     claude_default_model: str = "claude-sonnet-4-6"
-    claude_planning_model: str = "claude-opus-4-6"
+    claude_planning_model: str = "claude-opus-4-7"  # bumped 2026-04-22 — see docs/implementation/09 §11
     claude_fast_model: str = "claude-haiku-4-5"
     claude_max_tokens: int = 4096
     claude_max_tool_iterations: int = 20
@@ -56,11 +56,19 @@ class Settings(BaseSettings):
     voyage_api_key: str = ""
 
     # Evaluation
-    evaluation_enabled: bool = False
+    # Default ON — in debug mode the Haiku grader is satisfied by MockProvider,
+    # in prod it's gated by the presence of a real Claude provider anyway.
+    evaluation_enabled: bool = True
 
-    # Bedrock
-    bedrock_model_id: str = "anthropic.claude-sonnet-4-6-v1"
-    bedrock_planning_model_id: str = "anthropic.claude-opus-4-6-v1"
+    # Bedrock — use cross-region inference profile IDs (`global.` prefix).
+    # Plain regional IDs (`anthropic.claude-sonnet-4-6`) only work on-demand
+    # in us-east-1/us-west-2; elsewhere (ap-southeast-1, eu-central-1, …)
+    # Anthropic 4.x models require an inference profile. `global.*` works in
+    # every region that has Bedrock Anthropic access.
+    # Override per-env via AI_DRIVEN_BEDROCK_MODEL_ID / AI_DRIVEN_BEDROCK_PLANNING_MODEL_ID.
+    bedrock_model_id: str = "global.anthropic.claude-sonnet-4-6"
+    bedrock_planning_model_id: str = "global.anthropic.claude-opus-4-7"
+    bedrock_fast_model_id: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
     # PostgreSQL
     postgres_host: str = "localhost"
@@ -116,7 +124,9 @@ class Settings(BaseSettings):
     # MCP
     mcp_enabled: bool = False
     mcp_github_enabled: bool = False
-    mcp_context7_enabled: bool = False
+    # Context7 needs no credentials; safe to enable by default so the
+    # "MCP integration" feature shows ≥1 active server out of the box.
+    mcp_context7_enabled: bool = True
     mcp_jira_enabled: bool = False
     mcp_slack_enabled: bool = False
     mcp_datadog_enabled: bool = False

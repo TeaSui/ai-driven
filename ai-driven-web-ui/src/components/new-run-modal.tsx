@@ -72,19 +72,33 @@ export function NewRunModal({ open, onClose }: NewRunModalProps) {
     }
   }, [open])
 
-  // Close on Escape + focus trap
+  // Stable ref for onClose so effects don't re-run on every parent render
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  // Focus the first meaningful input once when modal opens
+  useEffect(() => {
+    if (!open) return
+    const el = dialogRef.current?.querySelector<HTMLElement>(
+      '[role="radiogroup"] button, select, input:not([disabled]), textarea:not([disabled])'
+    )
+    el?.focus()
+  }, [open])
+
+  // Keyboard: Escape to close + Tab focus trap
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
-      // Focus trap: keep Tab/Shift+Tab inside the dialog
       if (e.key === 'Tab' && dialogRef.current) {
+        // Exclude the close button from the focus-trap cycle
         const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          '[role="radio"], select:not([disabled]), input:not([disabled]), textarea:not([disabled]), button[type="button"]:not([aria-label="Close"]):not([disabled])'
         )
+        if (!focusable.length) return
         const first = focusable[0]
         const last = focusable[focusable.length - 1]
         if (e.shiftKey && document.activeElement === first) {
@@ -97,13 +111,8 @@ export function NewRunModal({ open, onClose }: NewRunModalProps) {
       }
     }
     window.addEventListener('keydown', handler)
-    // Move focus into dialog on open
-    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-      'button:not([disabled]), input:not([disabled])'
-    )
-    firstFocusable?.focus()
     return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
+  }, [open])
 
   const handleSubmit = useCallback(async () => {
     if (!message.trim()) {

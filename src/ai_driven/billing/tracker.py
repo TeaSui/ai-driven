@@ -12,10 +12,13 @@ logger = logging.getLogger(__name__)
 # Claude model pricing (USD per 1K tokens) — as of 2025
 # These are approximate; update as pricing changes.
 _MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Anthropic Direct
+    "claude-opus-4-7": {"input": 0.015, "output": 0.075},
     "claude-opus-4-6": {"input": 0.015, "output": 0.075},
     "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
     "claude-haiku-4-5": {"input": 0.0008, "output": 0.004},
     # Bedrock model IDs
+    "anthropic.claude-opus-4-7-v1": {"input": 0.015, "output": 0.075},
     "anthropic.claude-opus-4-6-v1": {"input": 0.015, "output": 0.075},
     "anthropic.claude-sonnet-4-6-v1": {"input": 0.003, "output": 0.015},
     "anthropic.claude-haiku-4-5-v1": {"input": 0.0008, "output": 0.004},

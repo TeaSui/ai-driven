@@ -24,7 +24,7 @@ format:
 	ruff check --fix src/ tests/
 
 run:
-	uvicorn ai_driven.main:app --host 0.0.0.0 --port 8000 --reload
+	AI_DRIVEN_DEBUG=true uvicorn ai_driven.main:app --host 0.0.0.0 --port 8888 --reload
 
 docker-up:
 	cd docker && docker compose up -d

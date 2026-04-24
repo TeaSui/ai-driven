@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Save } from 'lucide-react'
 import { Btn } from '@/components/ui/btn'
+import { notify } from '@/lib/notify'
 
 type SeverityThreshold = 'suggestion' | 'warning' | 'critical'
 
@@ -212,7 +213,7 @@ export default function RulesPage() {
           tone="brand"
           size="sm"
           icon={<Save size={13} />}
-          onClick={() => window.alert('Settings saved.')}
+          onClick={() => notify('Settings saved.', 'success')}
         >
           Save changes
         </Btn>

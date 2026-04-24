@@ -1,125 +1,104 @@
 # Implementation Plan 08 — Auth, Session, Multi-Tenancy & WebSocket Authorization
 
 **Owner:** Backend + Security + Frontend
-**Severity:** P1 (security / cross-tenant leak) + P2 (no login UI)
+**Severity:** P1 (operator visibility) + P2 (UI login, session, API-key UI)
 **Estimated effort:** 3–5 days
 **Blocks:** second customer onboarding, GA launch
 
-> **Requires Security-engineer subagent review before merging.** Touches authentication, session management, and cross-tenant authorization — a trust boundary.
+> **Requires Security-engineer subagent review before merging.** Touches authentication and cross-tenant authorization.
 
-## Problem
+## What exists today (corrections to earlier draft)
 
-1. **Cross-tenant data leak on WebSocket.** `src/ai_driven/api/chat/router.py:303-315` accepts any `task_id` and subscribes to `task:{task_id}:events` without checking the caller's team owns that task. Anyone with a task ID sees the stream.
-2. **No login.** `AI_DRIVEN_DEBUG=true` is the current auth bypass. Production uses API keys per team (per `docs/architecture/01-database-er.md`), but there is no UI to create/rotate them and no login flow for humans.
-3. **No `middleware.ts`** in the Next.js app — no central hook to enforce auth on route navigation.
-4. **Hardcoded user** "Alex Chen · Platform · Manila" in `sidebar.tsx:335-344`.
-5. **Debug mode invisible to operators.** If `AI_DRIVEN_DEBUG=true` ever reaches prod, nothing in the UI surfaces the warning.
+Exploration of `src/ai_driven/` found more than the first review suggested:
 
-## Target architecture
+- [x] API-key middleware with Redis-cached team lookup — `src/ai_driven/auth/middleware.py`
+- [x] `get_team_id`, `require_task_access`, `require_role` — `src/ai_driven/dependencies.py`
+- [x] Rate limiting per team (chat_send + concurrent) — `src/ai_driven/auth/rate_limiter.py`
+- [x] Billing tracker with daily budget enforcement — `src/ai_driven/billing/tracker.py`
+- [x] **WebSocket first-message auth** with team-scoped task ownership check — `src/ai_driven/api/chat/router.py:408-466` (closes with 4404 on mismatch)
+- [x] Admin endpoints scoped by `team_id` (e.g. `/api/admin/tasks`, `/repos`, `/incidents`)
 
-```
-┌──────────────┐   SSO (OIDC)      ┌─────────────────┐
-│ Browser/User │ ────────────────▶ │  Identity Provider │
-└──────────────┘                   │  (Cognito / Auth0) │
-      │ session cookie             └─────────────────┘
-      ▼
-┌─────────────────────────────┐
-│ Next.js middleware.ts       │  — redirect unauthenticated → /login
-│ - validates JWT             │  — injects {userId, teamId, role} into request headers
-└─────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────┐
-│ FastAPI deps.py             │
-│ - get_current_user          │  — verifies JWT / API key
-│ - require_team_member       │  — enforces team scope
-└─────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────┐
-│ Resource access             │  — every repo/task/incident read joins on team_id
-└─────────────────────────────┘
-```
+## What's still missing
 
-## Implementation steps
+- [ ] Next.js `middleware.ts` — no central route guard; `/dashboard/*` is reachable without a session
+- [ ] Login / session flow in the UI (`alert()` stubs and hardcoded "Alex Chen")
+- [ ] API-key management UI (create / rotate / revoke)
+- [ ] Team switcher for users in >1 team
+- [ ] Debug-mode visual indicator — `settings.debug` bypasses auth at `auth/middleware.py:171`; nothing in UI surfaces that
+- [ ] `cancelled` terminal state — `/stop` sets `failed` (`api/chat/router.py` + UI successRate)
+- [ ] WebSocket client in the Next.js UI does **not** send the required `{"type":"auth","token":"..."}` first message (works today only because debug mode allows empty auth)
+- [ ] API-key rotation with grace period (`/teams/{id}/rotate-key` exists but no UI)
 
-### Phase 1 — Backend hardening (first, unblocks deploy) · ~1 day
+## Checklist
 
-1. **Add `team_id` to JWT claims** (issued at login).
-2. **New FastAPI dependency** `require_task_access(task_id)`:
-   ```python
-   async def require_task_access(task_id: str, user: User = Depends(current_user)):
-       task = await task_repo.get(task_id)
-       if task is None or task.team_id != user.team_id:
-           raise HTTPException(404)  # 404 not 403 — don't leak existence
-       return task
-   ```
-3. **Guard the WebSocket.** Replace the permissive handler at `api/chat/router.py:303` with:
-   ```python
-   @router.websocket("/stream/{task_id}")
-   async def stream(ws: WebSocket, task_id: str):
-       await ws.accept()
-       try:
-           user = await auth_from_ws(ws)  # token via query param or first message
-           task = await task_repo.get(task_id)
-           if task is None or task.team_id != user.team_id:
-               await ws.close(code=4404)
-               return
-           # ... existing pub/sub loop
-   ```
-4. **Guard every admin endpoint** with `require_team_member` — reviews, incidents, tasks, repos.
-5. **Add `cancelled` terminal state** (replaces current `stop → failed` conflation at `api/chat/router.py:291-293`).
+### Phase 1 — Backend corrections · ~½ day
+
+- [ ] Introduce `cancelled` task status enum value + DB CHECK
+- [ ] `POST /tasks/{id}/stop` sets `status='cancelled'`, not `failed` (`api/chat/router.py:291-293`)
+- [ ] `DashboardSummary.successRate` excludes `cancelled` from denominator (`api/admin/router.py`)
+- [ ] Extend `HealthResponse` in `src/ai_driven/api/health.py` with `debug: bool = settings.debug`
+- [ ] Unit test: stopping a task yields `status='cancelled'` and a `complete` event with `stopped=true`
 
 ### Phase 2 — Identity provider · ~1 day
 
-- Cognito User Pool per environment. Teams = Cognito groups with a `teamId` custom attribute.
-- API-key issuance remains for webhooks/CI (Jira, DataDog, GitHub) — stored hashed in `team_api_keys` table, rotate every 90 days.
+- [ ] Cognito User Pool per env (dev / staging / prod); `teamId` custom attribute
+- [ ] `users` table (id, email, team_id, role, created_at) — migration
+- [ ] `/api/auth/session` endpoint returns `{userId, teamId, role, email}` from validated JWT
+- [ ] Federation skeleton (SAML / OIDC) — spec only, not implemented
 
-### Phase 3 — Next.js integration · ~1 day
+### Phase 3 — Next.js middleware & pages · ~1 day
 
-1. `middleware.ts` at repo root:
-   ```ts
-   import { NextResponse, type NextRequest } from 'next/server'
-   import { verifyJwt } from '@/lib/auth/jwt'
+- [ ] `ai-driven-web-ui/middleware.ts` at repo root (not under `src/`), matches `/dashboard/:path*`
+- [ ] Cookie-stored session token, `verifyJwt()` helper in `src/lib/auth/`
+- [ ] Redirect unauthenticated to `/login`
+- [ ] `/login` page with Cognito Hosted UI redirect
+- [ ] `SessionProvider` context; `sidebar.tsx` reads `user.name`, `user.role`, `user.team`
+- [ ] Remove hardcoded "Alex Chen · Platform · Manila" (`src/components/layout/sidebar.tsx:335-344`)
+- [ ] Replace `alert()` on Settings button with router push to `/dashboard/admin/settings`
 
-   export async function middleware(req: NextRequest) {
-     if (req.nextUrl.pathname.startsWith('/dashboard')) {
-       const token = req.cookies.get('session')?.value
-       const user = token ? await verifyJwt(token) : null
-       if (!user) return NextResponse.redirect(new URL('/login', req.url))
-       const res = NextResponse.next()
-       res.headers.set('x-user-id', user.sub)
-       res.headers.set('x-team-id', user.teamId)
-       return res
-     }
-   }
-   export const config = { matcher: ['/dashboard/:path*'] }
-   ```
-2. `/login` page with Cognito Hosted UI redirect.
-3. `SessionProvider` context consumed by `sidebar.tsx` (replace "Alex Chen").
-4. Team switcher (if a user is in multiple teams).
-5. `/dashboard/admin/api-keys` — issue / rotate / revoke API keys per team.
+### Phase 4 — WebSocket client auth · ~2 h
 
-### Phase 4 — Operator visibility · ~½ day
+- [ ] `tasks/[id]/page.tsx` WebSocket: send `{"type":"auth","token": sessionApiKey}` as first message after `ws.onopen`
+- [ ] Handle close codes 4401 (bad auth) / 4404 (not yours) with visible error banner + SWR fallback
+- [ ] Env-configured API key for dev (`NEXT_PUBLIC_DEV_API_KEY`) and session-sourced key in prod
 
-- Extend `HealthResponse` in `api/health.py` with `debug: bool` sourced from `settings.debug`.
-- `dashboard/layout.tsx`: fetch `/health` once on mount; if `debug: true`, render a red sticky banner: **"Debug mode active — authentication is bypassed. Do not use in production."**
+### Phase 5 — API-key manager UI · ~½ day
+
+- [ ] `/dashboard/admin/api-keys` page lists existing keys (masked) with create/rotate/revoke
+- [ ] Wire to existing `POST /api/admin/teams/{id}/rotate-key`
+- [ ] Surface 7-day grace period clearly (old key still works until {date})
+- [ ] Copy-on-create modal (one-time reveal); keys never displayed after creation
+
+### Phase 6 — Debug banner · ~2 h
+
+- [ ] `dashboard/layout.tsx` fetches `/health` on mount
+- [ ] If `debug: true`, render red sticky top banner:
+      **"Debug mode active — authentication is bypassed. Do not use in production."**
+- [ ] Banner announces with `aria-live="assertive"` for screen readers
+- [ ] Click-to-dismiss disabled in prod (visible always) but allowed locally
+
+### Phase 7 — Observability & ops · ~½ day
+
+- [ ] DataDog alert: `ai_driven.auth.debug_mode_active` metric emitted by backend when `settings.debug=true` at boot
+- [ ] Cross-tenant probe integration test: `teamA` JWT hitting `teamB` IDs returns 404 (`tests/security/test_cross_tenant.py` already exists — extend with WS case)
+- [ ] API-key rotation runbook in `docs/runbooks/`
 
 ## Acceptance
 
-- [ ] A user with `teamA` JWT cannot fetch `/api/admin/tasks/{id}` for a task owned by `teamB` (404 returned).
-- [ ] A WebSocket connection to `/api/chat/stream/{id}` with a mismatched token closes with code 4404 before any event is sent.
-- [ ] Unauthenticated browser visits to `/dashboard/*` redirect to `/login`.
-- [ ] `AI_DRIVEN_DEBUG=true` causes a banner to render.
-- [ ] Stop button sets status to `cancelled`, not `failed`.
-- [ ] `successRate` metric in `/api/admin/dashboard` excludes `cancelled` tasks.
-- [ ] API-key rotation works without downtime (keys are additive; grace period 7 days).
+- [ ] `AI_DRIVEN_DEBUG=true` causes a red banner + a DataDog alert within 60 s
+- [ ] Unauthenticated visit to `/dashboard/overview` redirects to `/login`
+- [ ] Stop button sets task to `cancelled`; `successRate` excludes it
+- [ ] `teamA` cannot read `teamB`'s tasks / incidents / reviews / PR data (404, not 403)
+- [ ] WS with wrong token closes with `code=4401`; wrong `task_id` with `code=4404`
+- [ ] API-key rotation works without service interruption (additive, 7-day grace)
+- [ ] No `alert()` calls remain in production UI bundle
 
 ## Rollback
 
-- Feature flag `auth.enforce=false` leaves the new middleware in place but in log-only mode for 24 h, so ops can observe which requests would have been blocked before turning it on.
+- [ ] Feature flag `auth.enforce=false` leaves middleware in log-only mode for 24 h before enforcement flips on
 
-## Out of scope
+## Out of scope (backlog)
 
-- Fine-grained RBAC (admin vs viewer). Day-1 is **single role per team = member.** Promote to roles in a follow-up (`09-rbac.md`).
-- SSO federation with the customer's IdP — backlog.
+- Fine-grained RBAC beyond `member` role — tracked in a future `10-rbac.md`
+- SCIM provisioning
+- Enterprise SSO federation with customer IdPs

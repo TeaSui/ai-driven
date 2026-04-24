@@ -78,15 +78,15 @@ class JiraClient:
             key=data["key"],
             summary=fields.get("summary", ""),
             description=description,
-            status=fields.get("status", {}).get("name", ""),
-            issue_type=fields.get("issuetype", {}).get("name", ""),
-            priority=fields.get("priority", {}).get("name", ""),
-            assignee=fields.get("assignee", {}).get("displayName") if fields.get("assignee") else None,
-            reporter=fields.get("reporter", {}).get("displayName") if fields.get("reporter") else None,
+            status=(fields.get("status") or {}).get("name", ""),
+            issue_type=(fields.get("issuetype") or {}).get("name", ""),
+            priority=(fields.get("priority") or {}).get("name", ""),
+            assignee=(fields.get("assignee") or {}).get("displayName"),
+            reporter=(fields.get("reporter") or {}).get("displayName"),
             labels=fields.get("labels", []),
-            components=[c["name"] for c in fields.get("components", [])],
+            components=[c["name"] for c in (fields.get("components") or [])],
             acceptance_criteria=acceptance_criteria,
-            subtasks=[st["key"] for st in fields.get("subtasks", [])],
+            subtasks=[st["key"] for st in (fields.get("subtasks") or [])],
             comments=comments,
             url=f"{self._base_url}/browse/{data['key']}",
         )
@@ -134,11 +134,67 @@ class JiraClient:
 
     @_retry_policy
     async def transition_issue(self, issue_key: str, transition_name: str) -> None:
+        """Transition an issue using exact, fuzzy, or semantic name match.
+
+        The agent often asks for a common workflow state (e.g. "In Review")
+        that may not literally exist in the target project ("Start Progress",
+        "Done", etc.). We match in three passes:
+          1. Exact (case-insensitive)
+          2. Target-state name match (t.to.name)
+          3. Semantic alias — map common concepts to whichever transition
+             moves the issue in the right direction
+        """
         transitions = await self.get_transitions(issue_key)
-        transition = next((t for t in transitions if t.name.lower() == transition_name.lower()), None)
+
+        def find(predicate) -> JiraTransition | None:
+            return next((t for t in transitions if predicate(t)), None)
+
+        name_l = transition_name.lower().strip()
+
+        # 1. Exact transition-name match
+        transition = find(lambda t: t.name.lower() == name_l)
+
+        # 2. Target-state match — "In Review" matches transition that goes to "In Review"
         if not transition:
-            available = [t.name for t in transitions]
-            raise ValueError(f"Transition '{transition_name}' not found. Available: {available}")
+            transition = find(lambda t: getattr(t, "to_status", "").lower() == name_l)
+
+        # 3. Ordered fallback chains. Each chain is the preferred order when
+        # the requested state doesn't exist literally. E.g. asking for "In
+        # Review" on a project with only {Start Progress, Done} should pick
+        # Start Progress (forward motion) rather than failing.
+        if not transition:
+            chains = {
+                "in review":   ["review", "code review", "ready for review",
+                                "start progress", "start work", "begin progress",
+                                "in progress"],
+                "in progress": ["start progress", "start work", "begin progress",
+                                "progress", "in progress"],
+                "done":        ["done", "close", "closed", "resolve", "resolved",
+                                "complete"],
+                "to do":       ["open", "reopen", "back to to do", "to do", "backlog"],
+            }
+            candidates = chains.get(name_l, [])
+            for cand in candidates:
+                transition = find(lambda t, c=cand: (
+                    c == t.name.lower()
+                    or c == getattr(t, "to_status", "").lower()
+                ))
+                if transition:
+                    break
+            if not transition:  # looser contains-match as last resort
+                for cand in candidates:
+                    transition = find(lambda t, c=cand: (
+                        c in t.name.lower()
+                        or c in getattr(t, "to_status", "").lower()
+                    ))
+                    if transition:
+                        break
+
+        if not transition:
+            available = [f"{t.name} (→ {getattr(t,'to_status','?')})" for t in transitions]
+            raise ValueError(
+                f"Transition '{transition_name}' not found. Available: {available}"
+            )
 
         resp = await self._http.post(
             f"/issue/{issue_key}/transitions",

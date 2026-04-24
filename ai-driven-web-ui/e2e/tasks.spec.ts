@@ -74,7 +74,7 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: MOCK_TASKS }),
+        body: JSON.stringify({ tasks: MOCK_TASKS }),
       }),
     )
 
@@ -97,7 +97,7 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: MOCK_TASKS }),
+        body: JSON.stringify({ tasks: MOCK_TASKS }),
       }),
     )
 
@@ -106,7 +106,7 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: MOCK_TASKS[0] }),
+        body: JSON.stringify(MOCK_TASKS[0]),
       }),
     )
 
@@ -115,7 +115,14 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: [] }),
+        body: JSON.stringify([]),
+      }),
+    )
+    await page.route('/api/admin/tasks/task-abc/evaluations', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
       }),
     )
 
@@ -142,7 +149,7 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: MOCK_TASKS[0] }),
+        body: JSON.stringify(MOCK_TASKS[0]),
       }),
     )
 
@@ -150,7 +157,14 @@ test.describe('Tasks', () => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ data: [] }),
+        body: JSON.stringify([]),
+      }),
+    )
+    await page.route('/api/admin/tasks/task-abc/evaluations', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([]),
       }),
     )
 

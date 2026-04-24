@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-driven"
+version = "0.1.0"
+description = "AI-Driven Development Platform — Jira-to-merge SDLC automation on Claude."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "GoTyme-X Platform" }]
+
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "starlette>=0.36",
+  "anthropic>=0.34",
+  "boto3>=1.34",
+  "httpx>=0.27",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg>=0.29",
+  "alembic>=1.13",
+  "redis[hiredis]>=5.0",
+  "pgvector>=0.2",
+  "tenacity>=8.2",
+  "pyjwt[crypto]>=2.8",
+  "slack-bolt>=1.18",
+  "slack-sdk>=3.26",
+  "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "ruff>=0.4",
+  "mypy>=1.10",
+  "types-redis",
+  "httpx>=0.27",
+]
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+include = ["ai_driven*", "slack_bot*"]
+exclude = [
+  "tests*", "docs*", "docker*", "alembic*", "scripts*",
+  "ai-driven-web-ui*", "node_modules*", ".venv*",
+]
+
+# slack_bot lives at repo root; ai_driven lives under src/. Use a mapping so
+# both can be imported as top-level packages after a single `pip install -e .`.
+[tool.setuptools.package-dir]
+"ai_driven" = "src/ai_driven"
+"slack_bot" = "slack_bot"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict_optional = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -301,6 +301,47 @@ class BedrockProvider(ClaudeProvider):
     The payload uses the Anthropic Messages API format (``anthropic_version``).
     """
 
+    # Bedrock tool names must match ^[a-zA-Z0-9_-]{1,64}$ — no dots allowed.
+    # Our tool registry uses dotted names (jira.get_issue, github.create_pr);
+    # translate transparently so the same schemas work for both providers.
+    _BEDROCK_NAME_SEP = "__"  # unambiguous reverse mapping
+
+    @classmethod
+    def _encode_tool_name(cls, name: str) -> str:
+        return name.replace(".", cls._BEDROCK_NAME_SEP)
+
+    @classmethod
+    def _decode_tool_name(cls, name: str) -> str:
+        return name.replace(cls._BEDROCK_NAME_SEP, ".")
+
+    @classmethod
+    def _sanitize_tools_for_bedrock(cls, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = []
+        for t in tools:
+            new = dict(t)
+            if "name" in new:
+                new["name"] = cls._encode_tool_name(new["name"])
+            out.append(new)
+        return out
+
+    @classmethod
+    def _sanitize_messages_for_bedrock(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Re-encode any tool_use / tool_result block names in message history."""
+        out = []
+        for m in messages:
+            new_m = dict(m)
+            content = new_m.get("content")
+            if isinstance(content, list):
+                new_content = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use" and "name" in block:
+                        nb = dict(block); nb["name"] = cls._encode_tool_name(block["name"]); new_content.append(nb)
+                    else:
+                        new_content.append(block)
+                new_m["content"] = new_content
+            out.append(new_m)
+        return out
+
     def __init__(self) -> None:
         settings = get_settings()
         self._client = boto3.client("bedrock-runtime", region_name=settings.aws_region)
@@ -322,13 +363,13 @@ class BedrockProvider(ClaudeProvider):
         body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
-            "messages": _with_cache_control_messages(messages),
+            "messages": _with_cache_control_messages(self._sanitize_messages_for_bedrock(messages)),
             "temperature": temperature,
         }
         if system:
             body["system"] = _with_cache_control_system(system)
         if tools:
-            body["tools"] = _with_cache_control_tools(tools)
+            body["tools"] = _with_cache_control_tools(self._sanitize_tools_for_bedrock(tools))
         if thinking:
             body["thinking"] = thinking
         if stop_sequences:
@@ -347,6 +388,10 @@ class BedrockProvider(ClaudeProvider):
         )
 
         response_body = json.loads(response["body"].read())
+        # Decode tool names in response back to dotted form
+        for block in response_body.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_use" and "name" in block:
+                block["name"] = self._decode_tool_name(block["name"])
         result = self._parse_invoke_response(response_body, model)
 
         # Log cache savings if present
@@ -374,13 +419,13 @@ class BedrockProvider(ClaudeProvider):
         body: dict[str, Any] = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
-            "messages": messages,
+            "messages": self._sanitize_messages_for_bedrock(messages),
             "temperature": temperature,
         }
         if system:
             body["system"] = system
         if tools:
-            body["tools"] = tools
+            body["tools"] = self._sanitize_tools_for_bedrock(tools)
 
         import asyncio
         loop = asyncio.get_event_loop()
@@ -397,22 +442,48 @@ class BedrockProvider(ClaudeProvider):
         accumulated_content: list[dict[str, Any]] = []
         final_usage: dict[str, Any] = {}
         final_stop_reason = "end_turn"
+        # Track tool_use blocks by their content_block index so we can merge
+        # input_json_delta streams into the correct block.
+        tool_use_by_index: dict[int, dict[str, Any]] = {}
+        partial_json_by_index: dict[int, str] = {}
 
         for event in response["body"]:
             chunk = json.loads(event["chunk"]["bytes"])
+            idx = chunk.get("index")
+            ctype = chunk.get("type")
+
+            # Decode tool names in streaming tool_use starts
+            if ctype == "content_block_start":
+                block = chunk.get("content_block", {})
+                if block.get("type") == "tool_use" and "name" in block:
+                    block["name"] = self._decode_tool_name(block["name"])
+                    tool_use_by_index[idx] = dict(block)
+                    partial_json_by_index[idx] = ""
+                    accumulated_content.append(tool_use_by_index[idx])
             yield chunk
-            # Accumulate for final message construction
-            if chunk.get("type") == "content_block_delta":
+
+            if ctype == "content_block_delta":
                 delta = chunk.get("delta", {})
-                if delta.get("type") == "text_delta":
+                dtype = delta.get("type")
+                if dtype == "text_delta":
                     accumulated_content.append({"type": "text", "text": delta.get("text", "")})
-            elif chunk.get("type") == "message_delta":
+                elif dtype == "input_json_delta" and idx in tool_use_by_index:
+                    # Accumulate partial JSON; finalize at content_block_stop.
+                    partial_json_by_index[idx] += delta.get("partial_json", "")
+            elif ctype == "content_block_stop":
+                if idx in tool_use_by_index:
+                    raw = partial_json_by_index.get(idx, "")
+                    try:
+                        tool_use_by_index[idx]["input"] = json.loads(raw) if raw else {}
+                    except Exception:
+                        logger.warning(
+                            "Bedrock streaming: failed to parse tool input JSON for block %d: %s",
+                            idx, raw[:200] if raw else "(empty)",
+                        )
+                        tool_use_by_index[idx]["input"] = {}
+            elif ctype == "message_delta":
                 final_stop_reason = chunk.get("delta", {}).get("stop_reason", final_stop_reason)
                 final_usage = chunk.get("usage", final_usage)
-            elif chunk.get("type") == "content_block_start":
-                block = chunk.get("content_block", {})
-                if block.get("type") == "tool_use":
-                    accumulated_content.append(block)
 
         # Build a synthetic final message for callers
         combined_text = "".join(
@@ -433,11 +504,24 @@ class BedrockProvider(ClaudeProvider):
 
     @staticmethod
     def _resolve_model_id(model: str) -> str:
-        """Map short model names to Bedrock model IDs."""
+        """Map short model names to Bedrock model IDs.
+
+        Uses cross-region inference profile IDs (`global.` prefix) by default
+        so workflows run in any region that has Bedrock Anthropic access
+        (ap-southeast-1, eu-central-1, etc). Plain regional IDs only support
+        on-demand invocation in us-east-1 / us-west-2.
+
+        Callers can override by passing a full Bedrock model ID directly —
+        anything containing a dot is assumed already-resolved.
+        """
+        # Already a Bedrock ID (e.g. set via AI_DRIVEN_BEDROCK_MODEL_ID)
+        if "." in model:
+            return model
         model_map = {
-            "claude-sonnet-4-6": "anthropic.claude-sonnet-4-6",
-            "claude-opus-4-6": "anthropic.claude-opus-4-6-v1",
-            "claude-haiku-4-5": "anthropic.claude-haiku-4-5-20251001-v1:0",
+            "claude-opus-4-7": "global.anthropic.claude-opus-4-7",
+            "claude-opus-4-6": "global.anthropic.claude-opus-4-6-v1",
+            "claude-sonnet-4-6": "global.anthropic.claude-sonnet-4-6",
+            "claude-haiku-4-5": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
         }
         return model_map.get(model, model)
 
@@ -531,7 +615,13 @@ class ResilientProvider(ClaudeProvider):
             return await self._with_fallback(**kwargs)
 
     async def _with_fallback(self, **kwargs: Any) -> MessageResponse:
-        """Fall back to a cheaper model if the primary fails."""
+        """Fall back to a cheaper model if the primary fails.
+
+        Final safety net (debug mode only): if every model tier fails, return
+        a MockProvider response so the agent loop stays alive and the UI shows
+        a visible pipeline. Without this, an Anthropic/Bedrock outage (or a
+        customer hitting their quota) would halt every workflow mid-run.
+        """
         settings = get_settings()
         original_model = kwargs.get("model", "")
         if original_model == settings.claude_planning_model:
@@ -541,11 +631,33 @@ class ResilientProvider(ClaudeProvider):
             kwargs["model"] = settings.claude_fast_model
             logger.info("Falling back from %s to %s", original_model, kwargs["model"])
 
-        return await self._primary.create_message(**kwargs)
+        try:
+            return await self._primary.create_message(**kwargs)
+        except Exception as e:
+            if settings.debug:
+                logger.warning(
+                    "Every Claude model tier failed (%s: %s); falling back to "
+                    "MockProvider so the workflow stays alive in debug mode",
+                    type(e).__name__, str(e)[:120],
+                )
+                return await MockProvider().create_message(**kwargs)
+            raise
 
     async def create_message_stream(self, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        async for event in self._primary.create_message_stream(**kwargs):
-            yield event
+        try:
+            async for event in self._primary.create_message_stream(**kwargs):
+                yield event
+        except Exception as e:
+            settings = get_settings()
+            if settings.debug:
+                logger.warning(
+                    "Streaming failed (%s: %s); falling back to MockProvider stream",
+                    type(e).__name__, str(e)[:120],
+                )
+                async for event in MockProvider().create_message_stream(**kwargs):
+                    yield event
+            else:
+                raise
 
 
 class MockProvider(ClaudeProvider):

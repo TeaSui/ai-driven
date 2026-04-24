@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, WebSocket, WebSocketDisconnect
@@ -403,6 +404,56 @@ async def stop_task(task_id: str, _task=Depends(require_task_access)) -> dict:
         json.dumps({"type": "complete", "data": {"stopped": True, "message": "Task cancelled by user"}}),
     )
     return {"status": "cancelled", "taskId": task_id}
+
+
+# ── Human-in-the-loop clarification ──────────────────────────────────────────
+
+class HumanResponseBody(BaseModel):
+    """Body for POST /tasks/{id}/respond — answers the agent's pending question."""
+    answer: str
+
+
+@router.post("/tasks/{task_id}/respond")
+async def respond_to_task(
+    task_id: str,
+    body: HumanResponseBody,
+    _task=Depends(require_task_access),
+) -> dict:
+    """Reply to an agent that invoked `human.ask_clarification`.
+
+    The agent loop is waiting on the Redis key `task:{id}:human_answer`. We
+    write the answer there; the pending future resolves and the agent continues
+    its next iteration with the clarification as a tool_result.
+    """
+    settings = get_settings()
+    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+    answer = (body.answer or "").strip()
+    if not answer:
+        return JSONResponse(
+            status_code=400,
+            content={"error": {"code": "EMPTY_ANSWER", "message": "answer cannot be empty"}},
+        )
+    await redis_client.set(f"task:{task_id}:human_answer", answer, ex=3600)
+    # Clear the "awaiting_input" control flag so the agent resumes.
+    await redis_client.delete(f"task:{task_id}:control")
+    # Move status back to running so the UI stops showing the question card.
+    from ai_driven.db.postgres.repository import TaskRepository
+    from ai_driven.db.postgres.session import async_session_factory
+    async with async_session_factory() as session:
+        repo = TaskRepository(session)
+        await repo.update_status(uuid.UUID(task_id), "running")
+        await session.commit()
+    # Echo the human answer into (a) the pub/sub channel for live WebSocket
+    # subscribers and (b) the persisted event log so any client reloading the
+    # task page sees the question was answered and the clarification card clears.
+    event_payload = json.dumps({
+        "type": "human_response",
+        "data": {"answer": answer},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    await redis_client.rpush(f"task:{task_id}:event_log", event_payload)
+    await redis_client.publish(f"task:{task_id}:events", event_payload)
+    return {"status": "accepted", "taskId": task_id}
 
 
 async def _auth_from_ws(websocket: WebSocket, task_id: str) -> str | None:

@@ -145,6 +145,44 @@ export async function getTaskEvents(id: string): Promise<AgentEvent[]> {
   return f(`/api/admin/tasks/${id}/events`)
 }
 
+export interface TaskFile {
+  path: string
+  content: string
+  size: number
+  repo: string
+  ref: string
+  provider?: 'github' | 'bitbucket'
+}
+
+/**
+ * Fetch the live contents of a file the agent touched, read straight from
+ * GitHub. Use this instead of the `content` field from the event stream —
+ * that field was truncated to 2 KB on older tasks and will show a partial
+ * file. This endpoint always returns the real thing.
+ */
+export async function getTaskFile(taskId: string, path: string): Promise<TaskFile> {
+  return f(`/api/admin/tasks/${taskId}/file?path=${encodeURIComponent(path)}`)
+}
+
+export interface TaskDiff {
+  path: string
+  status: string          // "added" | "modified" | "removed" | ...
+  additions: number
+  deletions: number
+  patch: string           // unified-diff format (may be empty for binary files)
+  repo: string
+  pr_number: number
+  provider?: 'github' | 'bitbucket'
+}
+
+/**
+ * Fetch the unified diff patch for a file in this task's PR, so the UI can
+ * render GitHub-style red/green line coloring instead of just the final file.
+ */
+export async function getTaskDiff(taskId: string, path: string): Promise<TaskDiff> {
+  return f(`/api/admin/tasks/${taskId}/diff?path=${encodeURIComponent(path)}`)
+}
+
 export async function getUsageHistory(days: number) {
   return f(`/api/admin/usage/history?days=${days}`)
 }
@@ -295,6 +333,50 @@ export async function stopTask(taskId: string): Promise<void> {
   await authFetch(`/api/chat/tasks/${taskId}/stop`, { method: 'POST' })
 }
 
+// ── Human-in-the-loop clarification ──────────────────────────────────────────
+
+export async function respondToTask(taskId: string, answer: string): Promise<void> {
+  await authFetch(`/api/chat/tasks/${taskId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answer }),
+  })
+}
+
+export interface PendingQuestion {
+  question: string
+  context?: string
+  options?: string[]
+  timeout?: number
+}
+
+/** Extract the latest unanswered question from the event stream. */
+export function extractPendingQuestion(
+  events: AgentEvent[],
+  taskStatus?: string,
+): PendingQuestion | null {
+  if (taskStatus && !['awaiting_input', 'running', 'coding', 'planning'].includes(taskStatus)) {
+    return null
+  }
+  // Walk events backwards. A `human_response` after a `human_input_required`
+  // means the question was already answered.
+  let pending: PendingQuestion | null = null
+  for (const e of events) {
+    if (e.type === 'human_input_required') {
+      const d = e.data as Record<string, unknown>
+      pending = {
+        question: (d.question as string) || '',
+        context: d.context as string | undefined,
+        options: (d.options as string[] | undefined) ?? [],
+        timeout: d.timeout as number | undefined,
+      }
+    } else if (e.type === 'human_response') {
+      pending = null
+    }
+  }
+  return pending
+}
+
 // ── Evaluation API ───────────────────────────────────────────────────────────
 
 export interface TaskEvaluation {
@@ -310,5 +392,8 @@ export interface TaskEvaluation {
 
 export async function getTaskEvaluations(taskId: string): Promise<TaskEvaluation[]> {
   const r = await f(`/api/admin/tasks/${taskId}/evaluations`)
+  // Accept both shapes: backend returns a raw array today; older docs said
+  // `{evaluations: [...]}`. Either form must render.
+  if (Array.isArray(r)) return r
   return r.evaluations ?? []
 }

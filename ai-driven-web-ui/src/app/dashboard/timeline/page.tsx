@@ -68,7 +68,7 @@ function IcDatadog({ size = 14, color = 'currentColor' }: { size?: number; color
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type RunStatus = 'deployed' | 'merged' | 'reviewing' | 'coding' | 'blocked' | 'cancelled'
+type RunStatus = 'deployed' | 'merged' | 'reviewing' | 'coding' | 'blocked' | 'cancelled' | 'pr_open'
 
 interface PipelineRun {
   id: string
@@ -122,7 +122,9 @@ function deriveStatus(stage: string, stageStatus: string, assignee?: string): Ru
   if (stageStatus === 'cancelled') return 'cancelled'
   if (stageStatus === 'failed') return 'blocked'
   if (stageStatus === 'passed') {
-    // Human assignee merged the PR; AI agent completed autonomously (deployed)
+    // Terminal stage determines final status label
+    if (stage === 'monitor' || stage === 'deploy') return 'deployed'
+    if (stage === 'review') return 'pr_open'  // coding agent done = PR ready for review
     return assignee && assignee !== 'AI Agent' ? 'merged' : 'deployed'
   }
   if (stageStatus === 'queued') return 'coding'
@@ -135,7 +137,9 @@ function deriveStatus(stage: string, stageStatus: string, assignee?: string): Ru
 function mapApiRun(r: ApiPipelineRun): PipelineRun {
   const assignee = r.assignee ?? 'AI Agent'
   return {
-    id: r.jiraKey ?? r.id.slice(0, 8),
+    // Use the backend UUID as the React key so two tasks sharing a Jira key
+    // (e.g. the same ticket worked twice) don't collide.
+    id: r.id,
     title: r.title,
     repo: r.repo ?? '',
     branch: r.branch ?? `agent/${r.jiraKey ?? r.id.slice(0, 8)}`,
@@ -373,6 +377,7 @@ function TimelineLegend() {
 const STATUS_MAP: Record<RunStatus, { tone: 'success' | 'info' | 'danger' | 'default'; label: string }> = {
   deployed: { tone: 'success', label: 'Deployed' },
   merged: { tone: 'success', label: 'Merged' },
+  pr_open: { tone: 'info', label: 'PR Open' },
   reviewing: { tone: 'info', label: 'In review' },
   coding: { tone: 'info', label: 'Coding' },
   blocked: { tone: 'danger', label: 'Blocked' },
@@ -543,12 +548,17 @@ type FilterTab = 'all' | 'active' | 'merged' | 'blocked'
 export default function TimelinePage() {
   const [filter, setFilter] = useState<FilterTab>('all')
   const [showNewRun, setShowNewRun] = useState(false)
+  const [agentFilter, setAgentFilter] = useState<string | null>(null)
+  const [showFilterMenu, setShowFilterMenu] = useState(false)
   const { mutate } = useSWRConfig()
-  const { data: apiRuns } = useSWR('pipeline-runs', getPipelineRuns, { refreshInterval: 10000 })
+  const { data: apiRuns, isValidating, mutate: revalidate } = useSWR('pipeline-runs', getPipelineRuns, { refreshInterval: 10000 })
 
-  const runs: PipelineRun[] = apiRuns && apiRuns.length > 0 ? apiRuns.map(mapApiRun) : []
+  const allRuns: PipelineRun[] = apiRuns && apiRuns.length > 0 ? apiRuns.map(mapApiRun) : []
+  const runs: PipelineRun[] = agentFilter
+    ? allRuns.filter((r) => (r.assignee || '').toLowerCase().includes(agentFilter.toLowerCase()))
+    : allRuns
 
-  const isSuccess = (r: PipelineRun) => r.status === 'merged' || r.status === 'deployed'
+  const isSuccess = (r: PipelineRun) => r.status === 'merged' || r.status === 'deployed' || r.status === 'pr_open'
 
   const filtered =
     filter === 'all'
@@ -593,8 +603,54 @@ export default function TimelinePage() {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Btn size="sm" icon={<Filter size={12} />}>Filter</Btn>
-            <Btn size="sm" icon={<RefreshCw size={12} />} onClick={() => mutate('pipeline-runs')}>Refresh</Btn>
+            <div style={{ position: 'relative' }}>
+              <Btn
+                size="sm"
+                icon={<Filter size={12} />}
+                onClick={() => setShowFilterMenu((v) => !v)}
+                tone={agentFilter ? 'brand' : undefined}
+              >
+                {agentFilter ? `Agent: ${agentFilter}` : 'Filter'}
+              </Btn>
+              {showFilterMenu && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 4px)',
+                    right: 0,
+                    background: 'var(--panel)',
+                    border: '1px solid var(--panel-border)',
+                    borderRadius: 8,
+                    padding: 4,
+                    minWidth: 180,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                    zIndex: 50,
+                  }}
+                >
+                  {[null, 'AI Agent', 'Coding', 'Review', 'DevOps'].map((a) => (
+                    <button
+                      key={a ?? 'all'}
+                      onClick={() => { setAgentFilter(a); setShowFilterMenu(false) }}
+                      style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '6px 10px', fontSize: 12, borderRadius: 6,
+                        background: agentFilter === a ? 'var(--accent-soft)' : 'transparent',
+                        color: 'var(--text)', border: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      {a ?? 'All agents'}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Btn
+              size="sm"
+              icon={<RefreshCw size={12} style={isValidating ? { animation: 'gtx-spin 0.8s linear infinite' } : undefined} />}
+              onClick={() => revalidate()}
+            >
+              {isValidating ? 'Refreshing…' : 'Refresh'}
+            </Btn>
             <Btn size="sm" tone="brand" icon={<Plus size={12} />} onClick={() => setShowNewRun(true)}>New run</Btn>
           </div>
         </div>
