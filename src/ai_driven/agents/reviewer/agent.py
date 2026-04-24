@@ -87,6 +87,39 @@ class ReviewAgent(BaseAgent):
             }
 
         @self._registry.tool(
+            name="bitbucket.get_pr_diff",
+            description="Fetch the diff of a Bitbucket pull request.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "pr_number": {"type": "integer"},
+                },
+                "required": ["repo_full_name", "pr_number"],
+            },
+        )
+        async def get_bitbucket_pr_diff(repo_full_name: str, pr_number: int) -> dict[str, Any]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            diff = await self._scm.get_pr_diff(repo_full_name, pr_number)
+            files = [
+                {
+                    "path": f.path,
+                    "status": f.status,
+                    "additions": f.additions,
+                    "deletions": f.deletions,
+                    "patch": f.patch,
+                }
+                for f in diff.files
+            ]
+            files = _truncate_diff_files(files)
+            return {
+                "files": files,
+                "total_additions": diff.total_additions,
+                "total_deletions": diff.total_deletions,
+            }
+
+        @self._registry.tool(
             name="repo.read_file",
             description="Read a file from the repository for additional context.",
             input_schema={
@@ -136,6 +169,39 @@ class ReviewAgent(BaseAgent):
             },
         )
         async def post_pr_comment(
+            repo_full_name: str,
+            pr_number: int,
+            body: str,
+            file_path: str | None = None,
+            line: int | None = None,
+        ) -> dict[str, str]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            comment = await self._scm.post_pr_comment(
+                repo_full_name,
+                pr_number,
+                body,
+                file_path,
+                line,
+            )
+            return {"id": comment.id, "status": "posted"}
+
+        @self._registry.tool(
+            name="bitbucket.post_pr_comment",
+            description="Post a review comment on a Bitbucket pull request (general or inline on a specific file/line).",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "pr_number": {"type": "integer"},
+                    "body": {"type": "string"},
+                    "file_path": {"type": "string"},
+                    "line": {"type": "integer"},
+                },
+                "required": ["repo_full_name", "pr_number", "body"],
+            },
+        )
+        async def post_bitbucket_pr_comment(
             repo_full_name: str,
             pr_number: int,
             body: str,
@@ -224,6 +290,27 @@ class ReviewAgent(BaseAgent):
             return {"status": "approved", "pr_number": str(pr_number)}
 
         @self._registry.tool(
+            name="bitbucket.approve_pr",
+            description="Submit an approving review on a Bitbucket pull request. Use when no critical issues are found.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "pr_number": {"type": "integer"},
+                    "body": {"type": "string", "default": ""},
+                },
+                "required": ["repo_full_name", "pr_number"],
+            },
+        )
+        async def approve_bitbucket_pr(
+            repo_full_name: str, pr_number: int, body: str = ""
+        ) -> dict[str, str]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            await self._scm.approve_pr(repo_full_name, pr_number, body)
+            return {"status": "approved", "pr_number": str(pr_number)}
+
+        @self._registry.tool(
             name="github.request_changes",
             description="Submit a request-changes review on the pull request. Use when critical issues are found.",
             input_schema={
@@ -237,6 +324,27 @@ class ReviewAgent(BaseAgent):
             },
         )
         async def request_changes(
+            repo_full_name: str, pr_number: int, body: str = ""
+        ) -> dict[str, str]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            await self._scm.request_changes(repo_full_name, pr_number, body)
+            return {"status": "changes_requested", "pr_number": str(pr_number)}
+
+        @self._registry.tool(
+            name="bitbucket.request_changes",
+            description="Submit a request-changes review on a Bitbucket pull request. Use when critical issues are found.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "pr_number": {"type": "integer"},
+                    "body": {"type": "string", "default": ""},
+                },
+                "required": ["repo_full_name", "pr_number"],
+            },
+        )
+        async def request_bitbucket_changes(
             repo_full_name: str, pr_number: int, body: str = ""
         ) -> dict[str, str]:
             if not self._scm:

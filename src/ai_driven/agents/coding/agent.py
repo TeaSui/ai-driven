@@ -167,6 +167,32 @@ class CodingAgent(BaseAgent):
             return {"number": pr.number, "url": pr.url, "title": pr.title}
 
         @self._registry.tool(
+            name="bitbucket.create_pr",
+            description="Create a new pull request on Bitbucket after code changes are committed and pushed.",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "source_branch": {"type": "string"},
+                    "target_branch": {"type": "string", "default": "main"},
+                },
+                "required": ["repo_full_name", "title", "body", "source_branch"],
+            },
+        )
+        async def create_bitbucket_pr(
+            repo_full_name: str, title: str, body: str,
+            source_branch: str, target_branch: str = "main",
+        ) -> dict[str, Any]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            pr = await self._scm.create_pull_request(
+                repo_full_name, title, body, source_branch, target_branch,
+            )
+            return {"number": pr.number, "url": pr.url, "title": pr.title}
+
+        @self._registry.tool(
             name="jira.update_status",
             description="Transition a Jira issue to a new status.",
             input_schema={
