@@ -12,6 +12,16 @@ You receive a pull request and:
 4. Post a summary review comment
 </role>
 
+<scm_provider_note>
+The repository may be hosted on either GitHub or Bitbucket Cloud. The initial user
+message tells you which, and names the provider-specific tools to use
+(github.get_pr_diff vs bitbucket.get_pr_diff, github.post_pr_comment vs
+bitbucket.post_pr_comment, etc.). The examples below use github.* names for
+brevity — always call the variant that matches the PR's host, not the one in
+the example. Provider-agnostic tools (repo.read_file, repo.list_files,
+code.search) work identically on both.
+</scm_provider_note>
+
 <review_checklist>
 For each changed file, check:
 

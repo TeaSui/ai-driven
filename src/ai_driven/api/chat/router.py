@@ -132,18 +132,35 @@ async def _process_task_inline(task_id: str, agent_type: str, message: str, cont
             from ai_driven.jira.client import JiraClient
             jira_client = JiraClient()
 
-        # Create SCM client if configured
+        # Create SCM client based on the registered repo's scm_type (not the
+        # first-non-empty credential). Without this, a Bitbucket-registered
+        # repo would silently get GitHubClient whenever GITHUB_TOKEN is set.
         scm_client = None
         repo_full_name = context.get("repo_full_name", "")
-        if settings_inner.github_token:
-            from ai_driven.scm.github_client import GitHubClient
-            scm_client = GitHubClient(token=settings_inner.github_token)
-        elif settings_inner.bitbucket_app_password and settings_inner.bitbucket_username:
+        scm_type = "github"
+        if repo_full_name:
+            try:
+                from ai_driven.db.postgres.models import Repository as RepoRow
+                from ai_driven.db.postgres.session import async_session_factory
+                from sqlalchemy import select as _select
+                async with async_session_factory() as _s:
+                    _res = await _s.execute(
+                        _select(RepoRow.scm_type).where(
+                            RepoRow.full_name == repo_full_name
+                        )
+                    )
+                    scm_type = _res.scalar_one_or_none() or "github"
+            except Exception:
+                scm_type = "github"
+        if scm_type == "bitbucket" and settings_inner.bitbucket_username:
             from ai_driven.scm.bitbucket_client import BitbucketClient
             scm_client = BitbucketClient(
                 username=settings_inner.bitbucket_username,
                 app_password=settings_inner.bitbucket_app_password,
             )
+        elif settings_inner.github_token:
+            from ai_driven.scm.github_client import GitHubClient
+            scm_client = GitHubClient(token=settings_inner.github_token)
 
         kwargs: dict[str, Any] = {}
         if agent_type in ("coding", "devops"):
@@ -155,6 +172,7 @@ async def _process_task_inline(task_id: str, agent_type: str, message: str, cont
         task_input = {"message": message, **context}
         if repo_full_name:
             task_input["repo_full_name"] = repo_full_name
+            task_input["scm_type"] = scm_type
 
         # Per-task timeout: 20 minutes hard cap
         task_timeout = getattr(settings_inner, "task_timeout_seconds", 1200)
@@ -320,12 +338,30 @@ async def send_message(
         async with async_session_factory() as session:
             task_repo = TaskRepository(session)
             jira_key = body.context.get("jira_key")
+
+            # Resolve repo_id so the task links to a registered repository.
+            # Without this, admin endpoints that key off Repository.scm_type
+            # can't tell Bitbucket tasks from GitHub tasks and default to
+            # GitHub (→ 404 on Bitbucket file/diff reads).
+            resolved_repo_id: uuid.UUID | None = None
+            repo_full_name_ctx = body.context.get("repo_full_name", "")
+            if repo_full_name_ctx:
+                from ai_driven.db.postgres.models import Repository as _RepoRow
+                from sqlalchemy import select as _select
+                _res = await session.execute(
+                    _select(_RepoRow.id).where(
+                        _RepoRow.full_name == repo_full_name_ctx
+                    )
+                )
+                resolved_repo_id = _res.scalar_one_or_none()
+
             task = await task_repo.create_task(
                 task_id=task_id,
                 agent_type=body.agent_type,
                 title=body.message[:200],
                 input_data={"message": body.message, **body.context},
                 team_id=uuid.UUID(team_id),
+                repo_id=resolved_repo_id,
             )
             if jira_key:
                 task.jira_key = jira_key

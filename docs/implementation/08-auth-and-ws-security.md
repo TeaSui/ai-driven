@@ -33,17 +33,17 @@ Exploration of `src/ai_driven/` found more than the first review suggested:
 
 ### Phase 1 — Backend corrections · ~½ day
 
-- [ ] Introduce `cancelled` task status enum value + DB CHECK
-- [ ] `POST /tasks/{id}/stop` sets `status='cancelled'`, not `failed` (`api/chat/router.py:291-293`)
-- [ ] `DashboardSummary.successRate` excludes `cancelled` from denominator (`api/admin/router.py`)
-- [ ] Extend `HealthResponse` in `src/ai_driven/api/health.py` with `debug: bool = settings.debug`
-- [ ] Unit test: stopping a task yields `status='cancelled'` and a `complete` event with `stopped=true`
+- [x] Introduce `cancelled` task status + DB CHECK — `alembic/versions/a1b2c3d4e5f9_task_status_check.py` pins the full status set (`queued`, `planning`, `coding`, `testing`, `running`, `awaiting_input`, `paused`, `completed`, `failed`, `cancelled`)
+- [x] `POST /tasks/{id}/stop` sets `status='cancelled'`, not `failed` (`api/chat/router.py:396`)
+- [x] `DashboardSummary.successRate` excludes `cancelled` from denominator — math is `completed / (completed + failed)`, `cancelled` is neither
+- [x] Extend `HealthResponse` with `debug: bool = settings.debug` — `src/ai_driven/api/health.py:27`
+- [x] Unit test: stopping a task yields `status='cancelled'` and a `complete` event with `stopped=true` — `tests/unit/test_stop_task_cancelled.py`
 
 ### Phase 2 — Identity provider · ~1 day
 
-- [ ] Cognito User Pool per env (dev / staging / prod); `teamId` custom attribute
-- [ ] `users` table (id, email, team_id, role, created_at) — migration
-- [ ] `/api/auth/session` endpoint returns `{userId, teamId, role, email}` from validated JWT
+- [ ] Cognito User Pool per env (dev / staging / prod); `teamId` custom attribute — **blocked on AWS provisioning**
+- [x] ~~`users` table (id, email, team_id, role, created_at) — migration~~ — **superseded:** `team_members` (migration `a1b2c3d4e5f8`) already stores email + team_id + role. Reusing it avoids two parallel people models.
+- [x] `/api/auth/session` endpoint returns `{userId, teamId, teamName, role, email, authSource}` — scaffolded at `src/ai_driven/api/auth/router.py`. Resolves identity via API key today; `verify_cognito_jwt()` shim raises `NotImplementedError` until the pool exists. 4-test unit coverage in `tests/unit/test_auth_session.py`.
 - [ ] Federation skeleton (SAML / OIDC) — spec only, not implemented
 
 ### Phase 3 — Next.js middleware & pages · ~1 day
@@ -58,9 +58,9 @@ Exploration of `src/ai_driven/` found more than the first review suggested:
 
 ### Phase 4 — WebSocket client auth · ~2 h
 
-- [ ] `tasks/[id]/page.tsx` WebSocket: send `{"type":"auth","token": sessionApiKey}` as first message after `ws.onopen`
-- [ ] Handle close codes 4401 (bad auth) / 4404 (not yours) with visible error banner + SWR fallback
-- [ ] Env-configured API key for dev (`NEXT_PUBLIC_DEV_API_KEY`) and session-sourced key in prod
+- [x] `tasks/[id]/page.tsx` WebSocket: sends `{"type":"auth","token": sessionApiKey}` as first message after `ws.onopen`
+- [x] Handle close codes 4401 (bad auth) / 4404 (not yours) with visible error banner (`data-testid="ws-auth-error-banner"`, `role="alert"`, `aria-live="assertive"`)
+- [x] Env-configured API key for dev (`NEXT_PUBLIC_DEV_API_KEY`) with cookie-sourced `api_key` taking precedence in prod
 
 ### Phase 5 — API-key manager UI · ~½ day
 
@@ -71,11 +71,11 @@ Exploration of `src/ai_driven/` found more than the first review suggested:
 
 ### Phase 6 — Debug banner · ~2 h
 
-- [ ] `dashboard/layout.tsx` fetches `/health` on mount
-- [ ] If `debug: true`, render red sticky top banner:
+- [x] `dashboard/layout.tsx` fetches `/health` on mount and reads `debug` flag
+- [x] Red sticky top banner when `debug: true`:
       **"Debug mode active — authentication is bypassed. Do not use in production."**
-- [ ] Banner announces with `aria-live="assertive"` for screen readers
-- [ ] Click-to-dismiss disabled in prod (visible always) but allowed locally
+- [x] Banner announces with `role="alert"` + `aria-live="assertive"` for screen readers
+- [x] Banner has no dismiss button — stays visible as long as backend reports debug mode (spec says visible always in prod)
 
 ### Phase 7 — Observability & ops · ~½ day
 

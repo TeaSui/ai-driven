@@ -58,6 +58,8 @@ export default function DashboardLayout({
         {debug && (
           <div
             role="alert"
+            aria-live="assertive"
+            data-testid="debug-banner"
             style={{
               background: '#dc2626',
               color: '#fff',

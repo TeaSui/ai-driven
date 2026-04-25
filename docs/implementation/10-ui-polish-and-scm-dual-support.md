@@ -279,3 +279,36 @@ No existing GitHub code path changes semantically — all current tasks keep wor
 | `e2e/auth.spec.ts` | 4 (2 skipped) | 2 pass, 2 skipped with TODO — middleware not implemented |
 
 **Total: 25 tests, 23 pass, 2 skipped (pre-existing auth middleware gap, unrelated to this pass).**
+
+## Sprint 10 — consolidated checklist
+
+### Part 1 — UI bugs (all landed)
+- [x] BUG-21 — `input_data` 2 KB truncation → 64 KB cap
+- [x] BUG-22 — `human_response` persisted to event log
+- [x] BUG-23 — `salvage()` regex fallback for truncated JSON payloads
+- [x] BUG-24 — hardcoded `balance.go` demo removed from Reviews page
+- [x] BUG-25 — File tabs clickable (`<button>` + `selectedPath` state)
+- [x] BUG-26 — `GET /api/admin/tasks/{id}/file` for live file content
+- [x] BUG-27 — `GET /api/admin/tasks/{id}/diff` for GitHub-style red/green diff
+- [x] BUG-28 — `ToolStepCard` with emoji icons + friendly tool titles
+- [x] BUG-29 — `RealCodeContent` nullish fallback for undefined content
+
+### Part 2 — BitBucket dual-support (all landed)
+- [x] `SCMClient` Protocol with provider-agnostic methods
+- [x] `BitbucketClient` implementation (Cloud REST v2.0)
+- [x] `get_scm_client(scm_type, credentials)` factory
+- [x] `get_scm_client_from_settings(scm_type)` factory (for request-path helpers)
+- [x] `Repository.scm_type` field for per-repo provider selection
+- [x] Admin `/file` and `/diff` endpoints route by provider via `Repository.scm_type`
+- [x] Frontend `PR_TOOLS` recognises `bitbucket.create_pr` + `bitbucket.create_pull_request`
+- [x] `describeTool()` renders friendly titles for `bitbucket.*` tool names
+- [x] Coding agent registers `bitbucket.create_pr` alongside `github.create_pr`
+- [x] Review agent registers `bitbucket.get_pr_diff`, `bitbucket.post_pr_comment`, `bitbucket.approve_pr`, `bitbucket.request_changes`
+- [x] BitBucket webhook receiver at `POST /webhooks/bitbucket` (pullrequest:created / updated / comment_created)
+- [x] Config: `AI_DRIVEN_BITBUCKET_USERNAME`, `AI_DRIVEN_BITBUCKET_APP_PASSWORD`, `AI_DRIVEN_BITBUCKET_WORKSPACE`
+- [x] `scripts/bitbucket_happy_case.py` smoke script (factory + list + PR metadata)
+- [x] Smoke-test end-to-end against `origination1/ai-driven` — `scripts/bitbucket_happy_case.py` PASSED (2026-04-25): factory + list_files(main) + read_file(README.md, 2610 bytes) + list_pull_requests(OPEN)=0. Username value that worked: personal email (`nguyenminhtung.near@gmail.com`) — not the workspace slug. Diff/reviewers/checks paths deferred until an open PR exists on the repo.
+- [ ] Admin UI repo-add flow surfaces the provider dropdown (`POST /api/admin/repos` already accepts `scmType`)
+
+### Part 3 — Review sidebar real data (new, landed)
+See [11-code-review-sidebar.md](11-code-review-sidebar.md). `PRReviewer` + `PRCheck` models, `get_pr_reviewers` + `get_pr_checks` on both SCM clients, `GET /api/admin/reviews/{id}/reviewers` + `/checks` endpoints, and `ReviewSidebar` rewritten to call them via SWR. The hardcoded Mira Delgado / Jamie Ortiz / ci-unit rows are gone.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from tenacity import (
@@ -22,11 +23,14 @@ from ai_driven.scm.exceptions import (
     SCMValidationError,
 )
 from ai_driven.scm.models import (
+    Commit,
     DiffFile,
     DirectoryEntry,
     FileContent,
+    PRCheck,
     PRComment,
     PRDiff,
+    PRReviewer,
     PRState,
     PullRequest,
 )
@@ -90,10 +94,15 @@ class BitbucketClient:
     """Bitbucket Cloud API client implementing the SCM interface."""
 
     def __init__(self, username: str, app_password: str) -> None:
+        # Bitbucket's /pullrequests/{n}/diff endpoint returns a 302 redirect
+        # to a signed URL; without follow_redirects the response body is empty
+        # and our PR-diff parser sees 0 files. Same applies to /src/ raw file
+        # reads on some paths. Enable follow_redirects globally.
         self._http = httpx.AsyncClient(
             base_url=BITBUCKET_API_BASE,
             auth=(username, app_password),
             timeout=30.0,
+            follow_redirects=True,
         )
 
     @classmethod
@@ -119,6 +128,7 @@ class BitbucketClient:
             base_url=BITBUCKET_API_BASE,
             headers={"Authorization": f"Bearer {token}"},
             timeout=30.0,
+            follow_redirects=True,
         )
         return instance
 
@@ -151,12 +161,43 @@ class BitbucketClient:
     # File operations
     # ------------------------------------------------------------------
 
+    async def _resolve_ref(self, repo_full_name: str, ref: str) -> str:
+        """Resolve a branch name into a commit hash.
+
+        Bitbucket Cloud's /src/{ref} endpoint is ambiguous when the ref contains
+        a slash (e.g. "agent/bitbucket-smoke-3") — it parses only the first
+        segment as the ref and treats the rest as a path. URL-encoding doesn't
+        help (verified 2026-04-25 against origination1/ai-driven). The reliable
+        fix is to resolve the branch to its commit hash first and then use the
+        hash in the /src/{hash}/... URL.
+
+        Shortcuts:
+          * refs that look like full (40-char) or short (≥7-char hex) commit
+            hashes are returned as-is
+          * refs without slashes are returned as-is (Bitbucket handles them fine)
+        """
+        if "/" not in ref and (len(ref) >= 7 and all(c in "0123456789abcdef" for c in ref.lower())):
+            return ref
+        if "/" not in ref:
+            return ref
+        encoded = quote(ref, safe="")
+        resp = await self._request(
+            "GET", f"/repositories/{repo_full_name}/refs/branches/{encoded}"
+        )
+        sha = (resp.json().get("target") or {}).get("hash")
+        if not sha:
+            raise SCMError(
+                f"Bitbucket returned no commit hash for branch {ref!r}"
+            )
+        return sha
+
     async def list_files(
         self, repo_full_name: str, path: str = "", ref: str = "main"
     ) -> list[DirectoryEntry]:
         """List files and directories with Bitbucket pagination (``next`` URL)."""
+        resolved = await self._resolve_ref(repo_full_name, ref)
         entries: list[DirectoryEntry] = []
-        url: str | None = f"/repositories/{repo_full_name}/src/{ref}/{path}"
+        url: str | None = f"/repositories/{repo_full_name}/src/{resolved}/{path}"
         params: dict[str, Any] | None = None
 
         while url is not None:
@@ -181,9 +222,10 @@ class BitbucketClient:
     async def read_file(
         self, repo_full_name: str, path: str, ref: str = "main"
     ) -> FileContent:
+        resolved = await self._resolve_ref(repo_full_name, ref)
         resp = await self._request(
             "GET",
-            f"/repositories/{repo_full_name}/src/{ref}/{path}",
+            f"/repositories/{repo_full_name}/src/{resolved}/{path}",
         )
         content = resp.text
 
@@ -440,6 +482,115 @@ class BitbucketClient:
                 "merge_commit_sha": pr.get("merge_commit", {}).get("hash", ""),
             })
         return merged[:limit]
+
+    async def get_pr_reviewers(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRReviewer]:
+        """Build reviewer list from PR's participants + reviewers arrays."""
+        resp = await self._request(
+            "GET",
+            f"/repositories/{repo_full_name}/pullrequests/{pr_number}",
+        )
+        pr = resp.json()
+
+        state_map = {
+            "approved": "approved",
+            "changes_requested": "changes_requested",
+        }
+
+        out: dict[str, PRReviewer] = {}
+
+        # Participants with an explicit state win (approved / changes_requested)
+        for p in pr.get("participants") or []:
+            user = p.get("user") or {}
+            login = user.get("account_id") or user.get("uuid") or user.get("display_name")
+            if not login:
+                continue
+            raw_state = (p.get("state") or "").lower()
+            state = state_map.get(raw_state, "commented" if raw_state else "pending")
+            out[login] = PRReviewer(
+                username=user.get("nickname") or user.get("display_name") or login,
+                display_name=user.get("display_name") or login,
+                avatar_url=((user.get("links") or {}).get("avatar") or {}).get("href"),
+                is_bot=(user.get("type") == "app"),
+                state=state,
+            )
+
+        # Requested-but-not-participated reviewers → pending
+        for user in pr.get("reviewers") or []:
+            login = user.get("account_id") or user.get("uuid") or user.get("display_name")
+            if not login or login in out:
+                continue
+            out[login] = PRReviewer(
+                username=user.get("nickname") or user.get("display_name") or login,
+                display_name=user.get("display_name") or login,
+                avatar_url=((user.get("links") or {}).get("avatar") or {}).get("href"),
+                is_bot=(user.get("type") == "app"),
+                state="pending",
+            )
+
+        return list(out.values())
+
+    async def get_pr_checks(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRCheck]:
+        """Fetch build statuses for a PR."""
+        resp = await self._request(
+            "GET",
+            f"/repositories/{repo_full_name}/pullrequests/{pr_number}/statuses",
+        )
+        values = (resp.json() or {}).get("values") or []
+
+        # state -> (status, conclusion)
+        state_map = {
+            "SUCCESSFUL": ("completed", "success"),
+            "FAILED": ("completed", "failure"),
+            "STOPPED": ("completed", "cancelled"),
+            "INPROGRESS": ("in_progress", None),
+        }
+
+        checks: list[PRCheck] = []
+        for v in values:
+            raw_state = (v.get("state") or "").upper()
+            status, conclusion = state_map.get(raw_state, ("queued", None))
+            name = v.get("key") or v.get("name") or "check"
+            checks.append(PRCheck(
+                name=name,
+                status=status,
+                conclusion=conclusion,
+                duration_seconds=None,
+                details_url=v.get("url"),
+            ))
+        return checks
+
+    async def get_pr_commits(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[Commit]:
+        """List commits on a Bitbucket Cloud PR."""
+        resp = await self._request(
+            "GET",
+            f"/repositories/{repo_full_name}/pullrequests/{pr_number}/commits",
+        )
+        out: list[Commit] = []
+        for item in (resp.json() or {}).get("values") or []:
+            sha = item.get("hash", "")
+            ts_raw = item.get("date")
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else datetime.utcnow()
+            except Exception:
+                ts = datetime.utcnow()
+            author_node = (item.get("author") or {}).get("user") or {}
+            author = (author_node.get("display_name")
+                      or (item.get("author") or {}).get("raw") or "unknown")
+            url = ((item.get("links") or {}).get("html") or {}).get("href")
+            out.append(Commit(
+                sha=sha,
+                message=(item.get("message") or "").split("\n", 1)[0],
+                author=author,
+                timestamp=ts,
+                url=url,
+            ))
+        return out
 
     # ------------------------------------------------------------------
     # Helpers

@@ -17,7 +17,7 @@ Goal: every P1 from the review is either fixed or has a dated mitigation.
 | Severity taxonomy migration (enum + CHECK + normalize) | Backend + Data | `implementation/07-severity-taxonomy-migration.md` | 🔲 plan written |
 | WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `implementation/08-auth-and-ws-security.md` | 🔲 plan written |
 | `cancelled` terminal state replaces `failed` on `/stop` | Backend + UI | `implementation/08` §Phase 1.5 | 🔲 |
-| Model IDs — bump Opus 4.6 → 4.7 + re-benchmark | AI Eng | `config.py:36-38` | 🔲 |
+| Model IDs — bump Opus 4.6 → 4.7 + re-benchmark | AI Eng | `config.py:39` | ✅ landed (re-benchmark still TODO) |
 
 **Exit criteria:** every row green; zero P1 findings open; `successRate` metric excludes `cancelled`; debug banner visible when `AI_DRIVEN_DEBUG=true`.
 

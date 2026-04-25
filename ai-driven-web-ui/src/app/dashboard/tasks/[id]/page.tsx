@@ -1540,6 +1540,9 @@ export default function CodingAgentPage({
   // WebSocket for live streaming
   const [wsEvents, setWsEvents] = useState<AgentEvent[]>([])
   const [controlPending, setControlPending] = useState<'pause' | 'resume' | 'stop' | null>(null)
+  const [wsAuthError, setWsAuthError] = useState<
+    { code: number; message: string } | null
+  >(null)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
@@ -1579,7 +1582,21 @@ export default function CodingAgentPage({
       }
 
       ws.onerror = () => {}
-      ws.onclose = () => { wsRef.current = null }
+      ws.onclose = (ev) => {
+        wsRef.current = null
+        // 4401: auth failed (bad/missing token). 4404: task not in team scope.
+        if (ev.code === 4401) {
+          setWsAuthError({
+            code: 4401,
+            message: 'Live stream disconnected: authentication failed. Reload after signing in.',
+          })
+        } else if (ev.code === 4404) {
+          setWsAuthError({
+            code: 4404,
+            message: 'Live stream disconnected: this task does not belong to your team.',
+          })
+        }
+      }
 
       return () => { ws.close(); wsRef.current = null }
     } catch {
@@ -1685,6 +1702,25 @@ export default function CodingAgentPage({
 
   return (
     <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* WebSocket auth error banner — shown on 4401 / 4404 close */}
+      {wsAuthError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          data-testid="ws-auth-error-banner"
+          style={{
+            background: 'var(--status-warn-bg, #fef3c7)',
+            color: 'var(--status-warn, #92400e)',
+            borderBottom: '1px solid var(--status-warn, #b45309)',
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 500,
+          }}
+        >
+          {wsAuthError.message} (code {wsAuthError.code})
+        </div>
+      )}
+
       {/* Header */}
       <div
         style={{

@@ -120,7 +120,8 @@ def _estimate_cost(usage: Any, model: str) -> float:
     """Rough cost estimate based on token counts and model pricing."""
     # Prices per 1M tokens (approximate, update as needed)
     pricing = {
-        "claude-opus-4-6": {"input": 15.0, "output": 75.0},
+        "claude-opus-4-7": {"input": 15.0, "output": 75.0},
+        "claude-opus-4-6": {"input": 15.0, "output": 75.0},  # legacy alias
         "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
         "claude-haiku-4-5": {"input": 0.80, "output": 4.0},
     }

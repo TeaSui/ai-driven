@@ -18,7 +18,7 @@ class TestCalculateCost:
         assert abs(cost - 0.0105) < 0.0001
 
     def test_opus_pricing(self) -> None:
-        cost = calculate_cost("claude-opus-4-6", input_tokens=1000, output_tokens=500)
+        cost = calculate_cost("claude-opus-4-7", input_tokens=1000, output_tokens=500)
         # 1000/1000 * 0.015 + 500/1000 * 0.075 = 0.015 + 0.0375 = 0.0525
         assert abs(cost - 0.0525) < 0.0001
 

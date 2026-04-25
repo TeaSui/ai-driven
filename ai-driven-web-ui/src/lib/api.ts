@@ -86,6 +86,8 @@ export interface ReviewDetail {
   /** Status from backend: pending | in_progress | approved | changes_requested | merged */
   status: string
   createdAt?: string
+  /** Duration of the review task, in milliseconds (backend derives from task timing). */
+  durationMs?: number
   files: ReviewFile[]
 }
 
@@ -259,6 +261,64 @@ export async function getInsights(range: string): Promise<InsightsData> {
   return f(`/api/admin/insights?range=${range}`)
 }
 
+// ── Review sidebar: reviewers + checks (live from SCM) ────────────────────────
+
+export interface PRReviewer {
+  username: string
+  displayName: string
+  avatarUrl: string | null
+  isBot: boolean
+  /** "pending" | "approved" | "changes_requested" | "commented" | "dismissed" */
+  state: string
+  commentCount: number
+}
+
+export interface PRCheck {
+  name: string
+  /** "queued" | "in_progress" | "completed" */
+  status: string
+  /** "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out" | null */
+  conclusion: string | null
+  durationSeconds: number | null
+  detailsUrl: string | null
+}
+
+export interface ReviewReviewersResponse {
+  reviewers: PRReviewer[]
+  scmError?: string
+}
+
+export interface ReviewChecksResponse {
+  checks: PRCheck[]
+  scmError?: string
+}
+
+export async function getReviewReviewers(reviewId: string): Promise<ReviewReviewersResponse> {
+  return f(`/api/admin/reviews/${reviewId}/reviewers`)
+}
+
+export async function getReviewChecks(reviewId: string): Promise<ReviewChecksResponse> {
+  return f(`/api/admin/reviews/${reviewId}/checks`)
+}
+
+export interface PRCommit {
+  sha: string
+  shortSha: string
+  message: string
+  author: string
+  timestamp: string | null
+  url: string | null
+}
+
+export interface ReviewCommitsResponse {
+  commits: PRCommit[]
+  scmError?: string
+}
+
+export async function getReviewCommits(reviewId: string): Promise<ReviewCommitsResponse> {
+  return f(`/api/admin/reviews/${reviewId}/commits`)
+}
+
 // ── Chat API ──────────────────────────────────────────────────────────────────
 
 export interface Repo {
@@ -294,6 +354,7 @@ export async function getRepos(): Promise<Repo[]> {
 export interface CreateRepoRequest {
   fullName: string
   scmType: 'github' | 'bitbucket'
+  defaultBranch?: string
 }
 
 export async function createRepo(req: CreateRepoRequest): Promise<Repo> {
@@ -304,11 +365,41 @@ export async function createRepo(req: CreateRepoRequest): Promise<Repo> {
   }).then(async r => {
     if (!r.ok) {
       const err = await r.json().catch(() => ({}))
-      throw new Error(err?.error?.message ?? `Request failed: ${r.status}`)
+      throw new Error(
+        err?.error?.message ?? err?.detail ?? `Request failed: ${r.status}`,
+      )
     }
     const json = await r.json()
     return json.data ?? json
   })
+}
+
+/**
+ * Soft-delete a repository (sets is_active=false, preserves task history).
+ * Pass `hard: true` to permanently remove the row and detach linked tasks.
+ */
+export async function deleteRepo(id: string, opts?: { hard?: boolean }): Promise<void> {
+  const qs = opts?.hard ? '?hard=true' : ''
+  const r = await authFetch(`/api/admin/repos/${id}${qs}`, { method: 'DELETE' })
+  if (!r.ok && r.status !== 204) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error(err?.error?.message ?? err?.detail ?? `Request failed: ${r.status}`)
+  }
+}
+
+/** Reactivate a soft-deleted repository. */
+export async function reactivateRepo(id: string): Promise<Repo> {
+  const r = await authFetch(`/api/admin/repos/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ isActive: true }),
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error(err?.error?.message ?? err?.detail ?? `Request failed: ${r.status}`)
+  }
+  const json = await r.json()
+  return json.data ?? json
 }
 
 export async function sendMessage(req: SendMessageRequest): Promise<ChatResponse> {

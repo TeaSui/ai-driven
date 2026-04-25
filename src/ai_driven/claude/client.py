@@ -159,6 +159,10 @@ class ClaudeClient:
             messages.append({"role": "user", "content": tool_results})
 
         logger.warning("agent_loop_max_iterations", extra={"max_iterations": max_iter})
+        # Tag the response so callers can distinguish "finished by agent choice"
+        # from "ran out of iteration budget mid-work". BaseAgent.run() uses
+        # this to mark the task failed/incomplete rather than a silent success.
+        response.stop_reason = "max_iterations"
         return response
 
     async def _stream_iteration(

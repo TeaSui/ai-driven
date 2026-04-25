@@ -85,6 +85,10 @@ class RepoCreate(CamelModel):
 class RepoUpdate(CamelModel):
     default_branch: str | None = None
     settings_json: dict[str, Any] | None = None
+    # Allow reactivating a soft-deleted repository. Setting is_active=False
+    # is also allowed but is_equivalent to DELETE /repos/{id} (which is the
+    # preferred path for the UI).
+    is_active: bool | None = None
 
 
 class RepoResponse(CamelModel):
@@ -684,8 +688,11 @@ async def _resolve_task_scm_type(task_id: str) -> str:
     """Return ``"github"`` or ``"bitbucket"`` for a task.
 
     Priority:
-      1. The ``Repository.scm_type`` row the task is linked to in Postgres.
-      2. A hint in the event stream (explicit ``scm_type`` key in tool input).
+      1. The ``Repository.scm_type`` row the task is linked to in Postgres
+         via ``Task.repo_id``.
+      2. If ``Task.repo_id`` is null (older tasks), look up
+         ``Task.input_data["repo_full_name"]`` and match it to a registered
+         ``Repository`` row.
       3. Fallback ``"github"`` for backwards compatibility.
     """
     try:
@@ -696,6 +703,7 @@ async def _resolve_task_scm_type(task_id: str) -> str:
     from ai_driven.db.postgres.models import Task as TaskRow, Repository as RepoRow
 
     async with async_session_factory() as session:
+        # (1) Direct repo_id join
         res = await session.execute(
             select(RepoRow.scm_type).join(TaskRow, TaskRow.repo_id == RepoRow.id)
             .where(TaskRow.id == parsed)
@@ -703,6 +711,21 @@ async def _resolve_task_scm_type(task_id: str) -> str:
         row = res.scalar_one_or_none()
         if row:
             return row
+
+        # (2) Fallback: resolve via repo_full_name pulled from the task's
+        # input_data. Covers tasks created before chat router linked repo_id.
+        res2 = await session.execute(
+            select(TaskRow.input_data).where(TaskRow.id == parsed)
+        )
+        task_input = res2.scalar_one_or_none() or {}
+        repo_full_name = (task_input or {}).get("repo_full_name", "")
+        if repo_full_name:
+            res3 = await session.execute(
+                select(RepoRow.scm_type).where(RepoRow.full_name == repo_full_name)
+            )
+            row2 = res3.scalar_one_or_none()
+            if row2:
+                return row2
     return "github"
 
 
@@ -1028,6 +1051,52 @@ async def create_repo(
             detail=f"Repository '{body.full_name}' is already registered for this team",
         )
 
+    # Reachability probe: verify the repo exists and our configured
+    # credentials can see it before we create a DB row. Catches typos,
+    # wrong provider, revoked tokens, missing scopes — one call per
+    # registration, rare operation.
+    from ai_driven.scm.exceptions import SCMAuthError, SCMError, SCMNotFoundError
+    from ai_driven.scm.factory import get_scm_client_from_settings
+    try:
+        probe = get_scm_client_from_settings(body.scm_type)
+    except SCMError as ex:
+        # Missing credentials for the chosen provider.
+        raise HTTPException(
+            status_code=400,
+            detail=str(ex),
+        )
+    try:
+        # list_pull_requests is cheap and covers the same access scope
+        # the agents will need. We don't care about the result — only
+        # that the call succeeds against the repo.
+        await probe.list_pull_requests(body.full_name)
+    except SCMNotFoundError:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Repository '{body.full_name}' was not found on {body.scm_type}, "
+                f"or the configured credentials cannot access it."
+            ),
+        )
+    except SCMAuthError as ex:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot authenticate to {body.scm_type} — check the configured "
+                f"credentials. Provider said: {str(ex)[:180]}"
+            ),
+        )
+    except SCMError as ex:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{body.scm_type} probe failed: {type(ex).__name__}: {str(ex)[:180]}",
+        )
+    finally:
+        try:
+            await probe.close()
+        except Exception:
+            pass
+
     repo = await repo_repo.create(
         team_id=team.id,
         full_name=body.full_name,
@@ -1062,9 +1131,18 @@ async def list_repos(
 async def delete_repo(
     request: Request,
     repo_id: str,
+    hard: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Soft-delete a repository (set is_active=False)."""
+    """Delete a repository.
+
+    Default: soft-delete (``is_active=False``). Preserves the row, tasks keep
+    their ``repo_id`` link, and the UI shows 'Inactive'. Reactivate via
+    ``PUT /repos/{id}`` with ``{"isActive": true}``.
+
+    Pass ``?hard=true`` to permanently remove the row. Linked tasks are
+    detached (``Task.repo_id=NULL``) so task history survives the removal.
+    """
     team = await _get_team_from_request(request, session)
 
     try:
@@ -1078,7 +1156,10 @@ async def delete_repo(
     if not repo or repo.team_id != team.id:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    await repo_repo.soft_delete(parsed_id)
+    if hard:
+        await repo_repo.hard_delete(parsed_id)
+    else:
+        await repo_repo.soft_delete(parsed_id)
 
 
 @router.put("/repos/{repo_id}", response_model=RepoResponse)
@@ -1107,6 +1188,8 @@ async def update_repo(
         update_fields["default_branch"] = body.default_branch
     if body.settings_json is not None:
         update_fields["settings_json"] = body.settings_json
+    if body.is_active is not None:
+        update_fields["is_active"] = body.is_active
 
     if update_fields:
         await repo_repo.update_fields(parsed_id, **update_fields)
@@ -1420,6 +1503,7 @@ class ReviewDetailResponse(CamelModel):
     pr_url: str
     summary: str
     status: str
+    duration_ms: int | None = None
     files: list[ReviewFileResponse]
 
 
@@ -1495,6 +1579,12 @@ def _review_to_response(r: Any) -> ReviewDetailResponse:
     jira_key = task.jira_key if task else None
     title = task.title if task else f"PR #{r.pr_number}"
 
+    duration_ms: int | None = None
+    if task and task.started_at and task.completed_at:
+        duration_ms = int(
+            (task.completed_at - task.started_at).total_seconds() * 1000
+        )
+
     return ReviewDetailResponse(
         id=str(r.id),
         pr_number=r.pr_number,
@@ -1506,6 +1596,7 @@ def _review_to_response(r: Any) -> ReviewDetailResponse:
         pr_url=r.pr_url,
         summary=r.summary or "",
         status=r.status,
+        duration_ms=duration_ms,
         files=file_responses,
     )
 
@@ -1553,6 +1644,170 @@ async def get_review(
         raise HTTPException(status_code=404, detail="Review not found")
 
     return _review_to_response(review)
+
+
+async def _resolve_review_scm_target(
+    review_id: str, session: AsyncSession
+) -> tuple[Any, str, int, str]:
+    """Return (review, repo_full_name, pr_number, scm_type) or raise HTTPException."""
+    from ai_driven.db.postgres.models import Repository as RepoRow
+    from ai_driven.db.postgres.models import Review as ReviewModel
+    from ai_driven.db.postgres.models import Task as TaskRow
+    from sqlalchemy.orm import selectinload
+
+    try:
+        parsed_id = uuid.UUID(review_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid review ID format")
+
+    result = await session.execute(
+        select(ReviewModel)
+        .options(selectinload(ReviewModel.task))
+        .where(ReviewModel.id == parsed_id)
+    )
+    review = result.scalar_one_or_none()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    scm_type = "github"
+    if review.task and review.task.repo_id:
+        res = await session.execute(
+            select(RepoRow.scm_type).where(RepoRow.id == review.task.repo_id)
+        )
+        row = res.scalar_one_or_none()
+        if row:
+            scm_type = row
+
+    return review, review.repo_full_name, review.pr_number, scm_type
+
+
+@router.get("/reviews/{review_id}/reviewers")
+async def get_review_reviewers(
+    review_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the reviewer list from the underlying PR, with the AI reviewer prepended."""
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
+        review_id, session
+    )
+
+    ai_reviewer = {
+        "username": "gotyme-x-ai",
+        "displayName": "GoTyme-X AI",
+        "avatarUrl": None,
+        "isBot": True,
+        "state": review.status if review.status in (
+            "approved", "changes_requested", "commented", "pending"
+        ) else "commented",
+        "commentCount": len(review.comments_json or []),
+    }
+
+    try:
+        scm = get_scm_client_from_settings(scm_type)
+    except Exception as ex:
+        return {"reviewers": [ai_reviewer], "scmError": str(ex)}
+
+    try:
+        raw = await scm.get_pr_reviewers(repo_full_name, pr_number)
+    except Exception as ex:
+        logger.warning("get_pr_reviewers failed: %s", ex)
+        return {"reviewers": [ai_reviewer], "scmError": str(ex)[:200]}
+    finally:
+        await scm.close()
+
+    human = [
+        {
+            "username": r.username,
+            "displayName": r.display_name,
+            "avatarUrl": r.avatar_url,
+            "isBot": r.is_bot,
+            "state": r.state,
+            "commentCount": r.comment_count,
+        }
+        for r in raw
+    ]
+    return {"reviewers": [ai_reviewer] + human}
+
+
+@router.get("/reviews/{review_id}/checks")
+async def get_review_checks(
+    review_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the CI check-run list for the PR's head commit."""
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    _review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
+        review_id, session
+    )
+
+    try:
+        scm = get_scm_client_from_settings(scm_type)
+    except Exception as ex:
+        return {"checks": [], "scmError": str(ex)}
+
+    try:
+        raw = await scm.get_pr_checks(repo_full_name, pr_number)
+    except Exception as ex:
+        logger.warning("get_pr_checks failed: %s", ex)
+        return {"checks": [], "scmError": str(ex)[:200]}
+    finally:
+        await scm.close()
+
+    return {
+        "checks": [
+            {
+                "name": c.name,
+                "status": c.status,
+                "conclusion": c.conclusion,
+                "durationSeconds": c.duration_seconds,
+                "detailsUrl": c.details_url,
+            }
+            for c in raw
+        ]
+    }
+
+
+@router.get("/reviews/{review_id}/commits")
+async def get_review_commits(
+    review_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the commit list for the PR behind this review."""
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    _review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
+        review_id, session
+    )
+
+    try:
+        scm = get_scm_client_from_settings(scm_type)
+    except Exception as ex:
+        return {"commits": [], "scmError": str(ex)}
+
+    try:
+        raw = await scm.get_pr_commits(repo_full_name, pr_number)
+    except Exception as ex:
+        logger.warning("get_pr_commits failed: %s", ex)
+        return {"commits": [], "scmError": str(ex)[:200]}
+    finally:
+        await scm.close()
+
+    return {
+        "commits": [
+            {
+                "sha": c.sha,
+                "shortSha": c.sha[:7],
+                "message": c.message,
+                "author": c.author,
+                "timestamp": c.timestamp.isoformat() if c.timestamp else None,
+                "url": c.url,
+            }
+            for c in raw
+        ]
+    }
 
 
 # ---- Insights ----

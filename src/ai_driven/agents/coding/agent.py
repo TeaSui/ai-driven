@@ -525,6 +525,8 @@ class CodingAgent(BaseAgent):
         """Build comprehensive initial message with task context."""
         jira_key = task_input.get("jira_key", "")
         repo = task_input.get("repo_full_name", "")
+        scm_type = task_input.get("scm_type", "github")
+        pr_tool = "bitbucket.create_pr" if scm_type == "bitbucket" else "github.create_pr"
         # User's original chat message — the primary intent
         user_message = task_input.get("message", "")
         extra = task_input.get("instructions", "")
@@ -553,18 +555,25 @@ class CodingAgent(BaseAgent):
         parts += [
             "",
             "Follow this workflow:",
-            "1. UNDERSTAND: Use jira.get_issue to fetch the ticket details, acceptance criteria, and comments.",
+            "1. UNDERSTAND: Use jira.get_issue to fetch the ticket details, acceptance criteria, and comments (only if a Jira ticket key is provided — skip otherwise).",
             "2. EXPLORE: Use repo.list_files and repo.read_file to understand the codebase structure and relevant code.",
             "3. PLAN: Think through the implementation approach, considering existing patterns and test strategy.",
             "4. IMPLEMENT: Use git.create_branch to create a feature branch, then file.write to make changes.",
-            "5. DELIVER: Use github.create_pr to submit the changes, then jira.add_comment to update the ticket.",
+            f"5. DELIVER: Submit the PR with **{pr_tool}** (this repo is hosted on {scm_type}). Then post a Jira comment with the PR link if a Jira ticket exists.",
             "",
             "Important rules:",
+            "- Always pass the exact `repo_full_name` from the context above into every tool call. Never substitute or guess a different repo name.",
+            "- If no Jira ticket is provided in the context, do NOT invent one — skip jira.get_issue entirely and work from the user's request.",
             "- Follow existing code patterns and conventions found in the repository.",
             f"- Create a feature branch named `feature/{jira_key}` from the default branch." if jira_key else "",
             "- Write clean, tested code that matches the acceptance criteria.",
             f"- The PR title should be `{jira_key}: <summary>` where summary comes from Jira." if jira_key else "",
             "- Post a Jira comment with the PR link when done." if jira_key else "",
+            "",
+            "BUDGET DISCIPLINE — read this carefully:",
+            "- You have a fixed iteration budget. Opening the PR (step 5) is the most important action: a partially-written branch with a PR is always better than a complete branch with no PR, because a PR gets reviewed and the branch can keep evolving.",
+            f"- As a rule of thumb, STOP writing files and call {pr_tool} by the **two-thirds mark** of your budget. If you have 50 iterations, open the PR by iteration 33 even if the work feels incomplete — add a TODO section to the PR body and mention the remaining work.",
+            "- Never end a run without calling the PR tool. If you cannot finish, still open a draft PR referencing what's left.",
         ]
 
         # Remove empty strings from conditional lines

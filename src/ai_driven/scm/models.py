@@ -73,6 +73,7 @@ class Commit:
     message: str
     author: str
     timestamp: datetime
+    url: str | None = None
 
 
 @dataclass
@@ -89,3 +90,24 @@ class PRDiff:
     files: list[DiffFile] = field(default_factory=list)
     total_additions: int = 0
     total_deletions: int = 0
+
+
+@dataclass
+class PRReviewer:
+    username: str
+    display_name: str
+    avatar_url: str | None = None
+    is_bot: bool = False
+    # "pending" | "approved" | "changes_requested" | "commented" | "dismissed"
+    state: str = "pending"
+    comment_count: int = 0
+
+
+@dataclass
+class PRCheck:
+    name: str          # e.g. "ci / unit", "security / snyk"
+    status: str        # "queued" | "in_progress" | "completed"
+    conclusion: str | None = None
+    # "success" | "failure" | "neutral" | "cancelled" | "skipped" | "timed_out"
+    duration_seconds: int | None = None
+    details_url: str | None = None

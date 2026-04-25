@@ -532,9 +532,26 @@ class ReviewAgent(BaseAgent):
         pr_number = task_input.get("pr_number", "")
         pr_title = task_input.get("pr_title", "")
         pr_description = task_input.get("pr_description", "")
+        scm_type = task_input.get("scm_type", "github")
+
+        # Provider-specific tool names for the SCM-write parts of the review
+        # workflow. The repo is already registered with an scm_type; using the
+        # matching tool keeps telemetry honest and routes correctly even if
+        # the scm_client fallback chain ever changes.
+        if scm_type == "bitbucket":
+            diff_tool = "bitbucket.get_pr_diff"
+            comment_tool = "bitbucket.post_pr_comment"
+            approve_tool = "bitbucket.approve_pr"
+            changes_tool = "bitbucket.request_changes"
+        else:
+            diff_tool = "github.get_pr_diff"
+            comment_tool = "github.post_pr_comment"
+            approve_tool = "github.approve_pr"
+            changes_tool = "github.request_changes"
 
         parts = [
-            f"Please review pull request #{pr_number} in repository {repo}.",
+            f"Please review pull request #{pr_number} in repository {repo} "
+            f"(hosted on {scm_type}).",
         ]
 
         if pr_title:
@@ -543,12 +560,13 @@ class ReviewAgent(BaseAgent):
             parts.append(f"PR Description: {pr_description}")
 
         parts.append(
-            "\nWorkflow:"
-            "\n1. Fetch the PR diff using github.get_pr_diff"
-            "\n2. Analyze each changed file against the review checklist"
-            "\n3. Use repo.read_file or repo.list_files for additional context when needed"
-            "\n4. Use code.search to find related patterns in the codebase"
-            "\n5. Respond with the structured JSON review result"
+            f"\nWorkflow:"
+            f"\n1. Fetch the PR diff using {diff_tool}"
+            f"\n2. Analyze each changed file against the review checklist"
+            f"\n3. Use repo.read_file or repo.list_files for additional context when needed"
+            f"\n4. Use code.search to find related patterns in the codebase"
+            f"\n5. Post inline findings with {comment_tool}; submit the final review with {approve_tool} or {changes_tool}"
+            f"\n6. Respond with the structured JSON review result"
         )
 
         return "\n".join(parts)

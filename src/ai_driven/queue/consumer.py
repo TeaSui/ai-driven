@@ -115,7 +115,7 @@ class TaskConsumer:
                 await session.commit()
 
             # Create and run agent
-            agent = self._create_agent(agent_type, payload)
+            agent = await self._create_agent(agent_type, payload)
             result = await agent.run(payload)
 
             # Update task status
@@ -202,7 +202,34 @@ class TaskConsumer:
                 logger.warning("Heartbeat failed: %s", e)
 
     @staticmethod
-    def _create_agent(agent_type: str, payload: dict[str, Any]) -> Any:
+    async def _lookup_repo_scm_type(repo_full_name: str) -> str:
+        """Return 'github' or 'bitbucket' for a registered repo.
+
+        Defaults to 'github' when the repo isn't registered (legacy tasks
+        submitted before repo registration existed).
+        """
+        from ai_driven.db.postgres.models import Repository as RepoRow
+        from ai_driven.db.postgres.session import async_session_factory
+        from sqlalchemy import select
+
+        try:
+            async with async_session_factory() as session:
+                res = await session.execute(
+                    select(RepoRow.scm_type).where(
+                        RepoRow.full_name == repo_full_name
+                    )
+                )
+                row = res.scalar_one_or_none()
+                return row or "github"
+        except Exception as ex:
+            logger.warning(
+                "scm_type lookup failed for %s: %s — defaulting to github",
+                repo_full_name, ex,
+            )
+            return "github"
+
+    @staticmethod
+    async def _create_agent(agent_type: str, payload: dict[str, Any]) -> Any:
         """Factory method to create the appropriate agent with real clients."""
         settings = get_settings()
 
@@ -211,20 +238,29 @@ class TaskConsumer:
         if settings.jira_base_url and settings.jira_api_token:
             jira_client = JiraClient()
 
-        # Create SCM client based on repo info
+        # Create SCM client based on the registered repo's scm_type, not the
+        # first-non-empty credential. Looking up by repo_full_name means a
+        # Bitbucket-registered repo gets BitbucketClient even when
+        # GITHUB_TOKEN is also set (and vice versa).
         scm_client = None
         repo_full_name = payload.get("repo_full_name", "")
-        if repo_full_name and settings.github_token:
-            from ai_driven.scm.github_client import GitHubClient
+        if repo_full_name:
+            scm_type = await TaskConsumer._lookup_repo_scm_type(repo_full_name)
+            # Stamp the resolved provider into the payload so the coding-agent
+            # prompt can render the correct PR tool hint (github.create_pr vs
+            # bitbucket.create_pr) and skip jira.get_issue when there's no key.
+            payload["scm_type"] = scm_type
+            if scm_type == "bitbucket" and settings.bitbucket_username:
+                from ai_driven.scm.bitbucket_client import BitbucketClient
 
-            scm_client = GitHubClient(token=settings.github_token)
-        elif repo_full_name and settings.bitbucket_username:
-            from ai_driven.scm.bitbucket_client import BitbucketClient
+                scm_client = BitbucketClient(
+                    username=settings.bitbucket_username,
+                    app_password=settings.bitbucket_app_password,
+                )
+            elif settings.github_token:
+                from ai_driven.scm.github_client import GitHubClient
 
-            scm_client = BitbucketClient(
-                username=settings.bitbucket_username,
-                app_password=settings.bitbucket_app_password,
-            )
+                scm_client = GitHubClient(token=settings.github_token)
 
         agents: dict[str, Any] = {
             "coding": lambda: CodingAgent(

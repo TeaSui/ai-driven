@@ -10,6 +10,25 @@ from ai_driven.scm.github_client import GitHubClient
 from ai_driven.scm.models import SCMType
 
 
+def _build_github_mcp_adapter(token: str) -> Any:
+    """Phase A scaffolding: build an MCPSCMAdapter with a REST fallback client.
+
+    Kept in a helper so tests can monkeypatch just this function without
+    touching the rest of the factory.
+
+    NOTE (scaffolding): the real `McpClientManager` wiring is not yet hooked
+    up in this helper — doing so requires the server binary to be installed
+    and a background event loop that outlives request scope. For now this
+    function raises NotImplementedError when the flag is on, so flipping the
+    flag without wiring up the manager fails fast instead of silently. The
+    flag stays off by default.
+    """
+    raise NotImplementedError(
+        "MCPSCMAdapter factory wiring is scaffolding only. See "
+        "docs/implementation/12-scm-via-mcp.md Phase A tasks A1–A3."
+    )
+
+
 def get_scm_client_from_settings(
     scm_type: str | SCMType,
 ) -> GitHubClient | BitbucketClient:
@@ -18,6 +37,12 @@ def get_scm_client_from_settings(
     Used by request-path helpers (admin endpoints, webhook re-trigger, etc.)
     that don't have explicit credentials on hand but need to talk to the
     provider the task's repo is registered under.
+
+    When `scm_github_via_mcp=True`, returns an :class:`MCPSCMAdapter` wired
+    to the official github/github-mcp-server (see
+    ``docs/implementation/12-scm-via-mcp.md`` Phase A). Otherwise returns
+    the hand-rolled :class:`GitHubClient`. Flag is read-only at call time,
+    so hot-reload needs a process restart (same as any other setting).
     """
     from ai_driven.config import get_settings
 
@@ -31,6 +56,8 @@ def get_scm_client_from_settings(
     if scm_type == SCMType.GITHUB:
         if not settings.github_token:
             raise SCMError("GitHub token not configured (AI_DRIVEN_GITHUB_TOKEN)")
+        if settings.scm_github_via_mcp:
+            return _build_github_mcp_adapter(settings.github_token)
         return GitHubClient(token=settings.github_token)
 
     if scm_type == SCMType.BITBUCKET:

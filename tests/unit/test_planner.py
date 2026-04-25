@@ -150,7 +150,7 @@ class TestCreatePlan:
 
         with patch("ai_driven.agents.coding.planner.get_settings") as mock_settings:
             settings = MagicMock()
-            settings.claude_planning_model = "claude-opus-4-6"
+            settings.claude_planning_model = "claude-opus-4-7"
             mock_settings.return_value = settings
 
             plan = await agent.create_plan(
@@ -163,7 +163,7 @@ class TestCreatePlan:
 
         mock_claude.chat.assert_awaited_once()
         call_kwargs = mock_claude.chat.call_args
-        assert call_kwargs.kwargs["model"] == "claude-opus-4-6"
+        assert call_kwargs.kwargs["model"] == "claude-opus-4-7"
         assert call_kwargs.kwargs["thinking"]["type"] == "enabled"
         assert call_kwargs.kwargs["thinking"]["budget_tokens"] == 16000
 

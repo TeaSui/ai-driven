@@ -98,13 +98,13 @@ Source: `src/ai_driven/claude/provider.py` — `MockProvider._TOOL_SCRIPTS`
 | `AI_DRIVEN_CLAUDE_PROVIDER` | `anthropic` | `bedrock` | `anthropic` for direct API, `bedrock` for AWS |
 | `AI_DRIVEN_ANTHROPIC_API_KEY` | `sk-placeholder` | Real key (if provider=anthropic) | `sk-placeholder` triggers MockProvider in debug mode |
 | `AI_DRIVEN_CLAUDE_DEFAULT_MODEL` | `claude-sonnet-4-6` | same | Primary model for most tasks |
-| `AI_DRIVEN_CLAUDE_PLANNING_MODEL` | `claude-opus-4-6` | same | Extended thinking for planning |
+| `AI_DRIVEN_CLAUDE_PLANNING_MODEL` | `claude-opus-4-7` | same | Extended thinking for planning |
 | `AI_DRIVEN_CLAUDE_FAST_MODEL` | `claude-haiku-4-5` | same | Final fallback, also used for evaluation grading |
 | `AI_DRIVEN_SANDBOX_MODE` | **`mock`** | **`docker`** | Mock returns simulated results; docker runs Claude Code CLI |
 
 > **Bedrock Invoke API**: The platform uses `invoke_model` / `invoke_model_with_response_stream` with Anthropic Messages format payloads. IAM requires `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on `arn:aws:bedrock:{region}::foundation-model/anthropic.*`. Model access must also be enabled in the Bedrock console.
 
-> **Bedrock model IDs**: `claude-sonnet-4-6` maps to `anthropic.claude-sonnet-4-6`, `claude-opus-4-6` maps to `anthropic.claude-opus-4-6-v1`, `claude-haiku-4-5` maps to `anthropic.claude-haiku-4-5-20251001-v1:0`. See `BedrockProvider._resolve_model_id()`.
+> **Bedrock model IDs**: `claude-sonnet-4-6` maps to `anthropic.claude-sonnet-4-6`, `claude-opus-4-7` maps to `global.anthropic.claude-opus-4-7`, `claude-haiku-4-5` maps to `anthropic.claude-haiku-4-5-20251001-v1:0`. The older `claude-opus-4-6` still resolves to `global.anthropic.claude-opus-4-6-v1` as a legacy alias. See `BedrockProvider._resolve_model_id()`.
 
 ### RAG (Semantic Code Search)
 

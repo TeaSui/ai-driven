@@ -311,9 +311,9 @@ Screenshots archived at `/tmp/ui-walk/*.png` (12 pages + 4 workflow states + 2 d
 
 ## 11. Dependency currency
 
-- [ ] Bump `claude_planning_model` in `config.py:38` from `claude-opus-4-6` → `claude-opus-4-7`
-- [ ] Bump Bedrock model IDs at `config.py:62`
-- [ ] Add Opus 4.7 + Sonnet 4.6.x pricing to `billing/tracker.py:14-22`
+- [x] Bump `claude_planning_model` in `config.py:39` from `claude-opus-4-6` → `claude-opus-4-7` (landed 2026-04-22, re-benchmark still pending)
+- [x] Bump Bedrock model IDs (`config.py:81` now `global.anthropic.claude-opus-4-7`; `provider.py:_resolve_model_id` maps both 4.7 and legacy 4.6)
+- [x] Opus 4.7 pricing present in `billing/tracker.py:16,21` and `observability/metrics.py:122`
 - [ ] Canary 10% of planning tasks on 4.7; rollback if eval weighted-avg drops > 0.5
 - [ ] Update pricing table in `docs/features/01-ai-coding-agent.md`
 - [ ] Update `docs/configuration.md` env-var defaults

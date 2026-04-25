@@ -8,7 +8,6 @@ import {
   Sparkles,
   Check,
   CircleDot,
-  Activity,
   ExternalLink,
 } from 'lucide-react'
 import { Pill } from '@/components/ui/pill'
@@ -22,7 +21,13 @@ import {
   getReviews,
   approveReview,
   requestChanges,
+  getReviewReviewers,
+  getReviewChecks,
+  getReviewCommits,
   type ReviewDetail,
+  type PRReviewer,
+  type PRCheck,
+  type PRCommit,
 } from '@/lib/api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -46,6 +51,15 @@ type QueueTab = 'all' | 'awaiting' | 'completed'
 type ReviewTab = 'conversation' | 'review' | 'commits' | 'checks'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatReviewDuration(durationMs: number): string {
+  if (durationMs < 1000) return `${durationMs}ms`
+  const seconds = Math.round(durationMs / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return s === 0 ? `${m}m` : `${m}m ${s}s`
+}
 
 function toLocalSeverity(severity: string): Severity {
   if (severity === 'warn' || severity === 'warning') return 'warn'
@@ -153,18 +167,33 @@ function SummaryChip({
 // ── ReviewSummaryBar ──────────────────────────────────────────────────────────
 
 function ReviewSummaryBar({ review }: { review?: ReviewDetail }) {
-  const allComments = review ? review.files.flatMap((f) => f.comments) : null
-  const totalComments = allComments ? allComments.length : 3
-  const fileCount = review ? review.files.length : 7
-  const safetyCount = allComments
-    ? allComments.filter((c) => c.category === 'safety').length
-    : 1
-  const correctnessCount = allComments
-    ? allComments.filter((c) => c.category === 'correctness').length
-    : 1
-  const styleCount = allComments
-    ? allComments.filter((c) => c.category !== 'safety' && c.category !== 'correctness').length
-    : 1
+  // No review selected → render a neutral placeholder bar, not fake counts.
+  if (!review) {
+    return (
+      <div
+        data-testid="review-summary-empty"
+        style={{
+          padding: '14px 20px',
+          borderBottom: '1px solid var(--panel-border)',
+          background: 'var(--panel)',
+          color: 'var(--text-faint)',
+          fontStyle: 'italic',
+          fontSize: 12.5,
+        }}
+      >
+        Select a review from the queue to see the AI review summary.
+      </div>
+    )
+  }
+
+  const allComments = review.files.flatMap((f) => f.comments)
+  const totalComments = allComments.length
+  const fileCount = review.files.length
+  const safetyCount = allComments.filter((c) => c.category === 'safety').length
+  const correctnessCount = allComments.filter((c) => c.category === 'correctness').length
+  const styleCount = allComments.filter(
+    (c) => c.category !== 'safety' && c.category !== 'correctness',
+  ).length
 
   return (
     <div
@@ -193,20 +222,10 @@ function ReviewSummaryBar({ review }: { review?: ReviewDetail }) {
           </span>
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--text-subtle)' }}>
-          Analyzed {fileCount} file{fileCount !== 1 ? 's' : ''} from{' '}
-          <code
-            style={{
-              fontFamily: 'Geist Mono, monospace',
-              fontSize: 11,
-              background: 'var(--bg-muted)',
-              padding: '1px 4px',
-              borderRadius: 3,
-              border: '1px solid var(--border)',
-            }}
-          >
-            .gotyme/review.yml
-          </code>{' '}
-          took 12s
+          Analyzed {fileCount} file{fileCount !== 1 ? 's' : ''}
+          {review.durationMs != null && (
+            <> · took {formatReviewDuration(review.durationMs)}</>
+          )}
         </div>
       </div>
       <SummaryChip count={safetyCount} label="Safety" tone="warn" />
@@ -464,43 +483,67 @@ function FileReviewBlock({ review }: { review?: ReviewDetail }) {
 
 // ── ReviewerRow ───────────────────────────────────────────────────────────────
 
-function ReviewerRow({
-  name,
-  bot,
-  status,
-  comment,
-}: {
-  name: string
-  bot?: boolean
-  status: 'approved' | 'pending'
-  comment?: string
-}) {
+function ReviewerRow({ r }: { r: PRReviewer }) {
+  const toneByState: Record<string, 'success' | 'warn' | 'default'> = {
+    approved: 'success',
+    changes_requested: 'warn',
+    commented: 'default',
+    pending: 'default',
+    dismissed: 'default',
+  }
+  const labelByState: Record<string, string> = {
+    approved: 'Approved',
+    changes_requested: 'Changes requested',
+    commented: 'Commented',
+    pending: 'Pending',
+    dismissed: 'Dismissed',
+  }
+  const tone = toneByState[r.state] ?? 'default'
+  const label = labelByState[r.state] ?? r.state
+  const subLine = r.commentCount > 0
+    ? `${r.commentCount} comment${r.commentCount === 1 ? '' : 's'}`
+    : undefined
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      {bot ? <Avatar bot size={22} /> : <Avatar name={name} size={22} />}
+      {r.isBot ? <Avatar bot size={22} /> : <Avatar name={r.displayName} size={22} />}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, color: 'var(--text)' }}>{name}</div>
-        {comment && (
-          <div style={{ fontSize: 10.5, color: 'var(--text-subtle)' }}>{comment}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--text)' }}>{r.displayName}</div>
+        {subLine && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-subtle)' }}>{subLine}</div>
         )}
       </div>
-      {status === 'approved' && (
-        <Pill tone="success" size="xs" icon={<Check size={9} />}>
-          Approved
-        </Pill>
-      )}
-      {status === 'pending' && (
-        <Pill tone="default" size="xs">
-          Pending
-        </Pill>
-      )}
+      <Pill
+        tone={tone}
+        size="xs"
+        icon={r.state === 'approved' ? <Check size={9} /> : undefined}
+      >
+        {label}
+      </Pill>
     </div>
   )
 }
 
 // ── CheckRow ──────────────────────────────────────────────────────────────────
 
-function CheckRow({ name, ok, time }: { name: string; ok?: boolean; time?: string }) {
+function formatDuration(seconds: number | null): string | undefined {
+  if (seconds == null || seconds < 0) return undefined
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return s === 0 ? `${m}m` : `${m}m ${String(s).padStart(2, '0')}s`
+}
+
+function CheckRow({ c }: { c: PRCheck }) {
+  // Success / running / failed colour hints
+  const ok = c.conclusion === 'success'
+  const failed = c.conclusion === 'failure' || c.conclusion === 'timed_out'
+  const color = failed
+    ? 'var(--status-warn, #b00020)'
+    : ok
+      ? 'var(--status-success)'
+      : 'var(--text-faint)'
+  const duration = formatDuration(c.durationSeconds)
   return (
     <div
       style={{
@@ -511,15 +554,24 @@ function CheckRow({ name, ok, time }: { name: string; ok?: boolean; time?: strin
         color: 'var(--text-muted)',
       }}
     >
-      <Check
-        size={11}
-        color={ok ? 'var(--status-success)' : 'var(--text-faint)'}
-      />
-      <span className="gtx-mono" style={{ flex: 1 }}>
-        {name}
-      </span>
-      {time && (
-        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{time}</span>
+      <Check size={11} color={color} />
+      {c.detailsUrl ? (
+        <a
+          href={c.detailsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="gtx-mono"
+          style={{ flex: 1, color: 'inherit', textDecoration: 'none' }}
+        >
+          {c.name}
+        </a>
+      ) : (
+        <span className="gtx-mono" style={{ flex: 1 }}>
+          {c.name}
+        </span>
+      )}
+      {duration && (
+        <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{duration}</span>
       )}
     </div>
   )
@@ -528,61 +580,71 @@ function CheckRow({ name, ok, time }: { name: string; ok?: boolean; time?: strin
 // ── ReviewSidebar ─────────────────────────────────────────────────────────────
 
 function ReviewSidebar({ review }: { review?: ReviewDetail }) {
+  const reviewersKey = review ? ['/reviews', review.id, 'reviewers'] : null
+  const checksKey = review ? ['/reviews', review.id, 'checks'] : null
+
+  const { data: reviewersData } = useSWR(
+    reviewersKey,
+    () => getReviewReviewers(review!.id),
+    { refreshInterval: 30_000, revalidateOnFocus: false },
+  )
+  const { data: checksData } = useSWR(
+    checksKey,
+    () => getReviewChecks(review!.id),
+    { refreshInterval: 30_000, revalidateOnFocus: false },
+  )
+
+  const sectionTitle: React.CSSProperties = {
+    fontSize: 11,
+    color: 'var(--text-subtle)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 10,
+  }
+
   return (
     <div style={{ padding: '16px 20px', fontSize: 12.5 }}>
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-subtle)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          marginBottom: 10,
-        }}
-      >
-        Reviewers
-      </div>
+      <div style={sectionTitle}>Reviewers</div>
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 }}
       >
-        <ReviewerRow name="GoTyme-X AI" bot status="approved" comment="3 comments" />
-        <ReviewerRow name="Mira Delgado" status="pending" />
-        <ReviewerRow name="Jamie Ortiz" status="approved" />
+        {(() => {
+          if (!review) return <EmptyLine>Select a review to see reviewers</EmptyLine>
+          if (reviewersData === undefined) return <EmptyLine>Loading…</EmptyLine>
+          const list = Array.isArray(reviewersData.reviewers)
+            ? reviewersData.reviewers
+            : []
+          if (list.length === 0)
+            return <EmptyLine>No reviewers assigned</EmptyLine>
+          return list.map((r) => <ReviewerRow key={r.username} r={r} />)
+        })()}
+        {reviewersData?.scmError && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+            SCM: {reviewersData.scmError}
+          </div>
+        )}
       </div>
 
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-subtle)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          marginBottom: 10,
-        }}
-      >
-        Checks
-      </div>
+      <div style={sectionTitle}>Checks</div>
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}
       >
-        <CheckRow name="ci / unit" ok time="42s" />
-        <CheckRow name="ci / integration" ok time="3m 18s" />
-        <CheckRow name="ci / race-detector" ok time="1m 04s" />
-        <CheckRow name="ci / lint" ok time="22s" />
-        <CheckRow name="security / snyk" ok time="1m 45s" />
-        <CheckRow name="coverage / 87%" ok />
-        <CheckRow name="preview / staging" ok time="deployed" />
+        {(() => {
+          if (!review) return <EmptyLine>Select a review to see CI checks</EmptyLine>
+          if (checksData === undefined) return <EmptyLine>Loading…</EmptyLine>
+          const list = Array.isArray(checksData.checks) ? checksData.checks : []
+          if (list.length === 0)
+            return <EmptyLine>No CI checks reported</EmptyLine>
+          return list.map((c, i) => <CheckRow key={`${c.name}-${i}`} c={c} />)
+        })()}
+        {checksData?.scmError && (
+          <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+            SCM: {checksData.scmError}
+          </div>
+        )}
       </div>
 
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--text-subtle)',
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
-          marginBottom: 10,
-        }}
-      >
-        Linked
-      </div>
+      <div style={sectionTitle}>Linked</div>
       <div
         style={{
           fontSize: 12,
@@ -592,35 +654,169 @@ function ReviewSidebar({ review }: { review?: ReviewDetail }) {
           gap: 6,
         }}
       >
-        <a
-          href="#"
-          style={{
-            color: 'var(--accent-600)',
-            textDecoration: 'none',
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-          }}
-        >
-          <CircleDot size={11} />
-          <span className="gtx-mono">{review?.jiraKey ?? 'GTX-4829'}</span>{' '}
-          {review?.jiraKey ? review.title : 'Fix race condition'}
-        </a>
-        <a
-          href="#"
-          style={{
-            color: 'var(--accent-600)',
-            textDecoration: 'none',
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-          }}
-        >
-          <Activity size={11} />
-          Alert-8821 balance-cache errors
-        </a>
+        {review?.jiraKey ? (
+          <a
+            href="#"
+            style={{
+              color: 'var(--accent-600)',
+              textDecoration: 'none',
+              display: 'flex',
+              gap: 6,
+              alignItems: 'center',
+            }}
+          >
+            <CircleDot size={11} />
+            <span className="gtx-mono">{review.jiraKey}</span> {review.title}
+          </a>
+        ) : (
+          <EmptyLine>No Jira ticket linked</EmptyLine>
+        )}
       </div>
     </div>
+  )
+}
+
+function EmptyLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, color: 'var(--text-faint)', fontStyle: 'italic' }}>
+      {children}
+    </div>
+  )
+}
+
+// ── CommitList, CheckList, ConversationPanel ──────────────────────────────────
+
+function CommitList({
+  review,
+  data,
+}: {
+  review?: ReviewDetail
+  data?: { commits: PRCommit[]; scmError?: string }
+}) {
+  if (!review) {
+    return <EmptyLine>Select a review to see commits</EmptyLine>
+  }
+  if (data === undefined) {
+    return <EmptyLine>Loading commits…</EmptyLine>
+  }
+  const commits = Array.isArray(data.commits) ? data.commits : []
+  if (commits.length === 0) {
+    return (
+      <div>
+        <EmptyLine>No commits returned by the SCM provider.</EmptyLine>
+        {data.scmError && (
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>
+            SCM: {data.scmError}
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <ul
+      data-testid="commit-list"
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      {commits.map((c) => (
+        <li
+          key={c.sha}
+          style={{
+            padding: '8px 10px',
+            borderRadius: 4,
+            background: 'var(--bg-elev)',
+            border: '1px solid var(--panel-border)',
+            fontSize: 12.5,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+            <span
+              className="gtx-mono"
+              style={{ fontSize: 11, color: 'var(--text-faint)' }}
+            >
+              {c.shortSha}
+            </span>
+            <span style={{ flex: 1, color: 'var(--text)' }}>{c.message}</span>
+          </div>
+          <div style={{ fontSize: 10.5, color: 'var(--text-subtle)', marginTop: 2 }}>
+            {c.author}
+            {c.timestamp && <> · {new Date(c.timestamp).toLocaleString()}</>}
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function CheckList({
+  review,
+  data,
+}: {
+  review?: ReviewDetail
+  data?: { checks: PRCheck[]; scmError?: string }
+}) {
+  if (!review) {
+    return <EmptyLine>Select a review to see CI checks</EmptyLine>
+  }
+  if (data === undefined) {
+    return <EmptyLine>Loading checks…</EmptyLine>
+  }
+  const checks = Array.isArray(data.checks) ? data.checks : []
+  if (checks.length === 0) {
+    return (
+      <div>
+        <EmptyLine>No CI checks reported for this PR.</EmptyLine>
+        {data.scmError && (
+          <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>
+            SCM: {data.scmError}
+          </div>
+        )}
+      </div>
+    )
+  }
+  return (
+    <ul
+      data-testid="check-list"
+      style={{
+        listStyle: 'none',
+        margin: 0,
+        padding: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      {checks.map((c, i) => (
+        <li
+          key={`${c.name}-${i}`}
+          style={{
+            padding: '8px 10px',
+            borderRadius: 4,
+            background: 'var(--bg-elev)',
+            border: '1px solid var(--panel-border)',
+          }}
+        >
+          <CheckRow c={c} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ConversationPanel({ review }: { review?: ReviewDetail }) {
+  if (!review) {
+    return <EmptyLine>Select a review to see the PR conversation</EmptyLine>
+  }
+  return (
+    <EmptyLine>
+      PR conversation view is not wired to the SCM provider yet.
+    </EmptyLine>
   )
 }
 
@@ -957,27 +1153,53 @@ export default function ReviewsPage() {
     : 'No review selected'
   const prUrl = selectedReview?.prUrl
 
+  // Live PR metadata for tab counts + detail panes.
+  const { data: detailChecks } = useSWR(
+    selectedReview ? ['/reviews', selectedReview.id, 'checks'] : null,
+    () => getReviewChecks(selectedReview!.id),
+    { refreshInterval: 30_000, revalidateOnFocus: false },
+  )
+  const { data: detailCommits } = useSWR(
+    selectedReview ? ['/reviews', selectedReview.id, 'commits'] : null,
+    () => getReviewCommits(selectedReview!.id),
+    { refreshInterval: 30_000, revalidateOnFocus: false },
+  )
+
+  const aiReviewCount = selectedReview
+    ? selectedReview.files.reduce((s, f) => s + f.comments.length, 0)
+    : 0
+  const commitsCount = Array.isArray(detailCommits?.commits)
+    ? detailCommits.commits.length
+    : null
+  const checksCount = Array.isArray(detailChecks?.checks)
+    ? detailChecks.checks.length
+    : null
+  const checksAllPass =
+    Array.isArray(detailChecks?.checks) &&
+    detailChecks.checks.length > 0 &&
+    detailChecks.checks.every((c) => c.conclusion === 'success')
+
   const detailTabs: {
     id: ReviewTab
     label: string
-    count: number
+    count: number | null
     icon?: React.ReactNode
   }[] = [
-    { id: 'conversation', label: 'Conversation', count: 5 },
+    { id: 'conversation', label: 'Conversation', count: null },
     {
       id: 'review',
       label: 'AI Review',
-      count: selectedReview
-        ? selectedReview.files.reduce((s, f) => s + f.comments.length, 0)
-        : 3,
+      count: selectedReview ? aiReviewCount : null,
       icon: <BrandMark size={12} />,
     },
-    { id: 'commits', label: 'Commits', count: 2 },
+    { id: 'commits', label: 'Commits', count: commitsCount },
     {
       id: 'checks',
       label: 'Checks',
-      count: 8,
-      icon: <Check size={11} color="var(--status-success)" />,
+      count: checksCount,
+      icon: checksAllPass ? (
+        <Check size={11} color="var(--status-success)" />
+      ) : undefined,
     },
   ]
 
@@ -1163,18 +1385,21 @@ export default function ReviewsPage() {
                 >
                   {t.icon}
                   {t.label}
-                  <span
-                    style={{
-                      fontSize: 10.5,
-                      fontWeight: 400,
-                      color: 'var(--text-faint)',
-                      background: 'var(--bg-muted)',
-                      padding: '1px 5px',
-                      borderRadius: 8,
-                    }}
-                  >
-                    {t.count}
-                  </span>
+                  {t.count != null && (
+                    <span
+                      data-testid={`detail-tab-count-${t.id}`}
+                      style={{
+                        fontSize: 10.5,
+                        fontWeight: 400,
+                        color: 'var(--text-faint)',
+                        background: 'var(--bg-muted)',
+                        padding: '1px 5px',
+                        borderRadius: 8,
+                      }}
+                    >
+                      {t.count}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -1199,7 +1424,21 @@ export default function ReviewsPage() {
                 overflow: 'auto',
               }}
             >
-              <FileReviewBlock review={selectedReview} />
+              {detailTab === 'review' && (
+                <FileReviewBlock review={selectedReview} />
+              )}
+              {detailTab === 'commits' && (
+                <CommitList
+                  review={selectedReview}
+                  data={detailCommits}
+                />
+              )}
+              {detailTab === 'checks' && (
+                <CheckList review={selectedReview} data={detailChecks} />
+              )}
+              {detailTab === 'conversation' && (
+                <ConversationPanel review={selectedReview} />
+              )}
             </div>
             <div style={{ overflow: 'auto', background: 'var(--bg-elev)' }}>
               <ReviewSidebar review={selectedReview} />

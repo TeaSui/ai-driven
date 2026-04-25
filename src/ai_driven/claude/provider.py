@@ -344,7 +344,16 @@ class BedrockProvider(ClaudeProvider):
 
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = boto3.client("bedrock-runtime", region_name=settings.aws_region)
+        # Prefer explicit settings creds when present so .env.local wins over
+        # ~/.aws/credentials's [default] profile (which on some dev machines
+        # has a LocalStack sentinel 'test' key that Bedrock will reject).
+        boto_kwargs: dict[str, Any] = {"region_name": settings.aws_region}
+        if settings.aws_access_key_id and settings.aws_secret_access_key:
+            boto_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+            boto_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+            if settings.aws_session_token:
+                boto_kwargs["aws_session_token"] = settings.aws_session_token
+        self._client = boto3.client("bedrock-runtime", **boto_kwargs)
 
     async def create_message(
         self,
@@ -976,17 +985,23 @@ def create_provider(
             logger.info("Debug mode: no API key configured — using MockProvider")
             return MockProvider()
         if provider_type == ClaudeProviderType.BEDROCK:
-            # Test Bedrock connectivity; fall back to mock if IAM isn't set up
-            try:
-                import botocore.session
-                session = botocore.session.get_session()
-                creds = session.get_credentials()
-                if not creds or not creds.access_key or creds.access_key == "test":
-                    logger.info("Debug mode: no real AWS credentials — using MockProvider")
+            # Settings-level creds (from .env.local) win — they bypass both
+            # the ~/.aws/credentials default profile and the default chain.
+            if settings.aws_access_key_id and settings.aws_secret_access_key:
+                logger.info("Debug mode: using Bedrock with settings creds")
+            else:
+                # No settings creds → probe the default boto chain. Fall back
+                # to Mock if it returns nothing or the LocalStack 'test' key.
+                try:
+                    import botocore.session
+                    session = botocore.session.get_session()
+                    creds = session.get_credentials()
+                    if not creds or not creds.access_key or creds.access_key == "test":
+                        logger.info("Debug mode: no real AWS credentials — using MockProvider")
+                        return MockProvider()
+                except Exception:
+                    logger.info("Debug mode: AWS credentials check failed — using MockProvider")
                     return MockProvider()
-            except Exception:
-                logger.info("Debug mode: AWS credentials check failed — using MockProvider")
-                return MockProvider()
 
     providers = {
         ClaudeProviderType.ANTHROPIC: AnthropicProvider,

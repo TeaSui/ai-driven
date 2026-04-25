@@ -480,19 +480,37 @@ class BaseAgent(ABC):
             # Flush any remaining buffered text
             await _flush_stream_buffer(iteration_count)
 
+            # A run that stopped mid-workflow is NOT a success. Two modes:
+            #   * stop_reason="max_iterations" — the agent-loop budget ran
+            #     out before the model chose to stop.
+            #   * stop_reason="max_tokens" — the model's final response got
+            #     truncated at the output-token cap mid-sentence, which
+            #     typically means the DELIVER step (github.create_pr / PR
+            #     body composition) never fired.
+            # Both leave the branch pushed but no PR opened. Mark as failed
+            # so the UI surfaces the problem instead of a misleading
+            # "completed" badge with no PR URL.
+            bad_stop = getattr(response, "stop_reason", None) in (
+                "max_iterations", "max_tokens",
+            )
+            iterations_exhausted = bad_stop  # kept for the AgentResult message below
+            run_success = not bad_stop
+
             duration = time.monotonic() - start_time
             emit_agent_metrics(
-                self.agent_type, duration, tool_call_count, iteration_count, success=True,
+                self.agent_type, duration, tool_call_count, iteration_count,
+                success=run_success,
             )
             logger.info(
-                "agent_complete",
+                "agent_complete" if run_success else "agent_iterations_exhausted",
                 extra={
-                    "success": True,
+                    "success": run_success,
                     "iterations": iteration_count,
                     "tool_calls": tool_call_count,
                     "duration_seconds": round(duration, 2),
                     "total_input_tokens": conversation.total_input_tokens,
                     "total_output_tokens": conversation.total_output_tokens,
+                    "stop_reason": getattr(response, "stop_reason", None),
                 },
             )
 
@@ -527,12 +545,20 @@ class BaseAgent(ABC):
                 ))
 
             return AgentResult(
-                success=True,
+                success=run_success,
                 output=response.text,
                 conversation=conversation,
                 tool_calls=tool_call_count,
                 iterations=iteration_count,
                 duration_seconds=duration,
+                error=(
+                    f"Agent stopped after {iteration_count} iterations without "
+                    f"finishing (max_iterations={max_iterations or 'default'}). "
+                    f"Last step may have been a mid-workflow file write — check "
+                    f"the branch on the SCM side and consider raising "
+                    f"AI_DRIVEN_CLAUDE_MAX_TOOL_ITERATIONS or re-running."
+                    if iterations_exhausted else None
+                ),
             )
 
         except Exception as e:

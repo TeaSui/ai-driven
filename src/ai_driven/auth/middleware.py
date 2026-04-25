@@ -25,6 +25,11 @@ PUBLIC_PATHS = {
     "/webhooks/bitbucket",
     "/webhooks/jira",
     "/webhooks/datadog",
+    # Sprint 14: login must be reachable without prior auth. Logout is
+    # idempotent and clears browser state even when the current session is
+    # already invalid.
+    "/api/auth/login",
+    "/api/auth/logout",
 }
 
 # Redis cache TTL for team lookups (seconds)
@@ -62,6 +67,45 @@ async def _get_redis() -> Any:
     except Exception:
         logger.warning("Redis unavailable for team cache — falling back to no-cache mode")
         _redis_client = None
+        return None
+
+
+def _extract_session_token_mw(request: Request) -> str | None:
+    """Middleware version of _extract_session_token — avoids a cross-module import.
+
+    Returns the session token if a browser-shaped credential is present.
+    Separate from the API-key path so agents with only X-API-Key are not
+    forced through Redis.
+    """
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth.removeprefix("Bearer ").strip() or None
+    cookie = request.cookies.get("session_token")
+    return cookie or None
+
+
+async def _resolve_session(token: str) -> dict[str, Any] | None:
+    """Validate a session token against Redis. None on any failure.
+
+    Fail-closed on Redis outage — the caller returns 401 and the browser
+    redirects to /login. Agents and scripts never see this path (they use
+    X-API-Key), so the Redis hard-dependency is UI-only.
+
+    In debug mode, the ``debug-session`` sentinel (set by the Next.js
+    middleware when the backend reports ``debug=true`` on /health) resolves
+    to the sentinel debug team — mirrors the X-API-Key debug bypass.
+    """
+    settings = get_settings()
+    if settings.debug and token == "debug-session":
+        return {"team_id": "00000000-0000-0000-0000-000000000000", "role": "owner"}
+    try:
+        from ai_driven.auth import sessions as session_store
+        sess = await session_store.load_session(token)
+        if not sess:
+            return None
+        return {"team_id": sess.team_id, "role": sess.role}
+    except Exception as ex:
+        logger.warning("session resolution failed: %s", ex)
         return None
 
 
@@ -171,6 +215,27 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if settings.debug and not request.headers.get("X-API-Key"):
             request.state.team_id = "00000000-0000-0000-0000-000000000000"
             bind_team("00000000-0000-0000-0000-000000000000")
+            response = await call_next(request)
+            response.headers["X-Trace-Id"] = trace_id
+            clear_trace()
+            return response
+
+        # Sprint 14: session-token path (browser UI). If either
+        # Authorization: Bearer <token> or a session_token cookie is
+        # present, resolve via Redis instead of the X-API-Key path.
+        # Agents, webhooks, scripts still use X-API-Key.
+        session_token = _extract_session_token_mw(request)
+        if session_token:
+            session_data = await _resolve_session(session_token)
+            if session_data is None:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": {"code": "UNAUTHORIZED", "message": "Session expired or invalid", "details": []}},
+                )
+            request.state.team_id = session_data["team_id"]
+            request.state.session_token = session_token
+            bind_team(session_data["team_id"])
             response = await call_next(request)
             response.headers["X-Trace-Id"] = trace_id
             clear_trace()

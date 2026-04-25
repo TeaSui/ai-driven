@@ -2,11 +2,12 @@
 
 import { FormEvent, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { setApiKey } from '@/lib/auth'
+import { login } from '@/lib/auth'
 
 export default function LoginPage() {
   const router = useRouter()
   const [key, setKey] = useState('')
+  const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,20 +19,13 @@ export default function LoginPage() {
     setError('')
 
     try {
-      // Validate the API key by hitting /health with it
-      const res = await fetch('/api/admin/dashboard', {
-        headers: { 'X-API-Key': key.trim() },
-      })
-      if (res.status === 401) {
-        setError('Invalid API key. Please check and try again.')
-        setLoading(false)
-        return
-      }
-      // Key is valid — store it and redirect
-      setApiKey(key.trim())
+      // Exchange the API key for a short-lived session token. The backend
+      // sets an HttpOnly session_token cookie on success; the page just
+      // needs to navigate.
+      await login(key.trim(), email.trim() || undefined)
       router.push('/dashboard')
-    } catch {
-      setError('Unable to reach the server. Please try again.')
+    } catch (ex) {
+      setError(ex instanceof Error ? ex.message : 'Sign-in failed. Please try again.')
       setLoading(false)
     }
   }
@@ -42,9 +36,22 @@ export default function LoginPage() {
         <h1 style={styles.logo}>
           GoTyme<span style={styles.logoAccent}>X</span> AI
         </h1>
-        <p style={styles.subtitle}>Enter your team API key to continue</p>
+        <p style={styles.subtitle}>Sign in with your team API key</p>
 
         <form onSubmit={handleSubmit} style={styles.form} noValidate>
+          <label htmlFor="email" style={styles.label}>
+            Email <span style={styles.optional}>(optional, for audit log)</span>
+          </label>
+          <input
+            id="email"
+            type="email"
+            placeholder="you@company.com"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="email"
+            style={styles.input}
+          />
+
           <label htmlFor="api-key" style={styles.label}>API Key</label>
           <input
             id="api-key"
@@ -70,12 +77,13 @@ export default function LoginPage() {
             aria-busy={loading}
             style={styles.button}
           >
-            {loading ? 'Verifying...' : 'Sign in'}
+            {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
 
         <p style={styles.hint}>
           API keys are issued by your team administrator via the platform CLI or admin panel.
+          Your email is used only for the audit log and is not part of authentication.
         </p>
       </div>
     </main>
@@ -124,6 +132,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 500,
     color: 'var(--text)',
+  },
+  optional: {
+    fontSize: 11,
+    color: 'var(--text-faint)',
+    fontWeight: 400,
   },
   input: {
     padding: '10px 12px',

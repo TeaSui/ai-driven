@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_driven.db.postgres.models import (
@@ -80,8 +80,15 @@ class TaskRepository:
         title: str,
         input_data: dict[str, Any] | None = None,
         team_id: uuid.UUID | None = None,
+        repo_id: uuid.UUID | None = None,
     ) -> Task:
-        """Create a task with sensible defaults for chat-originated tasks."""
+        """Create a task with sensible defaults for chat-originated tasks.
+
+        Passing ``repo_id`` links the task to a registered repository so that
+        admin endpoints like ``/api/admin/tasks/{id}/file`` can resolve the
+        provider via ``Repository.scm_type`` (without it, they default to
+        GitHub and 404 on Bitbucket repos).
+        """
         if team_id is None:
             team_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
         return await self.create(
@@ -91,6 +98,7 @@ class TaskRepository:
             status="queued",
             title=title,
             input_data=input_data or {},
+            repo_id=repo_id,
         )
 
     async def update_status(
@@ -250,6 +258,22 @@ class RepoRepository:
         """Set is_active=False on a repository."""
         await self._session.execute(
             update(Repository).where(Repository.id == repo_id).values(is_active=False)
+        )
+
+    async def hard_delete(self, repo_id: uuid.UUID) -> None:
+        """Permanently delete a repository and detach its tasks.
+
+        Detaches tasks (sets ``Task.repo_id=NULL``) rather than cascading,
+        so the task history survives the repo removal. ``Task.repo_id`` is
+        nullable — callers like ``_resolve_task_scm_type`` already handle
+        that case by falling back to ``Task.input_data["repo_full_name"]``.
+        """
+        from ai_driven.db.postgres.models import Task
+        await self._session.execute(
+            update(Task).where(Task.repo_id == repo_id).values(repo_id=None)
+        )
+        await self._session.execute(
+            delete(Repository).where(Repository.id == repo_id)
         )
 
     async def update_fields(self, repo_id: uuid.UUID, **kwargs: Any) -> None:

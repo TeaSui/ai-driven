@@ -25,9 +25,12 @@ from ai_driven.scm.exceptions import (
     SCMValidationError,
 )
 from ai_driven.scm.models import (
+    Commit,
     DiffFile,
     DirectoryEntry,
     FileContent,
+    PRCheck,
+    PRReviewer,
     PRComment,
     PRDiff,
     PRState,
@@ -523,6 +526,126 @@ class GitHubClient:
                     "merge_commit_sha": pr.get("merge_commit_sha", ""),
                 })
         return merged[:limit]
+
+    async def get_pr_reviewers(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRReviewer]:
+        """Merge requested-reviewers (pending) with submitted reviews (latest state per user)."""
+        requested_resp, reviews_resp = (
+            await self._request(
+                "GET", f"/repos/{repo_full_name}/pulls/{pr_number}/requested_reviewers"
+            ),
+            await self._request(
+                "GET", f"/repos/{repo_full_name}/pulls/{pr_number}/reviews"
+            ),
+        )
+
+        state_map = {
+            "APPROVED": "approved",
+            "CHANGES_REQUESTED": "changes_requested",
+            "COMMENTED": "commented",
+            "DISMISSED": "dismissed",
+        }
+
+        # Latest review per user
+        by_user: dict[str, PRReviewer] = {}
+        comment_counts: dict[str, int] = {}
+        for rv in reviews_resp.json() or []:
+            user = rv.get("user") or {}
+            login = user.get("login")
+            if not login:
+                continue
+            if (rv.get("state") or "") == "COMMENTED":
+                comment_counts[login] = comment_counts.get(login, 0) + 1
+            mapped = state_map.get(rv.get("state") or "", "commented")
+            by_user[login] = PRReviewer(
+                username=login,
+                display_name=user.get("name") or login,
+                avatar_url=user.get("avatar_url"),
+                is_bot=(user.get("type") == "Bot"),
+                state=mapped,
+                comment_count=comment_counts.get(login, 0),
+            )
+
+        # Pending reviewers (requested but no review yet) — don't overwrite existing
+        requested = requested_resp.json() or {}
+        for user in (requested.get("users") or []):
+            login = user.get("login")
+            if not login or login in by_user:
+                continue
+            by_user[login] = PRReviewer(
+                username=login,
+                display_name=user.get("name") or login,
+                avatar_url=user.get("avatar_url"),
+                is_bot=(user.get("type") == "Bot"),
+                state="pending",
+            )
+
+        return list(by_user.values())
+
+    async def get_pr_checks(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRCheck]:
+        """Fetch check-runs for the PR's head commit."""
+        pr_resp = await self._request(
+            "GET", f"/repos/{repo_full_name}/pulls/{pr_number}"
+        )
+        sha = (pr_resp.json().get("head") or {}).get("sha")
+        if not sha:
+            return []
+
+        resp = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/commits/{sha}/check-runs",
+        )
+        runs = (resp.json() or {}).get("check_runs") or []
+        checks: list[PRCheck] = []
+        for run in runs:
+            duration: int | None = None
+            started, completed = run.get("started_at"), run.get("completed_at")
+            if started and completed:
+                try:
+                    s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                    c = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                    duration = max(0, int((c - s).total_seconds()))
+                except Exception:
+                    duration = None
+            checks.append(PRCheck(
+                name=run.get("name") or "check",
+                status=run.get("status") or "queued",
+                conclusion=run.get("conclusion"),
+                duration_seconds=duration,
+                details_url=run.get("html_url"),
+            ))
+        return checks
+
+    async def get_pr_commits(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[Commit]:
+        """List commits on a PR."""
+        resp = await self._request(
+            "GET", f"/repos/{repo_full_name}/pulls/{pr_number}/commits"
+        )
+        out: list[Commit] = []
+        for item in resp.json() or []:
+            sha = item.get("sha", "")
+            commit = item.get("commit") or {}
+            author = ((commit.get("author") or {}).get("name")
+                      or (item.get("author") or {}).get("login")
+                      or "unknown")
+            ts_raw = (commit.get("author") or {}).get("date")
+            try:
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")) if ts_raw else datetime.now(timezone.utc)
+            except Exception:
+                ts = datetime.now(timezone.utc)
+            out.append(Commit(
+                sha=sha,
+                message=(commit.get("message") or "").split("\n", 1)[0],
+                author=author,
+                timestamp=ts,
+                url=item.get("html_url"),
+            ))
+        return out
 
     # ------------------------------------------------------------------
     # Helpers

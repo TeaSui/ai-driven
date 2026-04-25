@@ -14,12 +14,98 @@
 import { test, expect } from './fixtures'
 
 test.describe('Authentication', () => {
-  test.skip('unauthenticated user visiting /dashboard is redirected to /login', async ({ page }) => {
-    // TODO: the codebase does not yet ship a middleware.ts that enforces the
-    // dashboard auth gate. /dashboard loads for anyone in dev mode. Re-enable
-    // this test once the middleware is added.
-    await page.goto('/dashboard')
+  test('unauthenticated user visiting /dashboard is redirected to /login (non-debug backend)', async ({
+    page,
+  }) => {
+    // The middleware's /health probe runs on the Node edge, which
+    // page.route can't intercept. Setting `disable_debug_bypass=1` cookie
+    // forces the middleware to skip the debug bypass and take the prod
+    // redirect path.
+    await page.context().addCookies([
+      {
+        name: 'disable_debug_bypass',
+        value: '1',
+        domain: 'localhost',
+        path: '/',
+        sameSite: 'Lax',
+        httpOnly: false,
+        secure: false,
+      },
+    ])
+
+    await page.goto('/dashboard/overview')
     await expect(page).toHaveURL(/\/login/)
+  })
+
+  test('authenticated user with api_key cookie is not redirected', async ({
+    authenticatedPage: page,
+  }) => {
+    // Also stub the backend-side calls the dashboard makes on load.
+    await page.route('/health', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'ok', debug: false }),
+      }),
+    )
+    await page.route('/api/admin/me', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { teamName: 'GoTyme Team' } }),
+      }),
+    )
+    await page.route('/api/admin/dashboard', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { costToday: 0, dailyBudget: 50, budgetUsagePercent: 0 },
+        }),
+      }),
+    )
+
+    await page.goto('/dashboard/overview')
+    await expect(page).toHaveURL(/\/dashboard/)
+  })
+
+  test('debug-mode backend auto-bypasses the redirect and sets a sentinel cookie', async ({
+    page,
+  }) => {
+    // debug=true short-circuits the redirect so local dev is frictionless.
+    await page.route('/health', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'ok', debug: true }),
+      }),
+    )
+    await page.route('/api/admin/me', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { teamName: 'Debug Team' } }),
+      }),
+    )
+    await page.route('/api/admin/dashboard', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { costToday: 0, dailyBudget: 50, budgetUsagePercent: 0 },
+        }),
+      }),
+    )
+
+    await page.goto('/dashboard/overview')
+    // Landed on /dashboard, not /login.
+    await expect(page).toHaveURL(/\/dashboard/)
+
+    // Middleware set the sentinel session cookie (Sprint 14 switched from
+    // api_key=debug-bypass to session_token=debug-session).
+    const cookies = await page.context().cookies()
+    const sessionCookie = cookies.find((c) => c.name === 'session_token')
+    expect(sessionCookie?.value).toBe('debug-session')
   })
 
   test('login page renders the API key input and sign-in button', async ({ page }) => {

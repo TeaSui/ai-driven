@@ -3,6 +3,7 @@
 from enum import Enum
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -37,13 +38,34 @@ class Settings(BaseSettings):
     claude_default_model: str = "claude-sonnet-4-6"
     claude_planning_model: str = "claude-opus-4-7"  # bumped 2026-04-22 — see docs/implementation/09 §11
     claude_fast_model: str = "claude-haiku-4-5"
-    claude_max_tokens: int = 4096
-    claude_max_tool_iterations: int = 20
+    # Output token cap. 4096 was too tight for coding runs — Sonnet 4.6's
+    # final "open the PR, summarize, update Jira" turn routinely writes
+    # >4k tokens (full PR body + tool calls) and got truncated mid-response,
+    # which prevented github.create_pr from firing (see KAN-10, 2026-04-25).
+    # Bump to 16384; models support this cleanly and the wall-clock cost
+    # is bounded by the request timeout, not the token cap.
+    claude_max_tokens: int = 16384
+    # Coding runs that touch ≥10 files often need 2 iterations per file
+    # (read → write) plus explore + plan + deliver. 20 was under-budgeted —
+    # KAN-9 (fe4e7f5c) burned 20 iterations writing files and never reached
+    # the PR step. 50 gives enough headroom for large tickets without
+    # encouraging runaway loops; raise further only after a new regression.
+    claude_max_tool_iterations: int = 50
     anthropic_api_key: str = ""
 
     # AWS
     aws_region: str = "eu-central-1"
     aws_account_id: str = ""
+    # Let the backend use explicit creds from .env.local so boto3 doesn't
+    # silently fall through to ~/.aws/credentials (which on this machine has
+    # a sentinel 'test' access key for LocalStack). Empty string means "let
+    # boto3 resolve from the default chain" — same as before.
+    #
+    # These read the *bare* AWS_* env-var names rather than AI_DRIVEN_AWS_*
+    # so users don't have to duplicate the standard boto3 names in .env.local.
+    aws_access_key_id: str = Field(default="", validation_alias="AWS_ACCESS_KEY_ID")
+    aws_secret_access_key: str = Field(default="", validation_alias="AWS_SECRET_ACCESS_KEY")
+    aws_session_token: str = Field(default="", validation_alias="AWS_SESSION_TOKEN")
 
     # Sandbox
     sandbox_mode: str = "mock"  # "mock" for local dev, "docker" for production
@@ -99,6 +121,14 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # Session-backed login (Sprint 14, docs/implementation/14-login-ux-overhaul.md).
+    # When true, the frontend must exchange an API key for a short-lived session
+    # token via POST /api/auth/login; the X-API-Key path stays open for agents
+    # and CI. Default off so rollout is reversible.
+    ui_auth_require_session: bool = False
+    session_ttl_seconds: int = 24 * 3600  # 24h sliding
+    session_max_age_seconds: int = 30 * 24 * 3600  # 30d hard cap
+
     # GitHub
     github_app_id: str = ""
     github_app_private_key: str = ""
@@ -130,6 +160,15 @@ class Settings(BaseSettings):
     mcp_jira_enabled: bool = False
     mcp_slack_enabled: bool = False
     mcp_datadog_enabled: bool = False
+
+    # Phase A of docs/implementation/12-scm-via-mcp.md: route the SCMClient
+    # protocol through the official github/github-mcp-server instead of the
+    # in-process GitHubClient. Default off — flip to true after staging burn-in.
+    scm_github_via_mcp: bool = False
+    # Pin the binary / npm package used for the official GitHub MCP server.
+    # Defaults to the npx-installable package so zero setup is needed locally.
+    github_mcp_command: str = "npx"
+    github_mcp_args: str = "-y,@github/github-mcp-server"
 
     # SCM tokens (direct token auth, alternative to App-based auth)
     github_token: str = ""

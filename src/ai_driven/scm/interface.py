@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from ai_driven.scm.models import (
+    Commit,
     DirectoryEntry,
     FileContent,
+    PRCheck,
     PRComment,
     PRDiff,
+    PRReviewer,
     PullRequest,
 )
 
@@ -96,4 +99,22 @@ class SCMClient(Protocol):
         self, repo_full_name: str, limit: int = 10
     ) -> list[dict[str, Any]]:
         """List recently merged PRs (used as deployment proxy)."""
+        ...
+
+    async def get_pr_reviewers(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRReviewer]:
+        """List reviewers on a pull request with their latest review state."""
+        ...
+
+    async def get_pr_checks(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[PRCheck]:
+        """List CI check runs for a pull request's head commit."""
+        ...
+
+    async def get_pr_commits(
+        self, repo_full_name: str, pr_number: int
+    ) -> list[Commit]:
+        """List the commits on a pull request."""
         ...

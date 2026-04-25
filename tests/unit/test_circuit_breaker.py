@@ -63,13 +63,13 @@ class TestResilientProvider:
         )
 
         with patch("ai_driven.claude.provider.get_settings") as mock_settings:
-            mock_settings.return_value.claude_planning_model = "claude-opus-4-6"
+            mock_settings.return_value.claude_planning_model = "claude-opus-4-7"
             mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
             mock_settings.return_value.claude_fast_model = "claude-haiku-4-5"
 
             resilient = ResilientProvider(mock_provider)
             result = await resilient.create_message(
-                model="claude-opus-4-6", max_tokens=100, messages=[]
+                model="claude-opus-4-7", max_tokens=100, messages=[]
             )
             assert result == mock_response
             # Second call should use fallback model

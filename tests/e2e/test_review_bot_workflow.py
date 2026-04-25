@@ -378,7 +378,7 @@ class TestLargeDiffModelSelection:
         agent = ReviewAgent(scm_client=AsyncMock())
         with patch("ai_driven.agents.reviewer.agent.get_settings") as mock_settings:
             mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
-            mock_settings.return_value.claude_planning_model = "claude-opus-4-6"
+            mock_settings.return_value.claude_planning_model = "claude-opus-4-7"
             model = agent._select_model({"diff_lines": 100})
             assert model == "claude-sonnet-4-6"
 
@@ -386,9 +386,9 @@ class TestLargeDiffModelSelection:
         agent = ReviewAgent(scm_client=AsyncMock())
         with patch("ai_driven.agents.reviewer.agent.get_settings") as mock_settings:
             mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
-            mock_settings.return_value.claude_planning_model = "claude-opus-4-6"
+            mock_settings.return_value.claude_planning_model = "claude-opus-4-7"
             model = agent._select_model({"diff_lines": 600})
-            assert model == "claude-opus-4-6"
+            assert model == "claude-opus-4-7"
 
 
 # ---------------------------------------------------------------------------

@@ -49,7 +49,7 @@ def test_message_response_with_thinking():
         ],
         stop_reason="end_turn",
         usage=TokenUsage(input_tokens=50, output_tokens=30),
-        model="claude-opus-4-6",
+        model="claude-opus-4-7",
     )
     assert response.text == "The answer is 42"
     assert not response.has_tool_use

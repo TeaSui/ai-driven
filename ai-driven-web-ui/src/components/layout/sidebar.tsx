@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { useSidebar } from './sidebar-context'
-import { authFetch, clearApiKey } from '@/lib/auth'
+import { authFetch, logout as doLogout } from '@/lib/auth'
 import { getDashboardSummary, type DashboardSummary } from '@/lib/api'
 import { BrandMark, Wordmark } from '@/components/ui/brand-mark'
 import { Avatar } from '@/components/ui/avatar'
@@ -289,8 +289,10 @@ export function Sidebar() {
       .catch(() => {})
   }, [])
 
-  function handleLogout() {
-    clearApiKey()
+  async function handleLogout() {
+    // Clears the session_token cookie server-side, revokes the Redis entry,
+    // and also drops the legacy api_key cookie for belt-and-braces.
+    await doLogout()
     router.push('/login')
   }
 
@@ -396,6 +398,7 @@ export function Sidebar() {
             <ThemeToggle iconOnly />
             <button
               aria-label="Sign out"
+              data-testid="sidebar-sign-out"
               onClick={handleLogout}
               style={{
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',

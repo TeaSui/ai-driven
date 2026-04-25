@@ -12,6 +12,7 @@ from ai_driven.api.webhooks.bitbucket import router as bitbucket_webhook_router
 from ai_driven.api.webhooks.jira import router as jira_webhook_router
 from ai_driven.api.webhooks.datadog import router as datadog_webhook_router
 from ai_driven.api.webhooks.slack import router as slack_webhook_router
+from ai_driven.api.auth.router import router as auth_router
 from ai_driven.api.chat.router import router as chat_router
 from ai_driven.api.admin.router import router as admin_router
 from ai_driven.api.error_handlers import register_error_handlers
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(jira_webhook_router, prefix="/webhooks/jira", tags=["webhooks"])
     app.include_router(datadog_webhook_router, prefix="/webhooks/datadog", tags=["webhooks"])
     app.include_router(slack_webhook_router, prefix="/webhooks/slack", tags=["webhooks"])
+    app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
     app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 

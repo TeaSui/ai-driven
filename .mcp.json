@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-mcp-servers",
+  "_comment": "Project-scoped MCP servers for ai-driven. Committed to git so every contributor gets the same tool surface. Secrets live in .env.local (untracked) and are substituted at launch via shell env expansion. See docs/mcp.md.",
+  "mcpServers": {
+    "aws-docs": {
+      "_comment": "Read-only AWS documentation / resource search. Useful when triaging DevOps incidents (CDK + Lambda + ECS stack) without opening the AWS console.",
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"]
+    },
+    "atlassian": {
+      "_comment": "Jira (and optionally Confluence) read/write. Credentials come from environment. If env vars are unset at startup the server still launches but returns 'not authenticated' on tool calls — set them in .env.local before using.",
+      "command": "uvx",
+      "args": ["mcp-atlassian@latest"],
+      "env": {
+        "JIRA_URL": "${AI_DRIVEN_JIRA_BASE_URL}",
+        "JIRA_USERNAME": "${AI_DRIVEN_JIRA_EMAIL}",
+        "JIRA_API_TOKEN": "${AI_DRIVEN_JIRA_API_TOKEN}"
+      }
+    }
+  }
+}
