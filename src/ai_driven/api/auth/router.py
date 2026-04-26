@@ -294,15 +294,17 @@ async def login(
             detail="Session store unavailable — please retry shortly.",
         )
 
-    # Set an HttpOnly cookie. Secure flag is honoured in production (HTTPS);
-    # local dev over http:// still works because httpx / fetch attach the
-    # cookie regardless when `secure=False`.
+    # Set an HttpOnly cookie. Secure flag is on everywhere except local HTTP
+    # dev — dev/staging/prod all run behind HTTPS, so the cookie must not be
+    # transmittable over cleartext there. LOCAL is the only env where we
+    # accept http:// and therefore the only env that needs Secure=False.
+    from ai_driven.config import Environment
     response.set_cookie(
         key="session_token",
         value=sess.token,
         httponly=True,
         samesite="lax",
-        secure=False,  # TODO: flip to True behind an env flag for prod deploys.
+        secure=settings.environment != Environment.LOCAL,
         max_age=settings.session_ttl_seconds,
         path="/",
     )

@@ -2,6 +2,8 @@
 
 **Purpose:** one checklist to ship every feature the platform claims. Derived from a pass over `src/ai_driven/` and `ai-driven-web-ui/src/` on 2026-04-22, then validated end-to-end with Playwright against live backend + frontend on 2026-04-23.
 
+> **Doc currency note (2026-04-25):** this audit predates Sprints 10–14. Many `[ ]` boxes below have since been completed in their dedicated sprint docs but **not back-ported here**. When a check disagrees with a sprint doc, the sprint doc wins. Authoritative status by sprint: see [00-overview.md](00-overview.md) Progress dashboard. This file is kept as a historical snapshot — do not rely on it as a current to-do list.
+
 ## Playwright runtime validation (2026-04-23)
 
 Booted backend (`uvicorn :8888`, debug mode) + frontend (Next dev `:3000`) with real Postgres/Redis/Anthropic-stub, walked every nav item, exercised interactive elements, and ran the New-run → Task-detail → Stop workflow:

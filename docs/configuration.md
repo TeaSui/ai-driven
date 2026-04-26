@@ -86,10 +86,18 @@ Source: `src/ai_driven/claude/provider.py` — `MockProvider._TOOL_SCRIPTS`
 
 | Env Variable | Local | Production | Notes |
 |---|---|---|---|
-| `AI_DRIVEN_ENVIRONMENT` | `local` | `production` | Used in logging, DataDog tags |
+| `AI_DRIVEN_ENVIRONMENT` | `local` | `production` | Used in logging, DataDog tags, **and the session-cookie `Secure` flag** — only `local` allows non-Secure cookies. Valid: `local`, `dev`, `staging`, `production`. |
 | `AI_DRIVEN_DEBUG` | `true` | **unset** (defaults to `false`) | See table above |
 | `AI_DRIVEN_API_PORT` | `8888` | `8888` | Backend API port |
 | `AI_DRIVEN_LOG_LEVEL` | `INFO` | `INFO` | |
+
+### Auth / sessions (Sprint 14)
+
+| Env Variable | Local | Production | Notes |
+|---|---|---|---|
+| `AI_DRIVEN_UI_AUTH_REQUIRE_SESSION` | `false` | `true` (when ready) | When `true`, the Next.js UI MUST exchange an API key for a session token before calling admin endpoints. Default `false` keeps `X-API-Key` accepted on browser requests during rollout. |
+| `AI_DRIVEN_SESSION_TTL_SECONDS` | `86400` (24 h sliding) | `86400` | Re-extended on each request that touches `/api/auth/session`. |
+| `AI_DRIVEN_SESSION_MAX_AGE_SECONDS` | `2592000` (30 d) | `2592000` | Hard cap. Sessions older than this are rejected regardless of the sliding TTL. |
 
 ### Claude / Bedrock
 

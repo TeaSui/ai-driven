@@ -60,13 +60,13 @@ High-level checklist of where each sprint stands. Per-item detail lives in each 
 - [x] **Sprint 6** — DevOps polish (core done — Secrets Manager integration + ECS auto-scaling tuning deferred to production)
 - [x] **Sprint 7** — Claude API integration (RAG, MCP, evaluation, extended thinking)
 - [x] **Sprint 8** — Severity taxonomy migration ([07-severity-taxonomy-migration.md](07-severity-taxonomy-migration.md)) — enum, migration, Pydantic validator, frontend typing, and CI grep-guard all landed. Staging + prod `alembic upgrade head` still pending.
-- [ ] **Sprint 9** — Auth + WebSocket security ([08-auth-and-ws-security.md](08-auth-and-ws-security.md)) — **PARTIAL.** Phase 1 (cancelled state + `/health` debug), Phase 4 (WS 4401/4404 banner), Phase 6 (debug banner) landed. **Launch blocker remaining:** Phases 2/3/5/7 — Cognito pool, login UI, API-key management UI, DataDog debug-mode alert.
+- [ ] **Sprint 9** — Auth + WebSocket security ([08-auth-and-ws-security.md](08-auth-and-ws-security.md)) — **PARTIAL.** Landed: Phase 1 (`cancelled` state + `/health` debug flag), Phase 4 (WS 4401/4404 banner), Phase 5 (API-key management UI + rotation), Phase 6 (red debug banner). Session-token login (originally Phase 3) shipped separately as Sprint 14. Cookie `Secure` flag env-aware. **Remaining (launch blockers):** Phase 2 (Cognito User Pool — blocked on AWS provisioning) and Phase 7 (DataDog debug-mode metric — needs prod metric surface).
 - [x] **Sprint 10a** — Task-page UX correctness pass (BUG-21 → BUG-29)
 - [x] **Sprint 10b** — BitBucket Cloud dual-support (code landed; smoke script `scripts/bitbucket_happy_case.py` passes against `origination1/ai-driven` — factory, list_files, read_file, list_pull_requests all green; diff/reviewers/checks deferred until an open PR exists on the repo)
 - [x] **Sprint 11** — Code Review sidebar live reviewer + check data
 - [x] **Sprint 12** — Dev-tool MCP registration: project-scoped `.mcp.json` with `aws-docs` + `atlassian` (Jira) servers. See [../mcp.md](../mcp.md).
 - [ ] **Sprint 13 (planned)** — SCM via MCP: replace `GitHubClient` with `MCPSCMAdapter` behind the existing `SCMClient` Protocol; Bitbucket swap gated on an official/maintained Bitbucket MCP shipping. See [12-scm-via-mcp.md](12-scm-via-mcp.md).
-- [ ] **Sprint 14 (proposed)** — Login UX overhaul: session-token cookie replaces raw API key; real logout, per-device sessions, audit trail; Cognito migration path preserved. See [14-login-ux-overhaul.md](14-login-ux-overhaul.md).
+- [x] **Sprint 14** — Login UX overhaul shipped: session-token HttpOnly cookie replaces raw API key, `POST /api/auth/login` + `/logout`, Redis-backed sessions with 24h sliding TTL + 30d hard cap, sidebar sign-out, env-aware Secure flag. Cognito migration path preserved (Sprint 9 Phase 2). See [14-login-ux-overhaul.md](14-login-ux-overhaul.md).
 
 ## Project Structure
 

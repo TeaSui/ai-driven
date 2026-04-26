@@ -469,7 +469,7 @@ class ReviewAgent(BaseAgent):
         parent_task_id: str | None = task_input.get("parent_task_id")
         await self._maybe_enable_rag(repo_full_name, parent_task_id=parent_task_id)
 
-        return await super().run(
+        result = await super().run(
             task_input,
             task_id=task_id,
             model=model or self._select_model(task_input),
@@ -477,6 +477,145 @@ class ReviewAgent(BaseAgent):
             use_thinking=use_thinking,
             stop_sequences=stop_sequences if stop_sequences is not None else ["```"],
         )
+
+        # Persist a Review row so the Code Review tab can surface this run.
+        # Do this after super().run() so the conversation + output text are
+        # already populated. Failures here must NOT fail the task — the PR
+        # comments have already been posted and the agent did its job.
+        if task_id:
+            try:
+                await self._persist_review_row(task_id, task_input, result)
+            except Exception:
+                logger.exception(
+                    "ReviewAgent: failed to persist Review row (non-fatal); "
+                    "task %s will still appear in the task list but not in "
+                    "the Code Review tab.", task_id,
+                )
+
+        return result
+
+    async def _persist_review_row(
+        self, task_id: str, task_input: dict[str, Any], result: Any
+    ) -> None:
+        """Harvest the agent output + tool calls and write a Review row."""
+        import json as _json
+        import re
+        import uuid as _uuid
+        from ai_driven.db.postgres.session import async_session_factory
+        from ai_driven.db.postgres.repository import ReviewRepository
+
+        repo_full_name = task_input.get("repo_full_name", "")
+        raw_pr = task_input.get("pr_number")
+
+        # pr_number must be an int. New-Run UI sometimes sends a Jira key
+        # ("KAN-10") which is nonsense here — refuse to persist in that case
+        # rather than silently mislabeling the Review row. The agent may
+        # still have posted comments to whatever number it extracted; that's
+        # a separate UI-validation bug.
+        pr_number: int | None = None
+        if isinstance(raw_pr, int):
+            pr_number = raw_pr
+        elif isinstance(raw_pr, str):
+            # Accept pure-int strings; reject anything with letters.
+            if raw_pr.isdigit():
+                pr_number = int(raw_pr)
+            else:
+                logger.warning(
+                    "ReviewAgent: pr_number=%r is not an integer; "
+                    "skipping Review persistence to avoid bad data. "
+                    "The UI should send int, not a Jira key.", raw_pr,
+                )
+                return
+
+        if not repo_full_name or pr_number is None:
+            logger.warning(
+                "ReviewAgent: missing repo_full_name / pr_number; skipping "
+                "Review persistence. repo=%r pr=%r",
+                repo_full_name, raw_pr,
+            )
+            return
+
+        # Parse the model's structured JSON output. Prompt asks for
+        #   { "verdict": "approve|request_changes|comment",
+        #     "summary": "...",
+        #     "findings": [ {severity, category, file_path, line, body, ...}, ... ],
+        #     "positive_highlights": [...] }
+        verdict: str = "commented"
+        summary: str = ""
+        comments: list[dict[str, Any]] = []
+        output_text = getattr(result, "output", "") or ""
+
+        # Strip a leading code fence if present.
+        m = re.search(r"\{.*\}", output_text, re.DOTALL)
+        if m:
+            try:
+                parsed = _json.loads(m.group(0))
+                summary = str(parsed.get("summary") or "")[:2000]
+                raw_verdict = str(parsed.get("verdict") or "").lower()
+                # Normalize to values the Review model + UI expect.
+                if raw_verdict in ("approve", "approved"):
+                    verdict = "approved"
+                elif raw_verdict in (
+                    "request_changes", "changes_requested", "changes"
+                ):
+                    verdict = "changes_requested"
+                else:
+                    verdict = "commented"
+                # The prompt's JSON schema uses various key names depending
+                # on model + prompt drift. Accept findings / comments / issues
+                # so we don't silently drop data.
+                findings_list: list[Any] = []
+                for k in ("findings", "comments", "issues"):
+                    v = parsed.get(k)
+                    if isinstance(v, list):
+                        findings_list = v
+                        break
+                for f in findings_list:
+                    if not isinstance(f, dict):
+                        continue
+                    comments.append({
+                        "file_path": f.get("file_path") or f.get("path") or f.get("file") or "",
+                        "line_number": f.get("line") or f.get("line_number"),
+                        "severity": (f.get("severity") or "info").lower(),
+                        "category": (f.get("category") or "correctness").lower(),
+                        "confidence": f.get("confidence", 0.8),
+                        "title": f.get("title") or "",
+                        "body": f.get("body") or f.get("message") or "",
+                        "suggested_code": f.get("suggested_code") or f.get("suggestedCode"),
+                    })
+            except Exception:
+                logger.info(
+                    "ReviewAgent: could not parse final JSON; Review row "
+                    "will have an empty comments_json. Summary will fall "
+                    "back to the raw output."
+                )
+                summary = output_text[:2000]
+
+        pr_url = f"https://github.com/{repo_full_name}/pull/{pr_number}"
+
+        async with async_session_factory() as session:
+            repo_ = ReviewRepository(session)
+            await repo_.create(
+                id=_uuid.uuid4(),
+                task_id=_uuid.UUID(task_id),
+                pr_url=pr_url,
+                pr_number=pr_number,
+                repo_full_name=repo_full_name,
+                status=verdict,
+                summary=summary,
+                comments_json=comments,
+                issues_found=len(comments),
+                critical_issues=sum(
+                    1 for c in comments
+                    if c.get("severity") in ("critical", "high", "warn", "warning")
+                ),
+            )
+            await session.commit()
+            logger.info(
+                "ReviewAgent: persisted Review row for task=%s pr=%s/%s "
+                "verdict=%s findings=%d",
+                task_id, repo_full_name, pr_number, verdict, len(comments),
+            )
 
     async def _register_mcp_tools(self) -> None:
         """Register MCP tools if MCP is enabled."""

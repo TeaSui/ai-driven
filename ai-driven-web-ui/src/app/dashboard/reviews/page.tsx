@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import useSWR, { mutate as swrMutate } from 'swr'
 import {
   FileCode,
@@ -17,6 +16,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { BrandMark } from '@/components/ui/brand-mark'
 import { ReviewCard } from '@/components/reviews/review-card'
 import { KeyboardShortcutHelp } from '@/components/ui/keyboard-shortcut-help'
+import { notify } from '@/lib/notify'
 import {
   getReviews,
   approveReview,
@@ -35,6 +35,8 @@ import {
 type Severity = 'warn' | 'info' | 'nit'
 
 interface ReviewComment {
+  /** Backend-side ID — used by Apply/Dismiss to identify the comment. */
+  id: string
   line: number
   severity: Severity
   title: string
@@ -75,6 +77,7 @@ function mapApiComments(
     t: `// line ${c.line}`,
     add: true,
     comment: {
+      id: c.id,
       line: c.line,
       severity: toLocalSeverity(c.severity),
       title: c.body.split('.')[0] ?? c.body,
@@ -237,7 +240,17 @@ function ReviewSummaryBar({ review }: { review?: ReviewDetail }) {
 
 // ── InlineComment ─────────────────────────────────────────────────────────────
 
-function InlineComment({ c }: { c: ReviewComment }) {
+function InlineComment({
+  c,
+  prUrl,
+  onDismiss,
+}: {
+  c: ReviewComment
+  /** Direct link to the PR's GitHub conversation tab — for "Reply". */
+  prUrl?: string
+  /** Parent removes this comment from the rendered list when called. */
+  onDismiss?: (id: string) => void
+}) {
   const tone =
     c.severity === 'warn' ? 'warn' : c.severity === 'info' ? 'info' : 'default'
   const color =
@@ -345,19 +358,58 @@ function InlineComment({ c }: { c: ReviewComment }) {
             </div>
           )}
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <Btn size="xs" tone="ghost" icon={<Check size={10} />}>
-              Apply
-            </Btn>
-            <Btn size="xs" tone="bare">
+            {/* Apply: minimal honest semantics — copy the suggested code to
+                the user's clipboard so they can paste it in their editor.
+                Hidden when there's no suggestion to copy. A future PATCH
+                endpoint could turn this into a real "commit on the PR
+                branch" action. */}
+            {c.suggestion && (
+              <Btn
+                size="xs"
+                tone="ghost"
+                icon={<Check size={10} />}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(c.suggestion!)
+                    notify('Suggestion copied to clipboard.', 'success')
+                  } catch {
+                    notify(
+                      'Copy failed — select the code block and copy manually.',
+                      'warn',
+                    )
+                  }
+                }}
+              >
+                Apply
+              </Btn>
+            )}
+            {/* Reply: open the PR's GitHub conversation tab in a new tab.
+                We don't have a per-thread reply endpoint yet, so this is the
+                honest minimum — the user types their reply on GitHub. */}
+            <Btn
+              size="xs"
+              tone="bare"
+              onClick={() => {
+                if (prUrl) {
+                  window.open(prUrl, '_blank', 'noopener,noreferrer')
+                } else {
+                  notify('PR URL not available for this review.', 'warn')
+                }
+              }}
+            >
               Reply
             </Btn>
-            <Btn size="xs" tone="bare">
+            {/* Dismiss: client-side only — hides the comment until reload.
+                Persisting requires a PATCH /reviews/{id}/comments/{cid}
+                endpoint that doesn't exist yet (TODO). */}
+            <Btn
+              size="xs"
+              tone="bare"
+              onClick={() => onDismiss?.(c.id)}
+            >
               Dismiss
             </Btn>
             <div style={{ flex: 1 }} />
-            <Btn size="xs" tone="bare">
-              4
-            </Btn>
           </div>
         </div>
       </div>
@@ -367,32 +419,28 @@ function InlineComment({ c }: { c: ReviewComment }) {
 
 // ── FileReviewBlock ───────────────────────────────────────────────────────────
 
-function FileReviewBlock({ review }: { review?: ReviewDetail }) {
-  const apiFile = review?.files[0]
-  if (!apiFile) {
-    return (
-      <div
-        style={{
-          background: 'var(--bg-elev)',
-          border: '1px dashed var(--panel-border)',
-          borderRadius: 12,
-          padding: '40px 20px',
-          textAlign: 'center',
-          color: 'var(--text-faint)',
-          fontSize: 13,
-        }}
-      >
-        Select a review from the queue to see the PR diff and AI comments. Review
-        file contents and comments are pulled from the live GitHub API — nothing
-        is rendered until a real review is open.
-      </div>
-    )
-  }
+function SingleFileBlock({
+  apiFile,
+  prUrl,
+  dismissedIds,
+  onDismiss,
+  onRestoreAll,
+}: {
+  apiFile: ReviewDetail['files'][number]
+  prUrl?: string
+  dismissedIds: Set<string>
+  onDismiss: (id: string) => void
+  onRestoreAll: () => void
+}) {
   const filePath = apiFile.path
   const additions = apiFile.additions
   const deletions = apiFile.deletions
   const diffLines = mapApiComments(apiFile)
-  const commentCount = apiFile.comments.length
+  const visibleCount = apiFile.comments.filter(
+    (c) => !dismissedIds.has(c.id),
+  ).length
+  const totalCount = apiFile.comments.length
+  const dismissedCount = totalCount - visibleCount
 
   return (
     <div
@@ -426,57 +474,145 @@ function FileReviewBlock({ review }: { review?: ReviewDetail }) {
         </Pill>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
-          {commentCount} AI comment{commentCount !== 1 ? 's' : ''}
+          {visibleCount} AI comment{visibleCount !== 1 ? 's' : ''}
+          {dismissedCount > 0 && (
+            <>
+              {' '}
+              <button
+                type="button"
+                onClick={onRestoreAll}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  fontSize: 11,
+                  color: 'var(--accent-600)',
+                  cursor: 'pointer',
+                }}
+              >
+                ({dismissedCount} dismissed — restore)
+              </button>
+            </>
+          )}
         </span>
       </div>
+      {diffLines.length > 0 ? (
+        <div
+          style={{
+            fontFamily: 'Geist Mono, monospace',
+            fontSize: 12.5,
+            lineHeight: 1.65,
+            background: 'var(--code-bg)',
+          }}
+        >
+          {diffLines.map((l, i) => (
+            <span key={i} style={{ display: 'contents' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  background: l.add ? 'var(--diff-add-bg)' : 'transparent',
+                  borderLeft: `2px solid ${l.add ? 'var(--diff-add-line)' : 'transparent'}`,
+                }}
+              >
+                <span
+                  style={{
+                    width: 44,
+                    padding: '0 10px',
+                    textAlign: 'right',
+                    color: 'var(--text-faint)',
+                    fontSize: 11,
+                    userSelect: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  {l.n}
+                </span>
+                <span
+                  style={{
+                    width: 14,
+                    color: l.add ? 'var(--status-success)' : 'transparent',
+                    flexShrink: 0,
+                    textAlign: 'center',
+                  }}
+                >
+                  {l.add ? '+' : ' '}
+                </span>
+                <span style={{ color: 'var(--code-text)', whiteSpace: 'pre' }}>
+                  {l.t}
+                </span>
+              </div>
+              {l.comment && !dismissedIds.has(l.comment.id) && (
+                <InlineComment
+                  c={l.comment}
+                  prUrl={prUrl}
+                  onDismiss={onDismiss}
+                />
+              )}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: '14px 16px',
+            fontSize: 12,
+            color: 'var(--text-faint)',
+            fontStyle: 'italic',
+          }}
+        >
+          No AI comments on this file.
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FileReviewBlock({ review }: { review?: ReviewDetail }) {
+  // Comments dismissed in this session. Client-side only — reload reveals
+  // them again. TODO: PATCH /reviews/{id}/comments/{cid} for persistence.
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set())
+  const handleDismiss = useCallback((id: string) => {
+    setDismissedIds((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+  }, [])
+  const handleRestoreAll = useCallback(() => setDismissedIds(new Set()), [])
+
+  const files = review?.files ?? []
+  if (files.length === 0) {
+    return (
       <div
         style={{
-          fontFamily: 'Geist Mono, monospace',
-          fontSize: 12.5,
-          lineHeight: 1.65,
-          background: 'var(--code-bg)',
+          background: 'var(--bg-elev)',
+          border: '1px dashed var(--panel-border)',
+          borderRadius: 12,
+          padding: '40px 20px',
+          textAlign: 'center',
+          color: 'var(--text-faint)',
+          fontSize: 13,
         }}
       >
-        {diffLines.map((l, i) => (
-          <span key={i} style={{ display: 'contents' }}>
-            <div
-              style={{
-                display: 'flex',
-                background: l.add ? 'var(--diff-add-bg)' : 'transparent',
-                borderLeft: `2px solid ${l.add ? 'var(--diff-add-line)' : 'transparent'}`,
-              }}
-            >
-              <span
-                style={{
-                  width: 44,
-                  padding: '0 10px',
-                  textAlign: 'right',
-                  color: 'var(--text-faint)',
-                  fontSize: 11,
-                  userSelect: 'none',
-                  flexShrink: 0,
-                }}
-              >
-                {l.n}
-              </span>
-              <span
-                style={{
-                  width: 14,
-                  color: l.add ? 'var(--status-success)' : 'transparent',
-                  flexShrink: 0,
-                  textAlign: 'center',
-                }}
-              >
-                {l.add ? '+' : ' '}
-              </span>
-              <span style={{ color: 'var(--code-text)', whiteSpace: 'pre' }}>
-                {l.t}
-              </span>
-            </div>
-            {l.comment && <InlineComment c={l.comment} />}
-          </span>
-        ))}
+        Select a review from the queue to see the PR diff and AI comments. Review
+        file contents and comments are pulled from the live GitHub API — nothing
+        is rendered until a real review is open.
       </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {files.map((f) => (
+        <SingleFileBlock
+          key={f.path}
+          apiFile={f}
+          prUrl={review?.prUrl}
+          dismissedIds={dismissedIds}
+          onDismiss={handleDismiss}
+          onRestoreAll={handleRestoreAll}
+        />
+      ))}
     </div>
   )
 }
@@ -975,8 +1111,6 @@ function ReviewQueue({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function ReviewsPage() {
-  const router = useRouter()
-
   // Queue state
   const [queueTab, setQueueTab] = useState<QueueTab>('all')
   const [focusedIndex, setFocusedIndex] = useState(0)
@@ -1063,13 +1197,9 @@ export default function ReviewsPage() {
     [],
   )
 
-  const handleOpen = useCallback(
-    (id: string) => {
-      setSelectedReviewId(id)
-      router.push(`/dashboard/reviews/${id}`)
-    },
-    [router],
-  )
+  const handleOpen = useCallback((id: string) => {
+    setSelectedReviewId(id)
+  }, [])
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────────
 

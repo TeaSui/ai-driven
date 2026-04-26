@@ -402,6 +402,39 @@ export async function reactivateRepo(id: string): Promise<Repo> {
   return json.data ?? json
 }
 
+// ── Team / API-key management (Sprint 9 Phase 5) ─────────────────────────────
+
+export interface MeResponse {
+  teamId: string
+  teamName: string
+}
+
+export async function getMe(): Promise<MeResponse> {
+  const r = await f('/api/admin/me')
+  return r.data ?? r
+}
+
+export interface KeyRotateResponse {
+  /** The freshly-minted raw key — only shown once; store it securely. */
+  apiKey: string
+  /** ISO timestamp when the old key's 48h grace period ends. */
+  oldKeyExpiresAt: string
+  teamId: string
+}
+
+export async function rotateApiKey(teamId: string): Promise<KeyRotateResponse> {
+  const r = await authFetch(`/api/admin/teams/${teamId}/rotate-key`, {
+    method: 'POST',
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error(
+      err?.error?.message ?? err?.detail ?? `Request failed: ${r.status}`,
+    )
+  }
+  return r.json()
+}
+
 export async function sendMessage(req: SendMessageRequest): Promise<ChatResponse> {
   return authFetch('/api/chat/send', {
     method: 'POST',

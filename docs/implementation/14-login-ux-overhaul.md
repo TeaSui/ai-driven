@@ -1,8 +1,9 @@
-# 13 — Login UX overhaul on top of `/api/auth/session`
+# 14 — Login UX overhaul on top of `/api/auth/session`
 
-**Status:** proposal, not started
+**Status:** **shipped 2026-04-25** (backend + UI). Cognito migration still pending (separate, blocked on AWS provisioning — see [08-auth-and-ws-security.md](08-auth-and-ws-security.md) Phase 2).
 **Depends on:** [08-auth-and-ws-security.md](08-auth-and-ws-security.md) Phase 2 scaffold (already landed), [middleware fix](../../ai-driven-web-ui/src/middleware.ts) (landed 2026-04-25)
 **Date opened:** 2026-04-25
+**Date shipped:** 2026-04-25
 
 ## Why
 
@@ -116,17 +117,18 @@ From that point, the session token is the only thing the UI knows. API-key login
 
 ## Acceptance checklist (when we ship B.2)
 
-- [ ] `POST /api/auth/login` mints session token, stores in Redis.
-- [ ] `POST /api/auth/logout` deletes session, clears cookie.
-- [ ] `GET /api/auth/session` reads session cookie, returns identity, touches `last_seen_at`.
-- [ ] Middleware accepts both session token and `X-API-Key` during migration window.
-- [ ] `/login` rewritten: email (optional) + API key, stores session cookie.
-- [ ] `/logout` route clears both client + server state.
-- [ ] Sidebar "Sign out" menu item works.
-- [ ] Frontend middleware (`src/middleware.ts`) switched from `api_key` to `session_token` cookie.
-- [ ] Debug-mode middleware bypass works end-to-end (backend recognizes `debug-session` sentinel when `settings.debug=true`).
-- [ ] Playwright: login → dashboard → logout → redirect to /login; session revocation from another tab logs the user out.
-- [ ] At least one Redis-outage simulation test: login fails cleanly with "Authentication service unavailable, try again shortly."
+- [x] `POST /api/auth/login` mints session token, stores in Redis. (`api/auth/router.py`)
+- [x] `POST /api/auth/logout` deletes session, clears cookie.
+- [x] `GET /api/auth/session` reads session cookie, returns identity, touches `last_seen_at`.
+- [x] Middleware accepts both session token and `X-API-Key` during migration window. (`auth/middleware.py:_resolve_session`)
+- [x] `/login` rewritten: email (optional) + API key, stores session cookie. (`app/login/page.tsx`)
+- [x] `/logout` flow clears both client + server state via sidebar Sign-out (`components/layout/sidebar.tsx`)
+- [x] Sidebar "Sign out" menu item works (`data-testid="sidebar-sign-out"`)
+- [x] Frontend middleware (`src/middleware.ts`) switched from `api_key` to `session_token` cookie.
+- [x] Debug-mode middleware bypass works end-to-end (backend recognizes `debug-session` sentinel when `settings.debug=true`).
+- [x] Playwright: login → dashboard → logout → redirect to /login. `e2e/auth-session.spec.ts` (6 tests, all green).
+- [x] Redis-outage simulation: `tests/unit/test_auth_login_logout.py::TestLoginRedisOutage` — login returns 503 with retry-able message when session store is unavailable.
+- [x] Cookie `Secure` flag is env-aware: only off for `Environment.LOCAL`, on for dev/staging/prod (`tests/unit/test_cookie_secure_flag.py`).
 
 ## Open questions (answer before starting B.2)
 

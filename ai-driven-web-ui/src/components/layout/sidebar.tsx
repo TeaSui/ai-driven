@@ -142,6 +142,17 @@ function IconClock({ size = 14 }: { size?: number }) {
   )
 }
 
+function IconKey({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'inline-block', flexShrink: 0 }}>
+      <circle cx="5.5" cy="10.5" r="2.5"/>
+      <path d="M7 9l6-6M11 5l1.5 1.5M13 3l1.5 1.5"/>
+    </svg>
+  )
+}
+
 function IconSettings({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
@@ -190,6 +201,7 @@ function buildNavItems(summary?: DashboardSummary): NavItem[] {
 const SUB_ITEMS: SubNavItem[] = [
   { id: 'repos', label: 'Repositories', href: '/dashboard/admin/repos', icon: <IconFolder size={14}/> },
   { id: 'rules', label: 'Review rules', href: '/dashboard/admin/rules', icon: <IconShield size={14}/> },
+  { id: 'keys',  label: 'API keys',      href: '/dashboard/admin/api-keys', icon: <IconKey size={14}/> },
   { id: 'runs',  label: 'Run history',  href: '/dashboard/admin/runs',  icon: <IconClock size={14}/> },
 ]
 

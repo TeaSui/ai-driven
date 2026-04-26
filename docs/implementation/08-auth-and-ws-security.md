@@ -26,7 +26,7 @@ Exploration of `src/ai_driven/` found more than the first review suggested:
 - [ ] Team switcher for users in >1 team
 - [ ] Debug-mode visual indicator — `settings.debug` bypasses auth at `auth/middleware.py:171`; nothing in UI surfaces that
 - [ ] `cancelled` terminal state — `/stop` sets `failed` (`api/chat/router.py` + UI successRate)
-- [ ] WebSocket client in the Next.js UI does **not** send the required `{"type":"auth","token":"..."}` first message (works today only because debug mode allows empty auth)
+- [x] WebSocket client first-message auth — UI now sends `{"type":"auth","token":...}` and handles 4401/4404 close codes with a banner. Done as Sprint 9 Phase 4.
 - [ ] API-key rotation with grace period (`/teams/{id}/rotate-key` exists but no UI)
 
 ## Checklist
@@ -64,10 +64,12 @@ Exploration of `src/ai_driven/` found more than the first review suggested:
 
 ### Phase 5 — API-key manager UI · ~½ day
 
-- [ ] `/dashboard/admin/api-keys` page lists existing keys (masked) with create/rotate/revoke
-- [ ] Wire to existing `POST /api/admin/teams/{id}/rotate-key`
-- [ ] Surface 7-day grace period clearly (old key still works until {date})
-- [ ] Copy-on-create modal (one-time reveal); keys never displayed after creation
+- [x] `/dashboard/admin/api-keys` page shows the team key (masked) with a rotate action — single key per team today, multi-key + revoke deferred to when the model supports it
+- [x] Wired to existing `POST /api/admin/teams/{id}/rotate-key`
+- [x] Surface 48h grace period clearly — dialog shows exact timestamp when the old key expires (backend uses 48h, not the spec's 7d — endpoint default, adjust both together if 7d is required)
+- [x] Copy-on-create modal — new raw key shown exactly once via the clipboard-copy reveal dialog; no backend retrieval after close
+- [x] Sidebar entry under Configure → `API keys` ([components/layout/sidebar.tsx](../../ai-driven-web-ui/src/components/layout/sidebar.tsx))
+- [x] Playwright coverage — 5 cases in [e2e/api-keys.spec.ts](../../ai-driven-web-ui/e2e/api-keys.spec.ts): load + masked key, confirm-before-POST, new-key reveal, backend error retry path, cancel
 
 ### Phase 6 — Debug banner · ~2 h
 
