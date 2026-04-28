@@ -11,6 +11,10 @@ MCP clients and servers: architecture, transports, implementing a client, defini
 - [End-to-end request flow](#end-to-end-request-flow)
 - [Implementing a client](#implementing-a-client)
 - [Defining resources (server)](#defining-resources-server)
+- [Accessing resources (client)](#accessing-resources-client)
+- [Designing prompts (server)](#designing-prompts-server)
+- [Using prompts (client)](#using-prompts-client)
+- [Tools vs resources vs prompts](#tools-vs-resources-vs-prompts)
 - [The MCP Inspector](#the-mcp-inspector)
 - [Gotchas](#gotchas)
 - [Sources](#sources)
@@ -165,6 +169,112 @@ MIME types are hints to clients about the payload format:
 
 Resources are ideal for "@mention" style features: list to populate an autocomplete, fetch to pull content when a user submits.
 
+## Accessing resources (client)
+
+Servers expose resources; clients fetch them with `read_resource(uri)`. Unlike tool calls (Claude-driven) or prompts (user-driven), reading a resource is **app-driven** — your code decides when context needs to be pulled in.
+
+```python
+import json
+from pydantic import AnyUrl
+
+class MCPClient:
+    # ... __aenter__/__aexit__ omitted, see "Implementing a client" above
+
+    async def list_resources(self) -> list:
+        result = await self.session().list_resources()
+        return result.resources
+
+    async def list_resource_templates(self) -> list:
+        result = await self.session().list_resource_templates()
+        return result.resourceTemplates
+
+    async def read_resource(self, uri: str) -> dict | str:
+        result = await self.session().read_resource(AnyUrl(uri))
+        resource = result.contents[0]
+        if resource.mimeType == "application/json":
+            return json.loads(resource.text)
+        return resource.text  # text/plain or other
+```
+
+Typical "@mention" UX: autocomplete from `list_resources()`; on submit, `read_resource(uri)` and inject the content into the user's message before sending it to Claude.
+
+```python
+async def chat_with_mention(client, mention_uri: str, user_text: str) -> str:
+    doc = await client.read_resource(mention_uri)
+    user_message = f"Reference document:\n{doc}\n\nUser question: {user_text}"
+    return await call_claude(user=user_message)
+```
+
+## Designing prompts (server)
+
+Prompts are pre-built, parameter-driven instruction templates the server publishes for users to invoke (slash commands, menu items). Treat them as the server's curated "best ways to use my tools."
+
+```python
+from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.prompts import base
+from pydantic import Field
+
+mcp = FastMCP("docs-server")
+
+@mcp.prompt(
+    name="summarize_doc",
+    description="Summarize a document by id with a target length.",
+)
+def summarize_doc(
+    doc_id: str = Field(description="ID from docs://documents"),
+    length: str  = Field(default="short", description="short | medium | long"),
+) -> list[base.Message]:
+    return [
+        base.UserMessage(
+            f"Summarize the document with id '{doc_id}' at {length} length. "
+            f"Use the read_doc tool to fetch it first."
+        )
+    ]
+```
+
+Design notes:
+- Prompts can return one or more messages and can pre-stage tool guidance, system context, and few-shot examples.
+- Parameters become kwargs — name them clearly, give descriptions, default optional ones.
+- Aim prompts at *your server's* tasks. Don't try to be a general assistant — that's the host app's job.
+- Test in the MCP Inspector before shipping; verify variable interpolation.
+
+## Using prompts (client)
+
+The client lists prompts, asks the user to fill arguments, fetches the materialised prompt, then sends it to Claude.
+
+```python
+class MCPClient:
+    async def list_prompts(self) -> list:
+        result = await self.session().list_prompts()
+        return result.prompts
+
+    async def get_prompt(self, name: str, arguments: dict) -> list[dict]:
+        result = await self.session().get_prompt(name, arguments)
+        # result.messages is a list of base.Message (UserMessage / AssistantMessage)
+        return [
+            {"role": m.role, "content": m.content.text if hasattr(m.content, "text") else m.content}
+            for m in result.messages
+        ]
+```
+
+Wire-up sketch:
+1. User types `/summarize_doc` (or picks from a menu populated by `list_prompts`).
+2. App reads each argument's description, prompts the user to fill them.
+3. Client calls `get_prompt("summarize_doc", {"doc_id": "report.pdf", "length": "short"})`.
+4. App passes those messages to Claude (with the server's tools attached, since the prompt may reference them).
+
+## Tools vs resources vs prompts
+
+Same MCP plumbing, different control planes:
+
+| Capability | Who triggers it | Typical UX |
+|---|---|---|
+| **Tools** | Claude (model-controlled) | Claude emits `tool_use`; the loop runs it |
+| **Resources** | The app (app-controlled) | App reads when context is needed (e.g., user @-mentions a doc) |
+| **Prompts** | The user (user-controlled) | User picks a slash command; app fills params; sends to Claude |
+
+A well-designed MCP server typically ships **all three**: tools to act, resources to read context, prompts to teach users the canonical recipes.
+
 ## The MCP Inspector
 
 Run a local inspector that lets you test tools and resources in a browser without wiring up a client.
@@ -190,6 +300,10 @@ Use the inspector as your dev feedback loop — edit the server, test the tool, 
 - **Templated URI params become function kwargs.** Name the `{param}` in the URI the same as the function argument — the SDK uses the name to bind.
 - **The inspector port may change.** Check the CLI output — don't hard-code 6277.
 - **MCP ≠ tool use.** Common misconception. MCP is "someone else wrote the tool"; tool use is the API-level mechanism. You still get `tool_use` blocks from Claude either way.
+- **Don't model resources as tools.** A `read_doc` tool that takes a `doc_id` is a smell — Claude has to know it can call it. Resources are pulled by the *app* in response to a UI signal (an @-mention) and injected into context.
+- **Prompts collapse "how do I use this server?" UX.** Servers without prompts force users to figure out the tool/resource recipes themselves. If a workflow takes more than two tool calls, ship it as a prompt.
+- **`get_prompt` returns templated `Message` objects, not strings.** Strip them into `{role, content}` dicts before handing to the API.
+- **Resource MIME type drives parsing.** `application/json` deserialises automatically (in your client wrapper); `text/plain` stays raw. Mismatched MIME types are silent corruption.
 
 ## Sources
 
@@ -199,3 +313,7 @@ Use the inspector as your dev feedback loop — edit the server, test the tool, 
 - `docs/building-with-the-claude-api/49-the-server-inspector.md`
 - `docs/building-with-the-claude-api/50-implementing-a-client.md`
 - `docs/building-with-the-claude-api/51-defining-resources.md`
+- `docs/building-with-the-claude-api/52-accessing-resources.md`
+- `docs/building-with-the-claude-api/53-designing-prompts.md`
+- `docs/building-with-the-claude-api/54-prompts-in-the-client.md`
+- `docs/building-with-the-claude-api/55-MCP-review.md`

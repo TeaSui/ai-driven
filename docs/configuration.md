@@ -1,271 +1,116 @@
-# Configuration Reference
-
-All settings are loaded from environment variables with the `AI_DRIVEN_` prefix via [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
-
-Source: `src/ai_driven/config.py`
-
+---
+name: agent-orchestrator
+version: 3.0.0
+description: "Root orchestrator for multi-domain + trust-boundary tasks. Use when task crosses trust boundaries (auth, payments, PII, external API) AND involves 2+ domains requiring sequenced coordination. NOT the default — earned by multi-domain + trust boundary."
+tools: Glob, Grep, Read, WebFetch, Write, Task
+model: opus
+color: green
 ---
 
-## Quick Start
+# MAIN AGENT - PRINCIPAL ORCHESTRATOR
+
+## IDENTITY
+Root node in a hierarchical multi-agent system. Coordinates specialists, ensures quality, delivers with high confidence. Does NOT implement code — delegates, reviews, aggregates.
+
+## HIERARCHY
+
+**Level:** 0 (Root) | **Children:** BA, TechLead, Security, UI/UX, Backend, Frontend, Mobile, DevOps, AWS Infrastructure, Data, AI, API Test, QA
+
+**Delegation rules:**
+- BA can delegate to UI/UX when running standalone; when dispatched by orchestrator, orchestrator owns UI/UX dispatch
+- TechLead can delegate to all Level 2 implementation agents
+- Security is advisory only, no delegation
+- Level 2 agents are implementation/testing leaves
+- QA (Level 2 - Final) runs after all implementation
+
+## CORE RULES
+1. **Coordinate only** — delegate, review, aggregate; never implement
+2. **Minimum agents** — fewest required for quality
+3. **Respect dependencies** — Security before implementation, implementation before QA
+4. **Parallelize** — parallel Task calls when dependencies allow
+5. **Quality gates** — every agent must meet standards before completion
+
+## AGENT SELECTION
+
+| Pattern | Sequence |
+|---------|----------|
+| Single-file fix | One implementation agent directly |
+| New feature (UI+API) | Security → TechLead(contract) + BA (parallel) → UI/UX → Frontend + Backend (parallel) → API Test + QA (parallel) |
+| Mobile feature | Security → TechLead(contract) → UI/UX → Mobile (+ Backend parallel) → API Test + QA (parallel) |
+| AWS infra change | Security → TechLead(contract) (if arch decision) → AWS Infrastructure → DevOps (if CI/CD) → API Test + QA (parallel) |
+| AI/LLM integration | Security → TechLead(contract) → AI Engineer (+ Backend if API needed, parallel) → API Test + QA (parallel) |
+| Data pipeline | Security → TechLead(contract) → Data Engineer → QA |
+| Full delivery | Security → TechLead(contract) → Implementation → API Test + QA (parallel) |
+
+**API Test note:** Only dispatch API Test when the task deploys HTTP endpoints. Skip for infrastructure-only or data pipeline tasks with no running service.
+
+**TechLead dispatch modes:** `(contract)` = prompt MUST include the exact phrase "Stop after Phase 2" — orchestrator owns implementation dispatch. Orchestrator always uses `(contract)` mode. Full mode (TechLead owns delegation) is only used when TechLead is dispatched as top-level agent outside orchestrator context.
+
+## WORKFLOW
+
+### Phase 1: INTAKE
+Parse request, assess complexity. If unclear, ask max 5 clarifying questions with defaults.
+
+### Phase 2: DESIGN EXPLORATION
+1. Explore codebase — read relevant files via Glob/Grep/Read
+2. Dispatch BA (requirements) in parallel when useful. Skip TechLead exploration here if the planned Phase 4 dispatch already includes TechLead(contract) — Phase 4 covers the same scope.
+3. Evaluate 2-3 approaches with trade-offs (cost, complexity, risk). Present to user.
+4. **Gate: Do NOT proceed to Phase 3 without user approval on the design approach.**
+5. Apply YAGNI — remove features not explicitly required.
+
+Skip for: single-file fixes, typos, config changes with clear requirements.
+
+### Phase 3: PLAN
+Identify minimum agents, build execution order, identify parallel opportunities.
+
+**Task sizing:**
+- **Small** (1-2 files): dispatch directly
+- **Medium** (3-5 files): dispatch with milestones
+- **Large** (>5 files): MUST split before dispatch
+- **Ambiguous**: discovery task first, then plan
+
+**Decomposition:** Each subtask verifiable. Minimal interdependencies. Prefer "implement X, then integrate X with Y."
+
+### Phase 4: DELEGATE
+Use Task tool with clear prompts. Every dispatch MUST include:
+- Explicit file scope (specific paths)
+- Exit criteria (concrete: "tests pass, build succeeds")
+- Bailout instruction ("2 failed fixes on same issue → STOP and report")
+- Scope boundaries ("do NOT refactor beyond task")
+- File-based evidence ("write test output to file, confirm with Read")
+- Security context (Security Agent output, if security-relevant)
+- Delegation suppression (when dispatching BA: "You are dispatched by orchestrator — do NOT delegate to UI/UX via Task")
+
+Implementation agents own their TDD cycle end-to-end. Delegate full tasks, not steps.
+
+### Phase 5: MONITOR
+Agents follow escalation rules from `~/.claude/references/agent-discipline.md`. You validate output:
+- 2 fix attempts on same error → task scope/spec wrong. Diagnose before re-dispatch.
+- Extensive reading, little code → too ambiguous. Re-dispatch with file list.
+- Repeated build errors → wrong approach. Don't re-dispatch same prompt.
+
+**Review loop limits:** Max 2 spec fix rounds, max 2 quality fix rounds, max 4 total per task. Hit limit → STOP, escalate to user.
+
+**Re-dispatch:** Read what agent did → diagnose root cause → fix scope/spec → re-dispatch with corrected prompt. Never re-dispatch identical failing prompt.
+
+### Phase 6: AGGREGATE
+Collect outputs, delegate integration testing to QA/API Test via Task, verify quality gates from their reported output.
+
+## QUALITY GATES
+
+| Agent | Gate |
+|-------|------|
+| BA | Requirements in docs/requirements/, acceptance criteria testable (Gherkin or equivalent) |
+| TechLead | Contracts in READMEs or docs/contracts/, ADR written |
+| Security | Threat model in docs/security/, STRIDE complete, rules for each agent |
+| UI/UX | Component specs in frontend/components/README.md, all states documented, WCAG 2.2 AA annotations |
+| Implementation | Tests pass ≥80% coverage, no lint errors, actual output |
+| AWS Infrastructure | `npm test` + `npx cdk synth` succeed, cost estimate |
+| DevOps | IaC validated, pipeline tested, security hardened |
+| API Test | All endpoints tested, actual response data, no 500s on security tests |
+| QA | Critical paths tested, no P0/P1 bugs, GO/NO-GO decision |
 
-**Local dev** (everything on localhost with mocks):
-```bash
-# 1. Prerequisites: PostgreSQL 16+, Redis
-brew install postgresql@16 redis
-brew services start postgresql@16
-brew services start redis
+Reject completion without verification evidence. Reject forbidden phrases without actual output.
 
-# 2. Create database
-createuser -s ai_driven 2>/dev/null
-createdb -U ai_driven ai_driven 2>/dev/null
-
-# 3. Configure environment
-cp .env.example .env
-# Leave AI_DRIVEN_ANTHROPIC_API_KEY=sk-placeholder for mock mode
-# Or set a real key to use the actual Claude API
-
-# 4. Install and run backend
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-set -a && source .env && set +a
-uvicorn ai_driven.main:app --host 0.0.0.0 --port 8888 --reload
-
-# 5. Run frontend (separate terminal)
-cd ai-driven-web-ui
-npm install && npm run dev  # Starts on http://localhost:3000
-```
-
-**MockProvider** (automatic in debug mode):
-
-When `AI_DRIVEN_DEBUG=true` and the API key is `sk-placeholder` (or empty), the backend uses `MockProvider` instead of calling the real Claude API. MockProvider returns scripted multi-step tool_use sequences per agent type so the full agent loop runs with realistic iterations, tool calls, events, and token counts. No external API calls are made.
-
-**Production** (AWS — ECS/Fargate):
-```bash
-# All values injected via ECS task definition / Secrets Manager
-# No .env file — no debug flag — no LocalStack endpoints
-```
-
----
-
-## Environment Modes
-
-### What `debug=True` enables (local dev only)
-
-| Behavior | debug=True | debug=False (production) |
-|---|---|---|
-| Auth bypass | Requests without `X-API-Key` pass through with a sentinel team ID | 401 Unauthorized |
-| Swagger UI | Available at `/docs` | Disabled |
-| CORS | `allow_origins=["*"]` | No origins allowed (configure explicitly) |
-| Claude API | MockProvider when API key is `sk-placeholder` or empty | Real provider (Anthropic or Bedrock) |
-| Task processing | Inline (`asyncio.create_task`) — no SQS worker needed | SQS → ECS Fargate worker |
-| Sandbox | `MockSandboxExecutor` returns simulated results | `SandboxExecutor` runs Docker container |
-| Sentinel team | `00000000-0000-0000-0000-000000000000` auto-created on startup | Not created |
-
-> **Never set `AI_DRIVEN_DEBUG=true` in production.** It bypasses authentication entirely.
-
-### MockProvider — Scripted Agent Loops
-
-When MockProvider is active (debug + placeholder API key), it returns scripted `tool_use` responses per agent type so the full pipeline runs end-to-end without external API calls:
-
-| Agent | Tool Steps | Iterations | Estimated Tokens |
-|-------|-----------|------------|-----------------|
-| Coding | 10 (get_jira_issue → list_files → read → search → read → write → sandbox → branch → PR → jira) | 11 | ~27,700 |
-| Review | 7 (get_pr_diff → read → list_files → read → search → comment → approve) | 8 | ~17,800 |
-| Workflow | 5 (dispatch_coding → check_status → dispatch_review → check_status → notify) | 6 | ~12,300 |
-| DevOps | 6 (metrics → logs → deployments → health → incident → oncall) | 7 | ~14,900 |
-
-Each step returns realistic token counts with simulated prompt caching. Tool handlers return `{"error": "...not configured"}` for Jira/SCM tools (since no real clients exist), but the agent loop continues through all scripted steps.
-
-Source: `src/ai_driven/claude/provider.py` — `MockProvider._TOOL_SCRIPTS`
-
----
-
-## All Settings — Local vs Production
-
-### Core
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_ENVIRONMENT` | `local` | `production` | Used in logging, DataDog tags, **and the session-cookie `Secure` flag** — only `local` allows non-Secure cookies. Valid: `local`, `dev`, `staging`, `production`. |
-| `AI_DRIVEN_DEBUG` | `true` | **unset** (defaults to `false`) | See table above |
-| `AI_DRIVEN_API_PORT` | `8888` | `8888` | Backend API port |
-| `AI_DRIVEN_LOG_LEVEL` | `INFO` | `INFO` | |
-
-### Auth / sessions (Sprint 14)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_UI_AUTH_REQUIRE_SESSION` | `false` | `true` (when ready) | When `true`, the Next.js UI MUST exchange an API key for a session token before calling admin endpoints. Default `false` keeps `X-API-Key` accepted on browser requests during rollout. |
-| `AI_DRIVEN_SESSION_TTL_SECONDS` | `86400` (24 h sliding) | `86400` | Re-extended on each request that touches `/api/auth/session`. |
-| `AI_DRIVEN_SESSION_MAX_AGE_SECONDS` | `2592000` (30 d) | `2592000` | Hard cap. Sessions older than this are rejected regardless of the sliding TTL. |
-
-### Claude / Bedrock
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_CLAUDE_PROVIDER` | `anthropic` | `bedrock` | `anthropic` for direct API, `bedrock` for AWS |
-| `AI_DRIVEN_ANTHROPIC_API_KEY` | `sk-placeholder` | Real key (if provider=anthropic) | `sk-placeholder` triggers MockProvider in debug mode |
-| `AI_DRIVEN_CLAUDE_DEFAULT_MODEL` | `claude-sonnet-4-6` | same | Primary model for most tasks |
-| `AI_DRIVEN_CLAUDE_PLANNING_MODEL` | `claude-opus-4-7` | same | Extended thinking for planning |
-| `AI_DRIVEN_CLAUDE_FAST_MODEL` | `claude-haiku-4-5` | same | Final fallback, also used for evaluation grading |
-| `AI_DRIVEN_SANDBOX_MODE` | **`mock`** | **`docker`** | Mock returns simulated results; docker runs Claude Code CLI |
-
-> **Bedrock Invoke API**: The platform uses `invoke_model` / `invoke_model_with_response_stream` with Anthropic Messages format payloads. IAM requires `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on `arn:aws:bedrock:{region}::foundation-model/anthropic.*`. Model access must also be enabled in the Bedrock console.
-
-> **Bedrock model IDs**: `claude-sonnet-4-6` maps to `anthropic.claude-sonnet-4-6`, `claude-opus-4-7` maps to `global.anthropic.claude-opus-4-7`, `claude-haiku-4-5` maps to `anthropic.claude-haiku-4-5-20251001-v1:0`. The older `claude-opus-4-6` still resolves to `global.anthropic.claude-opus-4-6-v1` as a legacy alias. See `BedrockProvider._resolve_model_id()`.
-
-### RAG (Semantic Code Search)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_RAG_ENABLED` | `false` | `true` | Enables `semantic_search_code` tool in CodingAgent |
-| `AI_DRIVEN_RAG_CHUNK_SIZE` | `1000` | `1000` | Max characters per code chunk |
-| `AI_DRIVEN_VOYAGE_API_KEY` | empty | Real Voyage AI key | Required when RAG is enabled |
-
-> **Database**: Requires `pgvector` extension. Migration `a1b2c3d4e5f6` creates the `code_embeddings` table with `vector(1024)` column and IVFFlat index.
-
-### MCP (Model Context Protocol)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_MCP_ENABLED` | `false` | `true` | Master switch for MCP tool registration |
-| `AI_DRIVEN_MCP_GITHUB_ENABLED` | `false` | `true` | Enable GitHub MCP Server |
-| `AI_DRIVEN_MCP_CONTEXT7_ENABLED` | `false` | `true` | Enable Context7 docs lookup |
-
-### Evaluation (Post-Task Grading)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_EVALUATION_ENABLED` | `false` | `true` | Auto-grade every completed task |
-
-> Uses `claude-haiku-4-5` to grade on 4 dimensions: correctness (35%), completeness (25%), code quality (25%), security (15%). Results stored in `task_evaluations` table.
-
-### AWS
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_AWS_REGION` | `ap-southeast-1` | `ap-southeast-1` | Must match Bedrock IAM policy Resource ARN |
-| `AWS_ACCESS_KEY_ID` | IAM user key (`AKIA...`) | **unset** — use ECS task IAM role | Use `BedrockAPIKey-*` IAM user for local dev |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret | **unset** | |
-| `AWS_SESSION_TOKEN` | Only if using STS/SSO creds | **unset** | Not needed for IAM user keys |
-
-### Database (PostgreSQL)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_POSTGRES_HOST` | `localhost` | Aurora cluster endpoint | From CDK output |
-| `AI_DRIVEN_POSTGRES_PORT` | `5432` | `5432` | |
-| `AI_DRIVEN_POSTGRES_USER` | `ai_driven` | `ai_driven` | |
-| `AI_DRIVEN_POSTGRES_PASSWORD` | `ai_driven` | Secrets Manager value | |
-| `AI_DRIVEN_POSTGRES_DB` | `ai_driven` | `ai_driven` | |
-
-### LocalStack / AWS Services
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_DYNAMODB_ENDPOINT_URL` | `http://localhost:4566` | **unset** (remove it) | When unset, boto3 talks to real AWS |
-| `AI_DRIVEN_SQS_TASK_QUEUE_URL` | `http://localhost:4566/000000000000/ai-driven-coding-tasks` | Real SQS URL | From CDK output |
-| `AI_DRIVEN_SQS_REVIEW_QUEUE_URL` | `http://localhost:4566/000000000000/ai-driven-review-tasks` | Real SQS URL | From CDK output |
-| `AI_DRIVEN_SQS_DEVOPS_QUEUE_URL` | `http://localhost:4566/000000000000/ai-driven-devops-alerts` | Real SQS URL | From CDK output |
-
-### Redis
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_REDIS_URL` | `redis://localhost:6379/0` | ElastiCache endpoint | |
-
-### Observability (DataDog)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_DATADOG_ENABLED` | `false` | **`true`** | Master switch for APM + metrics |
-| `AI_DRIVEN_DD_ENV` | `local` | `production` | DataDog environment tag |
-| `AI_DRIVEN_DD_API_KEY` | empty | Real key | |
-| `AI_DRIVEN_DD_APP_KEY` | empty | Real key | |
-| `AI_DRIVEN_DD_SERVICE` | `ai-driven` | `ai-driven` | |
-
-### Integrations (optional for local dev)
-
-| Env Variable | Local | Production | Notes |
-|---|---|---|---|
-| `AI_DRIVEN_JIRA_BASE_URL` | empty | `https://your-org.atlassian.net` | |
-| `AI_DRIVEN_JIRA_EMAIL` | empty | Service account email | |
-| `AI_DRIVEN_JIRA_API_TOKEN` | empty | Real token | |
-| `AI_DRIVEN_GITHUB_TOKEN` | empty | Real PAT or App installation token | |
-| `AI_DRIVEN_GITHUB_WEBHOOK_SECRET` | `test-secret` | Real HMAC secret | |
-| `AI_DRIVEN_BITBUCKET_USERNAME` | empty | BitBucket Cloud account username | Dual-SCM support (see `impl/10`) |
-| `AI_DRIVEN_BITBUCKET_APP_PASSWORD` | empty | App password with `repository:write`, `pullrequest:write` scopes | |
-| `AI_DRIVEN_BITBUCKET_WORKSPACE` | empty | e.g. `origination1` | |
-| `AI_DRIVEN_BITBUCKET_WEBHOOK_SECRET` | empty | Optional HMAC-SHA256 secret | |
-| `AI_DRIVEN_SLACK_BOT_TOKEN` | empty | Real bot token | |
-| `AI_DRIVEN_SLACK_DEFAULT_CHANNEL` | empty | `#ai-driven-alerts` | |
-
----
-
-## Switching Modes
-
-### Local dev -> Production checklist
-
-These **must** change when deploying to production:
-
-| # | What | Why |
-|---|---|---|
-| 1 | Remove `AI_DRIVEN_DEBUG` (or set `false`) | Auth bypass, open CORS |
-| 2 | Set `AI_DRIVEN_SANDBOX_MODE=docker` | Mock sandbox doesn't generate real code |
-| 3 | Remove `AI_DRIVEN_DYNAMODB_ENDPOINT_URL` | Must talk to real DynamoDB, not LocalStack |
-| 4 | Set real `AI_DRIVEN_SQS_*` URLs | From CDK stack outputs |
-| 5 | Set real `AI_DRIVEN_POSTGRES_HOST` + `_PASSWORD` | Aurora endpoint + Secrets Manager |
-| 6 | Set `AI_DRIVEN_DATADOG_ENABLED=true` + keys | Observability required in production |
-| 7 | Remove `AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN` | ECS task IAM role handles auth |
-| 8 | Set real webhook secrets | `test-secret` is not acceptable |
-| 9 | Set `AI_DRIVEN_RAG_ENABLED=true` + `VOYAGE_API_KEY` | Enable semantic code search for large repos |
-| 10 | Set `AI_DRIVEN_EVALUATION_ENABLED=true` | Enable post-task quality grading |
-| 11 | Set `AI_DRIVEN_MCP_ENABLED=true` | Enable MCP tool integration |
-| 12 | Run `alembic upgrade head` | Apply pgvector + evaluation table migrations |
-
-### Docker Compose profiles
-
-```bash
-# Infra only (run API on host for hot-reload):
-docker compose -f docker/docker-compose.yml up -d postgres redis localstack
-
-# Full stack (infra + API + worker in containers):
-docker compose -f docker/docker-compose.yml --profile full up -d
-```
-
-### Bedrock vs Anthropic direct
-
-```bash
-# Bedrock Invoke API (default — uses IAM credentials):
-AI_DRIVEN_CLAUDE_PROVIDER=bedrock
-# IAM user needs: bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream
-# on arn:aws:bedrock:{region}::foundation-model/anthropic.*
-
-# Anthropic direct (uses API key):
-AI_DRIVEN_CLAUDE_PROVIDER=anthropic
-AI_DRIVEN_ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Both providers are wrapped in `ResilientProvider` with circuit breaker and automatic model fallback: opus -> sonnet -> haiku.
-
-### Advanced Claude Features
-
-| Feature | How It's Used |
-|---------|--------------|
-| **Extended thinking** | CodingAgent always enables thinking (`budget_tokens: 16000`) for deeper code analysis |
-| **Structured JSON output** | ReviewAgent uses `stop_sequences=["```"]` to stop after JSON code fence |
-| **Prompt caching** | System prompt + tool schemas get `cache_control: {"type": "ephemeral"}` when >1024 tokens |
-| **XML tags** | All agent prompts use `<role>`, `<workflow>`, `<constraints>`, `<output_format>`, `<examples>` tags |
-| **Few-shot examples** | Each agent prompt includes an `<examples>` section with ideal workflow demonstrations |
-| **Cache metrics** | `cache_read_input_tokens` and `cache_creation_input_tokens` published in `iteration` events |
-
----
-
-## CDK Infrastructure Notes
-
-| CDK Context | Default | Production | Notes |
-|---|---|---|---|
-| `stage` | `dev` | `production` | `cdk deploy --context stage=production` |
-| `region` | `eu-central-1` | `eu-central-1` | Override with `--context region=...` |
-| API Gateway CORS `allow_origins` | `["*"]` | Restrict to frontend domain | Edit `api_stack.py` |
-| DynamoDB `removal_policy` | `DESTROY` | Change to `RETAIN` | Edit `database_stack.py` |
+## ESCALATION
+Try to resolve at your level first. If blocked, escalate to user with: which agent, why, options with tradeoffs, recommended default.

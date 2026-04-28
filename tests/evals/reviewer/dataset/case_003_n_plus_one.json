@@ -1,0 +1,34 @@
+{
+  "name": "case_003_n_plus_one",
+  "description": "PR introduces an N+1 query inside a request handler hot path. Reviewer should flag it as a performance / correctness issue and request changes.",
+  "pr": {
+    "repo_full_name": "test-org/orders-api",
+    "pr_number": 77,
+    "scm_type": "github",
+    "title": "Return order line items in /orders response",
+    "description": "Embeds line items in the orders list response so the dashboard can render them without extra calls.",
+    "diff_lines": 18
+  },
+  "diff": {
+    "total_additions": 16,
+    "total_deletions": 1,
+    "files": [
+      {
+        "path": "orders_api/handlers/orders.py",
+        "status": "modified",
+        "additions": 16,
+        "deletions": 1,
+        "patch": "@@ -22,7 +22,22 @@ class OrdersHandler:\n     async def list_orders(self, request):\n         user_id = request.user.id\n-        orders = await self.repo.list_orders_for_user(user_id)\n+        orders = await self.repo.list_orders_for_user(user_id)\n+        out = []\n+        for o in orders:\n+            # Fetch line items for each order\n+            items = await self.repo.list_line_items(o.id)\n+            out.append({\n+                \"id\": o.id,\n+                \"total\": o.total,\n+                \"items\": [\n+                    {\"sku\": it.sku, \"qty\": it.qty, \"price\": it.price}\n+                    for it in items\n+                ],\n+            })\n+        orders = out\n         return {\"orders\": orders}\n"
+      }
+    ]
+  },
+  "extra_files": {},
+  "expectations": {
+    "verdict": "changes_requested",
+    "must_flag_files": ["orders_api/handlers/orders.py"],
+    "must_mention_any": ["n+1", "n + 1", "loop", "batch", "join", "per-order", "for each order", "single query"],
+    "must_not_flag_files": [],
+    "min_critical_findings": 0,
+    "min_total_findings": 1
+  }
+}

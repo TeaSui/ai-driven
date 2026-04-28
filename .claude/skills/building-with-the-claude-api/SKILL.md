@@ -1,11 +1,11 @@
 ---
 name: building-with-the-claude-api
-description: Use when writing or debugging Python code that calls the Claude API through the Anthropic Python SDK — messages.create requests, multi-turn conversations, system prompts, temperature, streaming, structured JSON output via prefill, tool use (tool_use / tool_result blocks, multi-turn tool loops, fine-grained streaming, built-in text-editor / web-search / code-execution tools), extended thinking, vision, PDF input, citations, prompt caching with cache_control ephemeral, Files API, RAG pipelines (chunking, VoyageAI embeddings, BM25 lexical search, multi-index hybrid retrieval with reciprocal rank fusion), prompt engineering techniques (clarity, specificity, XML tags, one/multi-shot examples), eval workflows (datasets, model-based grading, code-based grading), or MCP client/server integration. Covers the 51-lesson curriculum in docs/building-with-the-claude-api/. Not for Claude Code CLI usage, Computer Use, or general agent frameworks.
+description: Use when writing or debugging Python code that calls the Claude API through the Anthropic Python SDK — messages.create requests, multi-turn conversations, system prompts, temperature, streaming, structured JSON output via prefill, tool use (tool_use / tool_result blocks, multi-turn tool loops, fine-grained streaming, built-in text-editor / web-search / code-execution tools), extended thinking, vision, PDF input, citations, prompt caching with cache_control ephemeral, Files API, RAG pipelines (chunking, VoyageAI embeddings, BM25 lexical search, multi-index hybrid retrieval with reciprocal rank fusion), prompt engineering techniques (clarity, specificity, XML tags, one/multi-shot examples), eval workflows (datasets, model-based grading, code-based grading), MCP client/server integration including resources and prompts, or agent vs workflow design (parallelization, chaining, routing, evaluator-optimizer, composable tools, environment inspection). Covers the 62-lesson curriculum in docs/building-with-the-claude-api/. Not for Claude Code CLI usage, Computer Use, or general agent frameworks.
 ---
 
 # Building with the Claude API
 
-Navigator for the 51-lesson curriculum at `docs/building-with-the-claude-api/`. Load the reference file that matches the task — do not load all of them.
+Navigator for the 62-lesson curriculum at `docs/building-with-the-claude-api/` (see [docs/building-with-the-claude-api/README.md](../../../docs/building-with-the-claude-api/README.md) for the human-readable section index). Load the reference file that matches the task — do not load all of them.
 
 ## When to use
 
@@ -57,7 +57,8 @@ Route to the reference file for the task at hand. Read only what's needed.
 | Tool functions, tool schemas, `tool_use` / `tool_result` block handling, multi-turn tool loops, multiple tools, fine-grained streaming, text-editor tool, web-search tool | [references/tool-use.md](references/tool-use.md) |
 | RAG overview, chunking strategies, VoyageAI embeddings + cosine similarity, BM25 lexical search, multi-index hybrid retrieval with reciprocal rank fusion | [references/rag.md](references/rag.md) |
 | Extended thinking, vision (images), PDF input, citations, prompt caching (cache_control ephemeral), code execution + Files API | [references/advanced-features.md](references/advanced-features.md) |
-| MCP intro, client/server architecture, stdio/HTTP transports, implementing a client, defining resources (direct vs templated), inspector | [references/mcp.md](references/mcp.md) |
+| MCP intro, client/server architecture, stdio/HTTP transports, implementing a client, defining resources (direct vs templated), accessing resources from a client, designing/using prompts, tools-vs-resources-vs-prompts, inspector | [references/mcp.md](references/mcp.md) |
+| Workflow vs agent decision, parallelization / chaining / routing / evaluator-optimizer patterns, composable agent tools, environment-inspection loop | [references/agents-workflows.md](references/agents-workflows.md) |
 
 ## Top pitfalls
 
@@ -73,7 +74,9 @@ Route to the reference file for the task at hand. Read only what's needed.
 - **Citation document must be a `document` block.** Wrap PDF/text in `{"type": "document", "source": {...}, "title": "...", "citations": {"enabled": True}}`. Citations appear as separate blocks in the response with `cited_text`, `document_index`, and page ranges.
 - **Code execution runs in a sandboxed Docker container with no network access.** Get data in/out via the Files API (`container_upload` blocks in, `code_execution_output` blocks out).
 - **MCP servers and clients are usually implemented separately** — you build one or the other, not both. Servers expose tools/resources; clients connect and call them.
+- **Tools / resources / prompts have different control planes.** Tools are model-driven, resources are app-driven (e.g. user @-mention triggers `read_resource`), prompts are user-driven (slash command). Don't model GET-shaped operations as tools — use resources.
+- **Default to a workflow, not an agent.** If you can write the steps down, build a workflow (parallelize / chain / route / evaluator-optimizer). Reach for an agent only when the request space is too open to enumerate, and pair every action tool with an observation tool — agents that can't see the result of their actions hallucinate the world's state.
 
 ## Sources
 
-All references cite their source docs inline. Primary curriculum: `docs/building-with-the-claude-api/1-accessing-the-api.md` through `51-defining-resources.md` (51 files).
+All references cite their source docs inline. Primary curriculum: `docs/building-with-the-claude-api/1-accessing-the-api.md` through `62-workflows-vs-agents.md` (62 lessons; one extra walkthrough at `35a-implementing-the-RAG-flow.md`). The grouped index is at `docs/building-with-the-claude-api/README.md`.

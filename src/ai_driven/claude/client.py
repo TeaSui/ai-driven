@@ -159,6 +159,50 @@ class ClaudeClient:
             messages.append({"role": "user", "content": tool_results})
 
         logger.warning("agent_loop_max_iterations", extra={"max_iterations": max_iter})
+
+        # Curriculum lesson 61 — environment inspection / forced closure:
+        # if the budget runs out while the model still wants tools, returning
+        # raw `tool_use` content leaves callers with no text to render or
+        # persist. Execute the pending tools so the model has observation,
+        # then make ONE no-tools synthesis call to force a final answer.
+        # Bounded to a single extra call; the cost is worth never shipping
+        # an empty result.
+        if response.has_tool_use:
+            try:
+                messages.append({"role": "assistant", "content": response.raw_content})
+                tool_results = await self._execute_tool_calls(
+                    response.tool_use_blocks, on_tool_call, on_tool_result
+                )
+                messages.append({"role": "user", "content": tool_results})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You have reached the iteration budget. Stop calling "
+                        "tools and emit your best-effort final answer now, "
+                        "based on what you have already observed. Do not "
+                        "request any further tool calls."
+                    ),
+                })
+                synthesis = await self._provider.create_message(
+                    model=model,
+                    max_tokens=max_tokens,
+                    messages=messages,
+                    system=system,
+                    tools=None,  # no tools — forces the model to produce text
+                    temperature=temperature,
+                    stop_sequences=stop_sequences,
+                )
+                if on_response:
+                    on_response(synthesis)
+                response = synthesis
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "agent_loop_synthesis_failed",
+                    extra={"error": str(exc)},
+                )
+                # Fall through with the original tool-use response; the
+                # max_iterations stop_reason still flags the failure.
+
         # Tag the response so callers can distinguish "finished by agent choice"
         # from "ran out of iteration budget mid-work". BaseAgent.run() uses
         # this to mark the task failed/incomplete rather than a silent success.

@@ -1,0 +1,34 @@
+{
+  "name": "case_002_clean_pr",
+  "description": "PR rewords a log message — purely cosmetic, no behavior change. The reviewer should approve and not invent issues.",
+  "pr": {
+    "repo_full_name": "test-org/payments-api",
+    "pr_number": 102,
+    "scm_type": "github",
+    "title": "Clarify retry log message",
+    "description": "Rewords the retry log so on-call can grep for 'retry' easily.",
+    "diff_lines": 4
+  },
+  "diff": {
+    "total_additions": 2,
+    "total_deletions": 2,
+    "files": [
+      {
+        "path": "payments_api/clients/upstream.py",
+        "status": "modified",
+        "additions": 2,
+        "deletions": 2,
+        "patch": "@@ -42,7 +42,7 @@ async def call_upstream(req):\n     for attempt in range(3):\n         try:\n             return await _do_call(req)\n         except UpstreamTimeout:\n-            log.warning(\"upstream slow, trying again\")\n+            log.warning(\"upstream timeout — retry %d/3\", attempt + 1)\n             await asyncio.sleep(0.5 * (attempt + 1))\n     raise UpstreamTimeout()\n"
+      }
+    ]
+  },
+  "extra_files": {},
+  "expectations": {
+    "verdict": "approved",
+    "must_flag_files": [],
+    "must_mention_any": [],
+    "must_not_flag_files": ["payments_api/clients/upstream.py"],
+    "min_critical_findings": 0,
+    "max_total_findings": 1
+  }
+}

@@ -72,3 +72,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "eval: end-to-end agent evals against the live Anthropic API. Opt-in. See tests/evals/README.md.",
+]

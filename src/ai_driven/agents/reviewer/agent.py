@@ -19,6 +19,39 @@ _PER_FILE_PATCH_LIMIT = 2048
 # Line count threshold for using planning model
 _LARGE_DIFF_LINE_THRESHOLD = 500
 
+# Evaluator-optimizer bound (curriculum lesson 56 + ~/.claude/rules/review-loop-limits.md):
+# the reviewer agent emits structured JSON; if it doesn't parse we re-prompt
+# with the schema. Hard ceiling of 2 repair rounds — past that, escalate to a
+# human rather than papering over with truncated text. Loops without bounds
+# are how graders silently drift; loops without escalation are how silent
+# failures become invisible regressions.
+_MAX_JSON_REPAIR_ROUNDS = 2
+
+_REVIEW_JSON_SCHEMA_REMINDER = (
+    "Your previous reply could not be parsed as the structured review JSON. "
+    "Re-emit ONLY the review object inside a single ```json fenced block, "
+    "matching exactly this shape (no prose before or after):\n"
+    "```json\n"
+    "{\n"
+    '  "verdict": "approve" | "request_changes" | "comment",\n'
+    '  "summary": "<short narrative summary>",\n'
+    '  "findings": [\n'
+    '    {\n'
+    '      "file_path": "<repo-relative path>",\n'
+    '      "line": <int or null>,\n'
+    '      "severity": "critical" | "high" | "medium" | "low" | "info",\n'
+    '      "category": "security" | "correctness" | "performance" | "style" | "tests" | "docs",\n'
+    '      "title": "<short>",\n'
+    '      "body": "<actionable explanation>",\n'
+    '      "cited_text": "<1-3 lines copied verbatim from the diff or file>",\n'
+    '      "suggested_code": "<optional fix snippet>"\n'
+    '    }\n'
+    "  ],\n"
+    '  "positive_highlights": ["<optional>"]\n'
+    "}\n"
+    "```"
+)
+
 
 def _truncate_diff_files(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Truncate file patches if total diff text exceeds 50KB."""
@@ -478,6 +511,15 @@ class ReviewAgent(BaseAgent):
             stop_sequences=stop_sequences if stop_sequences is not None else ["```"],
         )
 
+        # Bounded evaluator-optimizer pass: if the output isn't valid review
+        # JSON, re-prompt with the schema. Capped at _MAX_JSON_REPAIR_ROUNDS;
+        # if still invalid we escalate rather than persist a half-empty row.
+        await self._repair_or_escalate_output(
+            result,
+            model=model or self._select_model(task_input),
+            task_id=task_id,
+        )
+
         # Persist a Review row so the Code Review tab can surface this run.
         # Do this after super().run() so the conversation + output text are
         # already populated. Failures here must NOT fail the task — the PR
@@ -493,6 +535,117 @@ class ReviewAgent(BaseAgent):
                 )
 
         return result
+
+    @staticmethod
+    def _output_is_valid_review_json(output_text: str) -> bool:
+        """True iff the agent output contains a parseable review JSON object
+        with the keys we actually persist."""
+        import json as _json
+        import re as _re
+
+        if not output_text:
+            return False
+        match = _re.search(r"\{.*\}", output_text, _re.DOTALL)
+        if not match:
+            return False
+        try:
+            parsed = _json.loads(match.group(0))
+        except (_json.JSONDecodeError, ValueError):
+            return False
+        if not isinstance(parsed, dict):
+            return False
+        if "verdict" not in parsed:
+            return False
+        # Accept any of the field-name aliases that _persist_review_row tolerates.
+        return any(
+            isinstance(parsed.get(k), list) for k in ("findings", "comments", "issues")
+        ) or "summary" in parsed
+
+    async def _repair_or_escalate_output(
+        self,
+        result: Any,
+        *,
+        model: str,
+        task_id: str | None,
+    ) -> None:
+        """Bounded JSON-repair loop. Mutates `result.output` in place.
+
+        Lesson 56 (evaluator-optimizer): producer emits → grader checks → if
+        bad, send feedback and try again. Hard cap at _MAX_JSON_REPAIR_ROUNDS
+        (2). Past that, escalate: tag the result, publish an event, and let
+        downstream code mark the task as needing human review. Silent
+        truncation -- the previous behaviour -- is exactly the failure mode
+        the curriculum warns against.
+        """
+        output_text = getattr(result, "output", "") or ""
+        if self._output_is_valid_review_json(output_text):
+            return
+
+        settings = get_settings()
+        for attempt in range(1, _MAX_JSON_REPAIR_ROUNDS + 1):
+            logger.warning(
+                "ReviewAgent: output not parseable as review JSON; "
+                "repair attempt %d/%d", attempt, _MAX_JSON_REPAIR_ROUNDS,
+            )
+            await self._publish_event(
+                "review_output_repair",
+                {"attempt": attempt, "max_attempts": _MAX_JSON_REPAIR_ROUNDS},
+            )
+
+            repair_messages = [
+                {"role": "user", "content": _REVIEW_JSON_SCHEMA_REMINDER},
+                {"role": "user", "content": (
+                    "Here is your previous reply for reference; transform it "
+                    "into the required JSON without losing any findings:\n\n"
+                    + (output_text[:6000] or "<previous output was empty>")
+                )},
+                {"role": "assistant", "content": "```json\n{"},
+            ]
+
+            try:
+                repair = await self._claude.chat(
+                    messages=repair_messages,
+                    system=self._get_system_prompt({}),
+                    model=model,
+                    max_tokens=settings.claude_max_tokens,
+                    temperature=0.0,
+                    stop_sequences=["```"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ReviewAgent: repair call failed: %s", exc)
+                continue
+
+            repaired_text = "```json\n{" + (repair.text or "")
+            if self._output_is_valid_review_json(repaired_text):
+                result.output = repaired_text
+                logger.info(
+                    "ReviewAgent: repaired structured output on attempt %d",
+                    attempt,
+                )
+                return
+            output_text = repaired_text  # carry forward for the next round
+
+        # Two rounds, still bad. Escalate per ~/.claude/rules/review-loop-limits.md.
+        logger.error(
+            "ReviewAgent: output still unparseable after %d repair rounds; "
+            "escalating to human review. task_id=%s",
+            _MAX_JSON_REPAIR_ROUNDS, task_id,
+        )
+        if not hasattr(result, "metadata") or result.metadata is None:
+            result.metadata = {}
+        result.metadata["escalated"] = True
+        result.metadata["escalation_reason"] = (
+            f"reviewer JSON output invalid after {_MAX_JSON_REPAIR_ROUNDS} repair rounds"
+        )
+        await self._publish_event(
+            "review_escalation",
+            {
+                "reason": "invalid_structured_output",
+                "rounds_attempted": _MAX_JSON_REPAIR_ROUNDS,
+            },
+        )
+        if task_id:
+            await self._update_task_status("needs_human_review")
 
     async def _persist_review_row(
         self, task_id: str, task_input: dict[str, Any], result: Any
@@ -581,6 +734,11 @@ class ReviewAgent(BaseAgent):
                         "confidence": f.get("confidence", 0.8),
                         "title": f.get("title") or "",
                         "body": f.get("body") or f.get("message") or "",
+                        # Lesson 41 — citations: verbatim source quote that
+                        # anchors this finding to the diff/file. Empty when the
+                        # model could not (or did not) supply one — the eval
+                        # harness flags those.
+                        "cited_text": f.get("cited_text") or f.get("citedText") or "",
                         "suggested_code": f.get("suggested_code") or f.get("suggestedCode"),
                     })
             except Exception:

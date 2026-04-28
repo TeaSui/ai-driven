@@ -179,6 +179,7 @@ After analyzing the code, respond with a JSON review result:
       "confidence": 0.9,
       "title": "Short summary under 60 chars",
       "body": "Detailed explanation of the issue and why it matters",
+      "cited_text": "the exact 1–3 lines of code from the diff or file that the finding refers to, copied verbatim",
       "suggested_code": "optional code fix if applicable"
     }
   ],
@@ -196,6 +197,11 @@ Each comment MUST include:
 - confidence: 0.0 to 1.0 (how confident you are this is a real issue)
 - title: Short summary (under 60 chars)
 - body: Detailed explanation
+- cited_text: 1–3 lines of code copied verbatim from the diff or file you read.
+  This is the *evidence* for the finding. Do not paraphrase. Do not describe.
+  Quote the actual characters present in the source so a human reviewer can
+  ctrl-F to it. If you cannot quote the code, you do not have enough evidence
+  to file the finding — drop it.
 - suggested_code: Optional code fix (include only if you can provide a concrete fix)
 </output_format>
 """

@@ -1,0 +1,35 @@
+{
+  "name": "case_001_sql_injection",
+  "description": "PR introduces a SQL injection by string-concatenating user input into a query. The reviewer MUST flag this as a critical security issue and request changes.",
+  "pr": {
+    "repo_full_name": "test-org/payments-api",
+    "pr_number": 101,
+    "scm_type": "github",
+    "title": "Add user lookup endpoint",
+    "description": "Adds GET /users/lookup?email=... so the support tool can find users by email.",
+    "diff_lines": 24
+  },
+  "diff": {
+    "total_additions": 22,
+    "total_deletions": 2,
+    "files": [
+      {
+        "path": "payments_api/handlers/users.py",
+        "status": "modified",
+        "additions": 22,
+        "deletions": 2,
+        "patch": "@@ -10,6 +10,28 @@ from .db import db\n class UserHandler:\n     def __init__(self, conn):\n         self.conn = conn\n+\n+    async def lookup_by_email(self, request):\n+        email = request.query.get(\"email\", \"\")\n+        # Build query with the provided email so support can search\n+        query = \"SELECT id, email, status FROM users WHERE email = '\" + email + \"'\"\n+        cur = self.conn.cursor()\n+        cur.execute(query)\n+        row = cur.fetchone()\n+        if not row:\n+            return {\"found\": False}\n+        return {\"found\": True, \"id\": row[0], \"email\": row[1], \"status\": row[2]}\n"
+      }
+    ]
+  },
+  "extra_files": {
+    "payments_api/handlers/users.py": "from .db import db\n\nclass UserHandler:\n    def __init__(self, conn):\n        self.conn = conn\n\n    async def lookup_by_email(self, request):\n        email = request.query.get(\"email\", \"\")\n        query = \"SELECT id, email, status FROM users WHERE email = '\" + email + \"'\"\n        cur = self.conn.cursor()\n        cur.execute(query)\n        row = cur.fetchone()\n        if not row:\n            return {\"found\": False}\n        return {\"found\": True, \"id\": row[0], \"email\": row[1], \"status\": row[2]}\n"
+  },
+  "expectations": {
+    "verdict": "changes_requested",
+    "must_flag_files": ["payments_api/handlers/users.py"],
+    "must_mention_any": ["sql injection", "parameterized", "parameter", "bind variable", "prepared statement", "injection"],
+    "must_not_flag_files": [],
+    "min_critical_findings": 1
+  }
+}
