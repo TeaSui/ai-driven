@@ -6,13 +6,14 @@
 
 ## Summary
 
-Replace `WorkflowAgent` with a new `OrchestratorAgent` that sequences pre-implementation specialists (`BusinessAnalyst`, `Security`, `QA`) before the existing coding/review pipeline runs. Designs three additional specialists as stubs (`TechLead`, `UXDesigner`, `APITest`) so the routing machinery can exercise all 6 roles in tests while only 3 do real work in MVP. `CodingAgent` stays unified (stack-agnostic) — no separate backend/frontend/etc. agents.
+Replace `WorkflowAgent` with a new `OrchestratorAgent` that sequences pre-implementation specialists (`BusinessAnalyst`, `StackAnalyst`, `Security`, `QA`) before the existing coding/review pipeline runs. Designs three additional specialists as stubs (`TechLead`, `UXDesigner`, `APITest`) so the routing machinery can exercise all 7 roles in tests while only 4 do real work in MVP. `CodingAgent` stays as one class, but gains *stack-aware context injection*: `StackAnalyst` classifies which stacks a task touches (backend/frontend/mobile/devops/data/ai/aws), and only those stacks' guidance files are composed into CodingAgent's prompt — so a backend+devops ticket receives backend+devops expertise without the frontend/mobile/UX noise.
 
 ## Goals
 
 - Platform gains the pre-implementation discipline that `~/.claude/` has today: structured requirements (BA), threat modeling (Security), gate-based sign-off (QA).
 - Trust-boundary changes (auth, payments, PII, external API surface) cannot reach the coding agent without Security producing implementation rules first.
 - Ambiguous tickets get clarified by BA before CodingAgent burns tokens on the wrong thing.
+- CodingAgent receives only the stack-specific guidance relevant to the task (via StackAnalyst + stack_guides), saving tokens and improving focus vs. a one-size-fits-all prompt.
 - Final QA gate blocks tasks from transitioning to `COMPLETED` when acceptance criteria aren't met.
 - Cost overhead on trivial (fast-path) tasks is bounded to a single Haiku classifier call (~$0.0001).
 
@@ -20,7 +21,8 @@ Replace `WorkflowAgent` with a new `OrchestratorAgent` that sequences pre-implem
 
 - Per-team routing customization (`teams.settings_json.orchestration_overrides`) — follow-up spec C.
 - Verification gates and review-loop-limits enforcement — follow-up spec B.
-- Splitting `CodingAgent` into per-stack specialists (backend/frontend/mobile/etc.) — deliberately rejected; the current stack-agnostic agent is the right abstraction for a multi-tenant platform.
+- Splitting `CodingAgent` into separate per-stack agent classes (one class each for backend/frontend/mobile/devops/data/ai/aws) — deliberately rejected as over-engineering; 90% of the implementation logic would be shared, multiplying eval surface and maintenance cost. Tickets are also usually multi-stack, so "pick N relevant classes" mostly means "pick 3–5 of 7," which loses the token-saving benefit while adding orchestration complexity.
+- Instead: stack-specific context is delivered by a new `stack_analyst` specialist that classifies which stacks a task touches, and a `stack_guides/` library of ~500-token guidance files that get composed into `CodingAgent`'s prompt at runtime. One agent class, N composable stack perspectives. See "Stack-aware context injection" below.
 - Replacing `ReviewerAgent` or `DevOpsAgent` — they stay as is, with only a minor read-from-artifacts change to reviewer.
 
 ## Core decisions (locked)
@@ -29,7 +31,7 @@ Replace `WorkflowAgent` with a new `OrchestratorAgent` that sequences pre-implem
 |---|----------|--------|-----------|
 | 1 | First spec scope | Orchestrator + specialists | Most visible platform differentiator; directly maps `~/.claude` discipline into product |
 | 2 | Routing mechanism | Hybrid: rules classify tier, LLM picks specialists within tier | Matches `workflow-routing.md`; predictable cost/latency budget + flexibility where judgment is needed |
-| 3 | Specialist roster | Design 6 roles, implement 3 (BA/Security/QA) in MVP | Design once, implement in phases; reduces redesign risk |
+| 3 | Specialist roster | Design 7 roles, implement 4 (BA/Security/QA/StackAnalyst) in MVP | Design once, implement in phases; StackAnalyst is the mechanism that delivers stack-targeted context without splitting CodingAgent into 7 classes |
 | 4 | Routing rules location | Code-level (`routing.py`) | PR-reviewed, diffable, testable without API calls. Per-team config deferred to spec C |
 | 5 | Specialist comms | DB artifacts + orchestrator fan-out | Persistent audit trail + controlled context; orchestrator decides relevance |
 | 6 | Failure handling | Tiered: 2-round repair for parse, 3× backoff for infra, blocker verdicts are sacred | Matches existing reviewer pattern; preserves gate integrity |
@@ -80,8 +82,10 @@ Replace `WorkflowAgent` with a new `OrchestratorAgent` that sequences pre-implem
 | Routing rules module | `src/ai_driven/agents/orchestrator/routing.py` | new, pure Python |
 | Fan-out rules module | `src/ai_driven/agents/orchestrator/fan_out.py` | new, pure Python |
 | Artifact Pydantic schemas | `src/ai_driven/agents/orchestrator/artifacts.py` | new |
-| Specialist classes (3 live + 3 stubs) | `src/ai_driven/agents/specialists/{role}/agent.py` × 6 | new |
-| Specialist system prompts | `src/ai_driven/claude/prompts/specialists/{role}.py` × 3 (stubs have no prompt) | new |
+| Specialist classes (4 live + 3 stubs) | `src/ai_driven/agents/specialists/{role}/agent.py` × 7 | new |
+| Specialist system prompts | `src/ai_driven/claude/prompts/specialists/{role}.py` × 4 (stubs have no prompt) | new |
+| Stack guides library | `src/ai_driven/claude/prompts/stack_guides/{backend,frontend,mobile,devops,data,ai,aws}.md` × 7 | new |
+| CodingAgent prompt composer | `src/ai_driven/agents/coding/prompt_composer.py` (composes base + stack_guides + artifacts) | new |
 | Orchestrator + classifier prompts | `src/ai_driven/claude/prompts/orchestrator.py` | new |
 | Repair-loop helper lifted from reviewer | `src/ai_driven/agents/base.py` (new `_repair_or_escalate_json` method) | refactor |
 | Reviewer uses the lifted helper | `src/ai_driven/agents/reviewer/agent.py` | refactor |
@@ -112,7 +116,7 @@ CREATE TABLE task_artifacts (
   output_tokens   INTEGER DEFAULT 0,
   created_at      TIMESTAMP WITH TIME ZONE DEFAULT now(),
   CONSTRAINT task_artifacts_role_check CHECK (role IN (
-    'business_analyst','security','qa','tech_lead','ux_designer','api_test'
+    'business_analyst','stack_analyst','security','qa','tech_lead','ux_designer','api_test'
   )),
   CONSTRAINT task_artifacts_verdict_check CHECK (verdict IN (
     'pass','pass_with_notes','block','error','not_implemented'
@@ -142,6 +146,16 @@ NULL on pre-orchestrator tasks. Classifier writes one of the three values.
   "acceptance_criteria": [{"given": str, "when": str, "then": str}],
   "out_of_scope": [str],
   "blocking_questions": [str]    # if non-empty, verdict='block'
+}
+
+# stack_analyst
+{
+  "stacks": [Literal["backend","frontend","mobile","devops","data","ai","aws"]],
+  "primary_stack": str,          # the stack doing the heaviest lifting (for prompt ordering)
+  "cross_cutting_concerns": [str],  # e.g., "database migration", "API contract change"
+  "reasoning": str               # 1-2 sentences on why these stacks were chosen
+  # No blocking_questions — StackAnalyst can always make a call; if signals are thin,
+  # it defaults to {primary_stack based on repo clues, no others} with low-confidence reasoning.
 }
 
 # security
@@ -214,13 +228,15 @@ TIER_RULES: dict[str, TierRule] = {
         skip_to_pipeline=True,
     ),
     "full_workflow": TierRule(
-        mandatory=["business_analyst", "security"],
+        # stack_analyst runs after BA (it needs BA's acceptance criteria to classify well)
+        # and before security (so security sees which stacks are in play)
+        mandatory=["business_analyst", "stack_analyst", "security"],
         pick_from=["tech_lead", "ux_designer"],  # stubs in MVP
         skip_to_pipeline=False,
         final_gate="qa",
     ),
     "multi_domain": TierRule(
-        mandatory=["business_analyst", "tech_lead", "security"],
+        mandatory=["business_analyst", "stack_analyst", "tech_lead", "security"],
         pick_from=["ux_designer", "api_test"],
         skip_to_pipeline=False,
         final_gate="qa",
@@ -242,13 +258,14 @@ Only runs when `pick_from` is non-empty AND tier ≠ `fast_path`. One Haiku call
 | Specialist | Reads |
 |---|---|
 | `business_analyst` | nothing (runs first) |
-| `security` | `business_analyst` |
-| `tech_lead` (stub) | `business_analyst`, `security` |
-| `ux_designer` (stub) | `business_analyst` |
-| `api_test` (stub) | `tech_lead` (if present), `security` |
+| `stack_analyst` | `business_analyst` |
+| `security` | `business_analyst`, `stack_analyst` |
+| `tech_lead` (stub) | `business_analyst`, `stack_analyst`, `security` |
+| `ux_designer` (stub) | `business_analyst`, `stack_analyst` (filtered: only runs if `frontend` or `mobile` in stacks) |
+| `api_test` (stub) | `stack_analyst`, `tech_lead` (if present), `security` |
 | `qa` (final gate) | ALL prior artifacts + CodingAgent output + ReviewerAgent output |
-| `CodingAgent` (extended) | `business_analyst`, `security` |
-| `ReviewerAgent` (extended) | `security` only |
+| `CodingAgent` (extended) | `business_analyst`, `stack_analyst` (→ drives stack_guides injection), `security` |
+| `ReviewerAgent` (extended) | `security`, `stack_analyst` (to check reviewer comments match the task's stacks) |
 
 Hard-coded in `fan_out.py` — pure function `relevant_artifacts_for(role, all_artifacts) -> dict`.
 
@@ -310,7 +327,9 @@ Anti-patterns section is the key anti-drift mechanism — every specialist's pro
 
 **`business_analyst`:** Resolve ticket ambiguity using context + repo conventions, OR return `verdict='block'` with `blocking_questions`. Always produce Gherkin acceptance criteria. Always list out-of-scope.
 
-**`security`:** STRIDE against the described change. Produce `implementation_rules` (injected verbatim into CodingAgent prompt). Return `verdict='block'` only for flatly unsafe requests (plaintext credentials, disabling auth). Soft concerns → `compliance_notes` + `verdict='pass_with_notes'`.
+**`stack_analyst`:** Multi-label classify which stacks the task touches from the fixed 7-item set `{backend, frontend, mobile, devops, data, ai, aws}`. Inputs: Jira ticket + BA's acceptance criteria + a compact summary of the repo's tech stack (derived from `docs/implementation/00-overview.md`-style config or file-glob heuristics). Output: `stacks` list, `primary_stack`, `cross_cutting_concerns`. Never blocks — a low-confidence classification still proceeds (with conservative stack selection). Verdict is always `pass` or `pass_with_notes`.
+
+**`security`:** STRIDE against the described change. Reads StackAnalyst artifact to focus threat-model on relevant stacks (e.g., skip mobile-specific threats for a backend-only change). Produce `implementation_rules` (injected verbatim into CodingAgent prompt). Return `verdict='block'` only for flatly unsafe requests (plaintext credentials, disabling auth). Soft concerns → `compliance_notes` + `verdict='pass_with_notes'`.
 
 **`qa` (final gate):** Read ALL prior artifacts + PR diff + reviewer comments. Produce `checks_performed` covering acceptance criteria, security rules, test coverage, regression risk. Explicitly forbidden from re-running reviewer work — it's a gate, not a second reviewer.
 
@@ -324,6 +343,47 @@ Reuse reviewer pattern, lifted into `BaseAgent._repair_or_escalate_json(schema, 
 - Round 1: re-prompt with error message, ask for corrected JSON
 - Round 2: same
 - After round 2: `verdict='error'`, publish `specialist_failed`, orchestrator halts → human escalation
+
+### Stack-aware context injection (new in this spec)
+
+The mechanism that delivers "only the relevant stacks' context" without splitting `CodingAgent` into 7 classes.
+
+**Library:** `src/ai_driven/claude/prompts/stack_guides/` holds one file per stack:
+- `backend.md` — API design, layering, error handling at boundaries, DB patterns, async/sync tradeoffs
+- `frontend.md` — component architecture, state management, a11y, Core Web Vitals, responsive design
+- `mobile.md` — offline-first, 60fps, battery/memory, platform differences (iOS/Android)
+- `devops.md` — CI/CD, containers, monitoring, deployment safety, rollback
+- `data.md` — ETL, schemas, migration safety, data quality
+- `ai.md` — prompt engineering, token/cost budgets, eval harness, caching
+- `aws.md` — IaC, least-privilege IAM, serverless patterns, region/availability
+
+Each file is ~500 tokens. Short, focused, stable. These are NOT prompts for a separate agent — they're **prompt fragments** consumed by `CodingAgent`.
+
+**Composer:** `src/ai_driven/agents/coding/prompt_composer.py` exposes:
+
+```python
+def compose_coding_prompt(
+    base: str,
+    stacks: list[str],               # from stack_analyst artifact
+    artifacts: dict[str, Artifact],  # BA, security
+) -> str:
+    """Returns the full system prompt: BASE + <stack_guides>…</stack_guides> + <prior_artifacts>…</prior_artifacts>"""
+```
+
+Order is deterministic — `primary_stack` first, then others alphabetically. Determinism matters for prompt caching: byte-exact matches are required for cache hits (advanced-features.md:170).
+
+**Cache strategy:** The base CodingAgent prompt + each stack guide is cacheable independently IF each exceeds 1024 tokens combined. Realistic case: `base (3K tokens) + backend (500) + devops (500) = 4K` → one cache breakpoint at the end of the composed system prompt. Cache hit rate approaches 100% for repeat stacks from the same team.
+
+**Fallback when StackAnalyst didn't run:** `fast_path` tier skips specialists entirely (see Section "Routing & classification"). For fast-path tasks, `compose_coding_prompt` is called with `stacks=[]`, producing the original stack-agnostic behavior. This preserves current behavior for trivial tasks and only adds cost/complexity where it pays off.
+
+**Token savings (realistic estimate):**
+- Current: base prompt ~3K tokens, no stack context
+- After this spec, backend-only task: 3K base + 500 backend = 3.5K (+500, modest)
+- After this spec, backend+devops task: 3K + 500 + 500 = 4K (+1K)
+- **Token savings vs. a hypothetical "load all 7 stack guides always" approach: 7 × 500 = 3.5K excluded per task** — the saving is *against the naïve alternative*, not against the current implementation. The benefit vs. current is precision (better focus on relevant patterns), not fewer tokens.
+
+**Why this is worth doing even though it ADDS ~500-1K tokens vs. today:**
+The current generic prompt is cheap but coaches the model poorly. The stack guides encode real patterns (e.g., "backend handlers validate at the boundary, never trust internal callers; never catch-and-continue — let errors propagate") that dramatically shift what "correct" code looks like. Expected effect: fewer review round-trips, higher first-pass PR-approval rate. Eval suite (below) measures this.
 
 ## Failure handling (tiered per Q6)
 
@@ -348,6 +408,7 @@ Blocker verdicts are **sacred** — the orchestrator never re-prompts a Security
 | Tier classifier | `claude-haiku-4-5` | 3-way classification, short input, temp=0 |
 | Specialist picker | `claude-haiku-4-5` | Subset pick from known list |
 | `business_analyst` | `claude-sonnet-4-6` | Ambiguity reasoning + Gherkin generation |
+| `stack_analyst` | `claude-haiku-4-5` | Multi-label classification over a fixed 7-item list; same shape as tier classifier, Haiku is sufficient |
 | `security` | `claude-sonnet-4-6` | STRIDE depth; under-calling severity is a real risk with Haiku |
 | `qa` | `claude-sonnet-4-6` | Context-heavy (all artifacts + diff) |
 | Stubs | n/a | No Claude calls |
@@ -391,6 +452,7 @@ System prompt must exceed 1024 tokens to be cacheable — planned prompts clear 
 | Specialist | Tools |
 |---|---|
 | `business_analyst` | none |
+| `stack_analyst` | `repo.list_files` (read-only) — lets it peek at top-level structure for stack signals (e.g., `package.json`, `pyproject.toml`, `ai-driven-web-ui/`) |
 | `security` | none |
 | `qa` | `scm.read_diff`, `scm.read_file`, `tests.list_run_results` (read-only) |
 | Stubs | none |
@@ -428,7 +490,8 @@ UI consumes these automatically — events surface in the existing task timeline
 
 - `test_routing_rules.py` — pure function tests, ~20 cases
 - `test_fan_out.py` — per-role allowed-reads assertions
-- `test_specialist_{role}.py` × 6 — mocked Claude, asserted artifact fields
+- `test_specialist_{role}.py` × 7 — mocked Claude, asserted artifact fields
+- `test_prompt_composer.py` — deterministic stack ordering, cache-byte-stability, fallback when `stacks=[]`
 - `test_specialist_repair_loop.py` — malformed JSON handling
 - `test_classifier.py` — tier assignment + fallback behavior
 - `test_orchestrator_agent.py` — full orchestrator flow with mocked specialists (order, persistence, blocker hard-stop, stub handling)
@@ -443,7 +506,7 @@ Target: 100% routing/fan-out coverage, ≥90% orchestrator state transitions.
 
 ### Evaluation suite (`tests/evals/specialists/`) — real Claude, nightly CI
 
-Following `tests/evals/reviewer/` pattern. ~15 real Jira tickets per role with expected verdicts. Haiku-based grader scores verdict correctness, reasoning quality, payload completeness. Thresholds: ≥90% verdict correctness, ≥7/10 grader scores. Failures on main alert Slack — no PR block, no nightly block (costs real API money; hard-gating nightly eval would wake people for non-actionable failures).
+Following `tests/evals/reviewer/` pattern. ~15 real Jira tickets per live role (BA, stack_analyst, security, qa) with expected verdicts/outputs. Haiku-based grader scores verdict correctness, reasoning quality, payload completeness, asking for **strengths, weaknesses, reasoning AND score** (not just score — graders converge on 6/10 without the structured breakdown per `evaluation.md:118`). Thresholds: ≥90% verdict correctness, ≥7/10 grader scores. StackAnalyst has an additional deterministic grader: comparing predicted `stacks` against a human-labeled ground truth (F1 score, threshold ≥0.85). Failures on main alert Slack — no PR block, no nightly block (costs real API money; hard-gating nightly eval would wake people for non-actionable failures).
 
 ### E2E (Playwright)
 
