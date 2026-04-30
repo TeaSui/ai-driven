@@ -25,6 +25,28 @@ logger = logging.getLogger(__name__)
 _STREAM_FLUSH_INTERVAL = 0.2  # seconds
 _STREAM_FLUSH_SIZE = 500  # chars
 
+# Claude Sonnet 4.6 pricing ($/M tokens). Update if defaults change or
+# per-call model overrides introduce cheaper variants. These are the live
+# rates used for the per-task budget kill-switch in `_should_continue`.
+#   input       — uncached input
+#   cache_write — cache_creation_input_tokens (1.25× input)
+#   cache_read  — cache_read_input_tokens (0.1× input)
+#   output      — output_tokens
+_PRICE_INPUT_PER_M       = 3.00
+_PRICE_CACHE_WRITE_PER_M = 3.75
+_PRICE_CACHE_READ_PER_M  = 0.30
+_PRICE_OUTPUT_PER_M      = 15.00
+
+
+def _iteration_cost_usd(usage: Any) -> float:
+    """Compute the dollar cost of a single Claude response's usage block."""
+    return (
+        usage.input_tokens              * _PRICE_INPUT_PER_M       / 1_000_000
+        + getattr(usage, "cache_creation_input_tokens", 0) * _PRICE_CACHE_WRITE_PER_M / 1_000_000
+        + getattr(usage, "cache_read_input_tokens", 0)     * _PRICE_CACHE_READ_PER_M  / 1_000_000
+        + usage.output_tokens           * _PRICE_OUTPUT_PER_M      / 1_000_000
+    )
+
 
 class BaseAgent(ABC):
     """Base class for all AI agents."""
@@ -306,6 +328,11 @@ class BaseAgent(ABC):
         start_time = time.monotonic()
         tool_call_count = 0
         iteration_count = 0
+        # Running dollar cost of this task's Claude calls. Incremented on
+        # every iteration; read by _should_continue to enforce the per-task
+        # budget ceiling (AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD).
+        running_cost_usd = 0.0
+        budget_exceeded = False
 
         # Publish phase_change when the agent starts
         await self._publish_event("phase_change", {"phase": "started", "agent_type": self.agent_type})
@@ -385,6 +412,16 @@ class BaseAgent(ABC):
                 })
 
         def on_response(response: MessageResponse) -> None:
+            """Sync callback invoked between iterations in the agent loop.
+
+            The cost accumulator MUST update synchronously here — _should_continue
+            reads it to gate the next iteration, and the async event-publishing
+            branch below doesn't block, so any cost update scheduled via
+            loop.create_task won't be visible to the gate before the next call.
+            """
+            nonlocal running_cost_usd
+            running_cost_usd += _iteration_cost_usd(response.usage)
+
             import asyncio
             try:
                 loop = asyncio.get_running_loop()
@@ -443,7 +480,24 @@ class BaseAgent(ABC):
                 await _flush_stream_buffer(iteration_num)
 
         async def _should_continue() -> bool:
-            """Callback for the agent loop to check pause/stop control flags."""
+            """Gate for the agent loop: pause/stop control flags AND budget ceiling."""
+            nonlocal budget_exceeded
+
+            # Per-task dollar budget kill-switch. Checked FIRST so a runaway
+            # loop (like KAN-12's 51-iteration / $6.25 incident) halts before
+            # the next Claude call fires instead of after. Matches the post-
+            # KAN-12 cost-control plan — see docs/plans/2026-04-29-*.md Red-team
+            # revisions + the claude_max_cost_per_task_usd setting.
+            if running_cost_usd >= settings.claude_max_cost_per_task_usd:
+                budget_exceeded = True
+                await self._publish_event("complete", {
+                    "stopped": True,
+                    "reason": "budget_exceeded",
+                    "cost_usd": round(running_cost_usd, 4),
+                    "ceiling_usd": settings.claude_max_cost_per_task_usd,
+                })
+                return False
+
             flag = await self._check_control_flag()
             if flag == "stopped":
                 await self._publish_event("complete", {"stopped": True, "message": "Task stopped by user"})
@@ -494,7 +548,11 @@ class BaseAgent(ABC):
                 "max_iterations", "max_tokens",
             )
             iterations_exhausted = bad_stop  # kept for the AgentResult message below
-            run_success = not bad_stop
+            # Budget-exceeded is also a failure mode: the loop halted
+            # mid-workflow to stop runaway cost. Mark the result as failed
+            # so the UI surfaces "$X.XX / $Y.YY budget ceiling hit" rather
+            # than a misleading completed badge.
+            run_success = not bad_stop and not budget_exceeded
 
             duration = time.monotonic() - start_time
             emit_agent_metrics(
@@ -544,6 +602,26 @@ class BaseAgent(ABC):
                     self._task_id, user_message, eval_output, self.agent_type,
                 ))
 
+            if budget_exceeded:
+                error_msg = (
+                    f"Agent halted at ${running_cost_usd:.2f} cost ceiling "
+                    f"(AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD="
+                    f"${settings.claude_max_cost_per_task_usd:.2f}) after "
+                    f"{iteration_count} iterations. The task scope was too "
+                    f"wide for a single run; split the ticket or raise the "
+                    f"ceiling after investigating."
+                )
+            elif iterations_exhausted:
+                error_msg = (
+                    f"Agent stopped after {iteration_count} iterations without "
+                    f"finishing (max_iterations={max_iterations or 'default'}). "
+                    f"Last step may have been a mid-workflow file write — check "
+                    f"the branch on the SCM side and consider raising "
+                    f"AI_DRIVEN_CLAUDE_MAX_TOOL_ITERATIONS or re-running."
+                )
+            else:
+                error_msg = None
+
             return AgentResult(
                 success=run_success,
                 output=response.text,
@@ -551,14 +629,8 @@ class BaseAgent(ABC):
                 tool_calls=tool_call_count,
                 iterations=iteration_count,
                 duration_seconds=duration,
-                error=(
-                    f"Agent stopped after {iteration_count} iterations without "
-                    f"finishing (max_iterations={max_iterations or 'default'}). "
-                    f"Last step may have been a mid-workflow file write — check "
-                    f"the branch on the SCM side and consider raising "
-                    f"AI_DRIVEN_CLAUDE_MAX_TOOL_ITERATIONS or re-running."
-                    if iterations_exhausted else None
-                ),
+                error=error_msg,
+                cost_usd=round(running_cost_usd, 4),
             )
 
         except Exception as e:
@@ -596,6 +668,7 @@ class BaseAgent(ABC):
                 conversation=conversation,
                 tool_calls=tool_call_count,
                 iterations=iteration_count,
+                cost_usd=round(running_cost_usd, 4),
                 duration_seconds=duration,
             )
 
@@ -626,6 +699,7 @@ class AgentResult:
         duration_seconds: float = 0.0,
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
+        cost_usd: float = 0.0,
     ) -> None:
         self.success = success
         self.output = output
@@ -635,6 +709,11 @@ class AgentResult:
         self.duration_seconds = duration_seconds
         self.error = error
         self.metadata = metadata or {}
+        # Cache-aware dollar cost accumulated across all Claude calls in
+        # this run. Populated by BaseAgent.run via the per-iteration
+        # _iteration_cost_usd helper; falls back to 0.0 for callers that
+        # construct AgentResult directly (unit tests).
+        self.cost_usd = cost_usd
 
     @property
     def total_tokens(self) -> int:

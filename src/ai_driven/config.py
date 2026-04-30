@@ -55,9 +55,17 @@ class Settings(BaseSettings):
     # Coding runs that touch ≥10 files often need 2 iterations per file
     # (read → write) plus explore + plan + deliver. 20 was under-budgeted —
     # KAN-9 (fe4e7f5c) burned 20 iterations writing files and never reached
-    # the PR step. 50 gives enough headroom for large tickets without
-    # encouraging runaway loops; raise further only after a new regression.
-    claude_max_tool_iterations: int = 50
+    # the PR step. 25 is the post-KAN-12 setting: in the 51-iter KAN-12
+    # run we saw cost grow quadratically past ~iter 15 without getting
+    # closer to PR creation. Real migration tickets that need more should
+    # be split by BA/StackAnalyst (orchestrator Phase 1), not given more
+    # rope here.
+    claude_max_tool_iterations: int = 25
+    # Per-task hard budget ceiling. When cumulative Claude cost on a single
+    # task hits this dollar value the agent loop short-circuits via
+    # _should_continue and returns success=False with a budget_exceeded
+    # reason. Prevents runaway $6+ incidents like KAN-12 (2026-04-30).
+    claude_max_cost_per_task_usd: float = 3.0
     anthropic_api_key: str = ""
 
     # AWS

@@ -118,11 +118,17 @@ class TaskConsumer:
             agent = await self._create_agent(agent_type, payload)
             result = await agent.run(payload)
 
-            # Update task status
-            # Estimate cost: ~$3/M input + ~$15/M output for Sonnet
+            # Update task status.
+            # BaseAgent.run now accumulates a cache-aware cost on the result
+            # (see _iteration_cost_usd). Use that when available; fall back
+            # to the legacy uncached-only estimate for old callers that
+            # construct AgentResult directly (mostly unit tests).
             input_tokens = result.conversation.total_input_tokens
             output_tokens = result.conversation.total_output_tokens
-            cost_usd = (input_tokens * 3.0 / 1_000_000) + (output_tokens * 15.0 / 1_000_000)
+            if getattr(result, "cost_usd", 0.0):
+                cost_usd = result.cost_usd
+            else:
+                cost_usd = (input_tokens * 3.0 / 1_000_000) + (output_tokens * 15.0 / 1_000_000)
 
             async with async_session_factory() as session:
                 task_repo = TaskRepository(session)
