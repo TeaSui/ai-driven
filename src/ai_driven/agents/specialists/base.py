@@ -197,7 +197,7 @@ class SpecialistBase(BaseAgent):
             f"{prior_block}\n"
             f"</prior_artifacts>\n"
             f"\n"
-            f"<instruction>Produce the JSON object per &lt;output_schema&gt;. "
+            f"<instruction>Produce the JSON object per <output_schema>. "
             f"Use prefill to start.</instruction>"
         )
 
