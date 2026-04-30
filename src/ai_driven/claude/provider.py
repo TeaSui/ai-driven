@@ -140,33 +140,43 @@ def _with_cache_control_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _with_cache_control_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Add cache_control breakpoint to the last user message if conversation is long enough.
+    """Pin a cache_control breakpoint on the FIRST user message.
 
-    Caching conversation history is effective when there are multiple turns and
-    the content exceeds the minimum cacheable threshold.
+    Why the first message, not the last:
+    In an agent tool loop, the conversation grows by one tool_result turn
+    per iteration. Marking the *last* user message (the newest tool_result)
+    as the cache breakpoint means every iteration has a different tail, so
+    every request is a cache miss that pays the 1.25× cache-write rate —
+    the opposite of what we want.
+
+    Pinning on the *first* user message (the initial task prompt, which
+    never changes after turn 1) gives a stable prefix. From iteration 2
+    onward every request hits the 0.1× cache-read rate on the initial
+    prompt + system + tools, which cuts input-side cost by roughly 10×
+    on long coding runs.
+
+    See KAN-12 cost post-mortem (2026-04-30) for the incident that
+    motivated this change.
     """
-    if len(messages) < 5:
+    if not messages:
         return messages
 
-    # Find the last user message
-    last_user_idx = None
-    for i in range(len(messages) - 1, -1, -1):
-        if messages[i].get("role") == "user":
-            last_user_idx = i
-            break
-
-    if last_user_idx is None:
+    # Find the FIRST user message.
+    first_user_idx = next(
+        (i for i, m in enumerate(messages) if m.get("role") == "user"),
+        None,
+    )
+    if first_user_idx is None:
         return messages
 
-    msg = messages[last_user_idx]
+    msg = messages[first_user_idx]
     content = msg.get("content")
 
-    # Only cache if content is large enough (estimate tokens)
     if isinstance(content, str):
         if len(content) < _CACHE_MIN_TOKENS * _CHARS_PER_TOKEN:
             return messages
         messages = list(messages)  # shallow copy
-        messages[last_user_idx] = {
+        messages[first_user_idx] = {
             **msg,
             "content": [
                 {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}},
@@ -181,7 +191,7 @@ def _with_cache_control_messages(messages: list[dict[str, Any]]) -> list[dict[st
         last_block = dict(new_content[-1])
         last_block["cache_control"] = {"type": "ephemeral"}
         new_content[-1] = last_block
-        messages[last_user_idx] = {**msg, "content": new_content}
+        messages[first_user_idx] = {**msg, "content": new_content}
 
     return messages
 
