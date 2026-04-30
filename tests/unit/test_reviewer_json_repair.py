@@ -82,7 +82,11 @@ def test_persistent_invalidity_escalates_after_cap() -> None:
     assert agent._claude.chat.await_count == _MAX_JSON_REPAIR_ROUNDS
     assert res.metadata["escalated"] is True
     assert "after" in res.metadata["escalation_reason"]
-    agent._update_task_status.assert_awaited_with("needs_human_review")
+    # Escalation is signal-only (metadata + event). The helper MUST NOT write
+    # tasks.status — 'needs_human_review' isn't in the ck_tasks_status CHECK
+    # constraint, so the old call was silently swallowed anyway, and
+    # specialists running in shadow mode must stay side-effect-free.
+    agent._update_task_status.assert_not_called()
 
 
 def test_escalation_event_published() -> None:

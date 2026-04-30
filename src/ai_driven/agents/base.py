@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -90,6 +91,12 @@ class BaseAgent(ABC):
     """Base class for all AI agents."""
 
     agent_type: str = "base"
+
+    # Hard cap on JSON-repair rounds — matches ~/.claude/rules/review-loop-limits.md.
+    # When a specialist or the reviewer emits malformed structured JSON, we
+    # re-prompt up to this many times, then escalate. Silent truncation is
+    # exactly the failure mode review-loop-limits.md warns against.
+    MAX_JSON_REPAIR_ROUNDS = 2
 
     def __init__(
         self,
@@ -712,6 +719,94 @@ class BaseAgent(ABC):
                 cost_usd=round(running_cost_usd, 4),
                 duration_seconds=duration,
             )
+
+    async def _repair_or_escalate_json(
+        self,
+        result: Any,
+        *,
+        validator: Callable[[str], bool],
+        schema_reminder: str,
+        system_prompt: str,
+        model: str,
+        task_id: str | None,
+        event_prefix: str = "agent",
+    ) -> None:
+        """Bounded JSON-repair loop usable by any agent emitting structured JSON.
+
+        Mutates ``result.output`` in place when repair succeeds. After
+        ``MAX_JSON_REPAIR_ROUNDS`` (2) failed attempts, sets
+        ``result.metadata['escalated'] = True`` and publishes an escalation
+        event. Callers decide what to do with an escalated result; this helper
+        never raises, never silently truncates, and NEVER updates task status
+        (the reviewer's caller handles that itself — the helper stays
+        side-effect-free so specialists running in shadow mode don't touch
+        tasks.status).
+        """
+        from ai_driven.config import get_settings  # local: avoid cycles
+
+        output_text = getattr(result, "output", "") or ""
+        if validator(output_text):
+            return
+
+        settings = get_settings()
+        for attempt in range(1, self.MAX_JSON_REPAIR_ROUNDS + 1):
+            logger.warning(
+                "%s: structured JSON output unparseable; repair attempt %d/%d",
+                self.agent_type, attempt, self.MAX_JSON_REPAIR_ROUNDS,
+            )
+            await self._publish_event(
+                f"{event_prefix}_output_repair",
+                {"attempt": attempt, "max_attempts": self.MAX_JSON_REPAIR_ROUNDS},
+            )
+            try:
+                repair = await self._claude.chat(
+                    messages=[
+                        {"role": "user", "content": schema_reminder},
+                        {"role": "user", "content": (
+                            "Here is your previous reply for reference; "
+                            "transform it into the required JSON without losing "
+                            "any details:\n\n"
+                            # 6000-char cap keeps the repair prompt bounded.
+                            # If legitimate outputs routinely exceed this,
+                            # escalation is the correct response — raising the
+                            # cap here would just burn tokens papering over
+                            # output sizes that won't fit the schema anyway.
+                            + (output_text[:6000] or "<previous output empty>")
+                        )},
+                        {"role": "assistant", "content": "```json\n{"},
+                    ],
+                    system=system_prompt,
+                    model=model,
+                    max_tokens=settings.claude_max_tokens,
+                    temperature=0.0,
+                    stop_sequences=["```"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("%s: repair call failed: %s", self.agent_type, exc)
+                continue
+
+            repaired_text = "```json\n{" + (repair.text or "")
+            if validator(repaired_text):
+                result.output = repaired_text
+                return
+            output_text = repaired_text
+
+        # Two rounds exhausted — escalate via metadata + event only.
+        # Do NOT call _update_task_status — 'needs_human_review' is not in
+        # the tasks.status CHECK constraint, and specialists running in
+        # shadow mode must stay side-effect-free.
+        if not hasattr(result, "metadata") or result.metadata is None:
+            result.metadata = {}
+        result.metadata["escalated"] = True
+        result.metadata["escalation_reason"] = (
+            f"{self.agent_type} JSON output invalid after "
+            f"{self.MAX_JSON_REPAIR_ROUNDS} repair rounds"
+        )
+        await self._publish_event(
+            f"{event_prefix}_escalation",
+            {"reason": "invalid_structured_output",
+             "rounds_attempted": self.MAX_JSON_REPAIR_ROUNDS},
+        )
 
     def _build_initial_message(self, task_input: dict[str, Any]) -> str:
         """Build the initial user message from task input. Override in subclasses."""

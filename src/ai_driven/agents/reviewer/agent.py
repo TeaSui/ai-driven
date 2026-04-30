@@ -568,84 +568,24 @@ class ReviewAgent(BaseAgent):
         model: str,
         task_id: str | None,
     ) -> None:
-        """Bounded JSON-repair loop. Mutates `result.output` in place.
+        """Delegate to BaseAgent._repair_or_escalate_json for the lifted loop.
 
-        Lesson 56 (evaluator-optimizer): producer emits → grader checks → if
-        bad, send feedback and try again. Hard cap at _MAX_JSON_REPAIR_ROUNDS
-        (2). Past that, escalate: tag the result, publish an event, and let
-        downstream code mark the task as needing human review. Silent
-        truncation -- the previous behaviour -- is exactly the failure mode
-        the curriculum warns against.
+        Historically this method also called self._update_task_status(
+        'needs_human_review'), but that status isn't in the ck_tasks_status
+        CHECK constraint and the call was silently swallowed by
+        _update_task_status's exception handler. Escalation now flows
+        purely via result.metadata['escalated'] and the 'review_escalation'
+        pub/sub event; downstream consumers check metadata.
         """
-        output_text = getattr(result, "output", "") or ""
-        if self._output_is_valid_review_json(output_text):
-            return
-
-        settings = get_settings()
-        for attempt in range(1, _MAX_JSON_REPAIR_ROUNDS + 1):
-            logger.warning(
-                "ReviewAgent: output not parseable as review JSON; "
-                "repair attempt %d/%d", attempt, _MAX_JSON_REPAIR_ROUNDS,
-            )
-            await self._publish_event(
-                "review_output_repair",
-                {"attempt": attempt, "max_attempts": _MAX_JSON_REPAIR_ROUNDS},
-            )
-
-            repair_messages = [
-                {"role": "user", "content": _REVIEW_JSON_SCHEMA_REMINDER},
-                {"role": "user", "content": (
-                    "Here is your previous reply for reference; transform it "
-                    "into the required JSON without losing any findings:\n\n"
-                    + (output_text[:6000] or "<previous output was empty>")
-                )},
-                {"role": "assistant", "content": "```json\n{"},
-            ]
-
-            try:
-                repair = await self._claude.chat(
-                    messages=repair_messages,
-                    system=self._get_system_prompt({}),
-                    model=model,
-                    max_tokens=settings.claude_max_tokens,
-                    temperature=0.0,
-                    stop_sequences=["```"],
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("ReviewAgent: repair call failed: %s", exc)
-                continue
-
-            repaired_text = "```json\n{" + (repair.text or "")
-            if self._output_is_valid_review_json(repaired_text):
-                result.output = repaired_text
-                logger.info(
-                    "ReviewAgent: repaired structured output on attempt %d",
-                    attempt,
-                )
-                return
-            output_text = repaired_text  # carry forward for the next round
-
-        # Two rounds, still bad. Escalate per ~/.claude/rules/review-loop-limits.md.
-        logger.error(
-            "ReviewAgent: output still unparseable after %d repair rounds; "
-            "escalating to human review. task_id=%s",
-            _MAX_JSON_REPAIR_ROUNDS, task_id,
+        await self._repair_or_escalate_json(
+            result,
+            validator=self._output_is_valid_review_json,
+            schema_reminder=_REVIEW_JSON_SCHEMA_REMINDER,
+            system_prompt=self._get_system_prompt({}),
+            model=model,
+            task_id=task_id,
+            event_prefix="review",
         )
-        if not hasattr(result, "metadata") or result.metadata is None:
-            result.metadata = {}
-        result.metadata["escalated"] = True
-        result.metadata["escalation_reason"] = (
-            f"reviewer JSON output invalid after {_MAX_JSON_REPAIR_ROUNDS} repair rounds"
-        )
-        await self._publish_event(
-            "review_escalation",
-            {
-                "reason": "invalid_structured_output",
-                "rounds_attempted": _MAX_JSON_REPAIR_ROUNDS,
-            },
-        )
-        if task_id:
-            await self._update_task_status("needs_human_review")
 
     async def _persist_review_row(
         self, task_id: str, task_input: dict[str, Any], result: Any
