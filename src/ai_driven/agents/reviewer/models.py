@@ -71,7 +71,16 @@ class ReviewResult:
 
     @classmethod
     def parse_from_text(cls, text: str) -> ReviewResult:
-        """Parse review JSON from Claude's response."""
+        """Parse review JSON from Claude's response.
+
+        ReviewAgent.run uses prefill + stop_sequences=["```"] to force
+        well-shaped JSON, and the repair loop in BaseAgent re-prompts on
+        parse failure. This method is the last line of defense: on parse
+        failure, log the FULL raw text so downstream log pipelines can
+        surface schema drift, and degrade to an empty comment verdict so
+        callers don't crash. Silent truncation to `summary[:500]` hid the
+        evidence needed to fix the underlying issue.
+        """
         cleaned = text.strip()
         if "```json" in cleaned:
             start = cleaned.index("```json") + 7
@@ -86,7 +95,12 @@ class ReviewResult:
             data = json.loads(cleaned)
             return cls.from_dict(data)
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("Failed to parse review JSON: %s", e)
+            logger.warning(
+                "ReviewResult.parse_from_text: failed to parse review JSON "
+                "(%s). Full raw response follows so schema drift is visible "
+                "in logs instead of being silently truncated to summary[:500]:\n%s",
+                e, text,
+            )
             return cls(verdict="comment", summary=text[:500])
 
     def filter_by_severity(self, threshold: str) -> ReviewResult:

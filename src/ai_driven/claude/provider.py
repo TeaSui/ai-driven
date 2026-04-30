@@ -103,6 +103,8 @@ class ClaudeProvider(ABC):
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 1.0,
+        thinking: dict[str, Any] | None = None,
+        stop_sequences: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         ...
 
@@ -253,6 +255,8 @@ class AnthropicProvider(ClaudeProvider):
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 1.0,
+        thinking: dict[str, Any] | None = None,
+        stop_sequences: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         params: dict[str, Any] = {
             "model": model,
@@ -264,6 +268,10 @@ class AnthropicProvider(ClaudeProvider):
             params["system"] = system
         if tools:
             params["tools"] = tools
+        if thinking:
+            params["thinking"] = thinking
+        if stop_sequences:
+            params["stop_sequences"] = stop_sequences
 
         async with self._client.messages.stream(**params) as stream:
             async for event in stream:
@@ -432,6 +440,8 @@ class BedrockProvider(ClaudeProvider):
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 1.0,
+        thinking: dict[str, Any] | None = None,
+        stop_sequences: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         model_id = self._resolve_model_id(model)
 
@@ -445,6 +455,10 @@ class BedrockProvider(ClaudeProvider):
             body["system"] = system
         if tools:
             body["tools"] = self._sanitize_tools_for_bedrock(tools)
+        if thinking:
+            body["thinking"] = thinking
+        if stop_sequences:
+            body["stop_sequences"] = stop_sequences
 
         import asyncio
         loop = asyncio.get_event_loop()
@@ -952,8 +966,14 @@ class MockProvider(ClaudeProvider):
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 1.0,
+        thinking: dict[str, Any] | None = None,
+        stop_sequences: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         import asyncio
+        # Mock provider ignores thinking/stop_sequences — just accept them
+        # so the abstract contract is honored and callers don't have to
+        # branch on provider type.
+        _ = (thinking, stop_sequences)
 
         response = await self.create_message(
             model=model, max_tokens=max_tokens, messages=messages,

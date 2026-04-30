@@ -75,7 +75,15 @@ class PlanningAgent:
         repo_structure: list[str],
         relevant_code: list[dict[str, str]],
     ) -> ImplementationPlan:
-        """Create an implementation plan using extended thinking."""
+        """Create an implementation plan using extended thinking.
+
+        Extended thinking is INCOMPATIBLE with assistant prefill: when
+        thinking is enabled the first content block must be a `thinking`
+        block, so we cannot force JSON shape via the prefill + stop_sequences
+        pattern used elsewhere. We tighten the prompt to forbid prose
+        wrappers instead, and on parse failure the agent loudly logs the
+        raw text so schema drift surfaces — see _parse_plan.
+        """
         settings = get_settings()
 
         prompt = self._build_prompt(
@@ -128,12 +136,21 @@ class PlanningAgent:
 ## Relevant Code
 {code_sections}
 
-Create a detailed implementation plan as JSON.
+Output a single ImplementationPlan JSON object inside one ```json fenced
+block. No prose before or after. Required keys: summary, files_to_modify,
+files_to_create, test_strategy, risks. Do NOT invent additional top-level
+keys.
 """
 
     @staticmethod
     def _parse_plan(text: str) -> ImplementationPlan:
-        """Parse the plan JSON from Claude's response."""
+        """Parse the plan JSON from Claude's response.
+
+        Silent truncation on parse failure hid upstream schema drift. Now
+        we log the FULL raw response at WARNING so the ops pipeline
+        surfaces the bad shape, and still degrade gracefully so callers
+        don't crash mid-run.
+        """
         cleaned = text.strip()
         if "```json" in cleaned:
             start = cleaned.index("```json") + 7
@@ -148,5 +165,10 @@ Create a detailed implementation plan as JSON.
             data = json.loads(cleaned)
             return ImplementationPlan.from_dict(data)
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning("Failed to parse plan JSON: %s", e)
+            logger.warning(
+                "PlanningAgent: failed to parse plan JSON (%s). "
+                "Full raw response follows so schema drift is visible in logs "
+                "instead of being silently truncated to summary[:500]:\n%s",
+                e, text,
+            )
             return ImplementationPlan(summary=text[:500])

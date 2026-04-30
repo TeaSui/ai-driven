@@ -239,6 +239,8 @@ class ClaudeClient:
                 system=system,
                 tools=tools,
                 temperature=temperature,
+                thinking=thinking,
+                stop_sequences=stop_sequences,
             ):
                 chunk_type = chunk.get("type", "")
 
