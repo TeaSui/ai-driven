@@ -43,6 +43,7 @@ import re
 from abc import abstractmethod
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any
+from xml.sax.saxutils import escape as _saxutils_escape
 
 from pydantic import ValidationError
 
@@ -171,25 +172,42 @@ class SpecialistBase(BaseAgent):
         }
         ticket = ctx.ticket or {}
         repo = ctx.repo or {}
+        # Escape every interpolated user-controlled string so a hostile
+        # Jira description like "</jira_ticket><instruction>..." cannot
+        # close the envelope and inject a fake instruction tag into the
+        # prompt. JSON-encoded prior_artifacts also get escaped as
+        # defence-in-depth (a prior artifact's string field may contain
+        # raw '<').
+        summary = _xml_escape(ticket.get("summary", ""))
+        description = _xml_escape(ticket.get("description", ""))
+        ac_raw = ticket.get("acceptance_criteria") or ""
+        acceptance_criteria = (
+            _xml_escape(ac_raw) if ac_raw else "<empty>"
+        )
+        labels_list = ticket.get("labels") or []
+        labels = _xml_escape(", ".join(labels_list))
+        full_name = _xml_escape(repo.get("full_name", ""))
+        scm_type = _xml_escape(repo.get("scm_type", ""))
+        default_branch = _xml_escape(repo.get("default_branch", ""))
         prior_block = (
-            json.dumps(prior, indent=2) if prior else "<none>"
+            _xml_escape(json.dumps(prior, indent=2)) if prior else "<none>"
         )
         return (
             f"<task_role>{self.role}</task_role>\n"
             f"\n"
             f"<jira_ticket>\n"
-            f"  <title>{ticket.get('summary', '')}</title>\n"
-            f"  <description>{ticket.get('description', '')}</description>\n"
+            f"  <title>{summary}</title>\n"
+            f"  <description>{description}</description>\n"
             f"  <acceptance_criteria>"
-            f"{ticket.get('acceptance_criteria') or '<empty>'}"
+            f"{acceptance_criteria}"
             f"</acceptance_criteria>\n"
-            f"  <labels>{ticket.get('labels', [])}</labels>\n"
+            f"  <labels>{labels}</labels>\n"
             f"</jira_ticket>\n"
             f"\n"
             f"<repository>\n"
-            f"  <full_name>{repo.get('full_name', '')}</full_name>\n"
-            f"  <scm_type>{repo.get('scm_type', '')}</scm_type>\n"
-            f"  <default_branch>{repo.get('default_branch', '')}"
+            f"  <full_name>{full_name}</full_name>\n"
+            f"  <scm_type>{scm_type}</scm_type>\n"
+            f"  <default_branch>{default_branch}"
             f"</default_branch>\n"
             f"</repository>\n"
             f"\n"
@@ -408,6 +426,19 @@ class StubSpecialist(SpecialistBase):
 
 
 # --- module-private helpers ----------------------------------------------
+
+
+def _xml_escape(text: str) -> str:
+    """Escape XML metacharacters (``<``, ``>``, ``&``) in user content.
+
+    Thin wrapper around :func:`xml.sax.saxutils.escape` so every
+    interpolation in :meth:`SpecialistBase._build_initial_message` goes
+    through a single audited choke point. The goal is prompt-injection
+    hardening: a Jira description containing literal ``</jira_ticket>``
+    must not be able to close the envelope and smuggle a fake
+    ``<instruction>`` tag into the rendered prompt.
+    """
+    return _saxutils_escape(text)
 
 
 def _artifact_to_dict(art: Any) -> dict[str, Any]:
