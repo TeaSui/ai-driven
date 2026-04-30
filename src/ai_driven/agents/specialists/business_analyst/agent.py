@@ -31,12 +31,21 @@ _SCHEMA_REMINDER = (
 
 
 class BusinessAnalystSpecialist(SpecialistBase):
+    """BusinessAnalyst — resolves ticket ambiguity, writes Gherkin ACs.
+
+    Convention: specialists declare class attributes ONLY when they
+    override a :class:`SpecialistBase` default. BA matches the base
+    defaults (``model_setting_attr = "claude_default_model"`` — a
+    Settings-resolved reference, not a literal, so a team-level model
+    flip propagates without touching specialists; ``max_output_tokens
+    = 2048``), so neither is restated here. Subclasses that need a
+    different model (e.g. ``stack_analyst`` on ``claude_fast_model``)
+    set ``model_setting_attr`` explicitly — the diff against this
+    template then clearly shows the override.
+    """
+
     agent_type = "specialist_business_analyst"
     role = "business_analyst"
-    # Sonnet — BA reasoning benefits from the stronger model. Resolved
-    # via Settings so a team-level model flip propagates automatically.
-    model_setting_attr = "claude_default_model"
-    max_output_tokens = 2048
 
     def _system_prompt(self) -> str:
         return BUSINESS_ANALYST_SYSTEM_PROMPT
