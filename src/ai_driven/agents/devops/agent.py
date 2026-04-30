@@ -350,30 +350,45 @@ class DevOpsAgent(BaseAgent):
         )
 
     def _build_initial_message(self, task_input: dict[str, Any]) -> str:
+        """Structure follows prompt-engineering.md: direct-action instruction
+        line, then XML-tagged context blocks, then an XML-tagged <workflow>
+        block so the triage steps read as structured guidance instead of
+        free-form prose.
+        """
         alert_title = task_input.get("title", "Unknown alert")
         alert_type = task_input.get("alert_type", "unknown")
         service = task_input.get("service", "")
         repo = task_input.get("repo_full_name", "")
 
-        parts = [
-            f"Triage this DataDog alert: [{alert_type}] {alert_title}",
+        parts: list[str] = [
+            "Triage the DataDog alert below and produce an incident report.",
             "",
-            "Follow this workflow:",
-            "1. ASSESS: Determine severity (P1-P4) based on alert type and impact.",
-            "2. GATHER: Use datadog.query_logs and datadog.query_metrics to understand the scope.",
-            "3. CORRELATE: Use deploy.get_recent to check for recent changes.",
-            "4. DIAGNOSE: Use datadog.get_service_health to check service status and active monitors.",
-            "5. ACT: Based on findings:",
-            "   - If rollback needed: use deploy.suggest_rollback to identify the target.",
-            "   - Create a Jira incident with jira.create_incident.",
-            "   - Notify the team with slack.notify_oncall.",
+            "<alert>",
+            f"type: {alert_type}",
+            f"title: {alert_title}",
         ]
-
         if service:
-            parts.append(f"\nAffected service: {service}")
+            parts.append(f"service: {service}")
         if repo:
-            parts.append(f"Repository: {repo}")
+            parts.append(f"repository: {repo}")
+        parts.append("</alert>")
+        parts.append("")
 
-        parts.append(f"\nFull alert payload: {task_input}")
+        parts.append("<full_payload>")
+        parts.append(str(task_input))
+        parts.append("</full_payload>")
+        parts.append("")
+
+        parts.append("<workflow>")
+        parts.append("1. ASSESS: determine severity (P1-P4) from alert type and impact.")
+        parts.append("2. GATHER: call datadog.query_logs and datadog.query_metrics "
+                     "to scope the incident.")
+        parts.append("3. CORRELATE: call deploy.get_recent to find recent changes.")
+        parts.append("4. DIAGNOSE: call datadog.get_service_health to inspect service "
+                     "status and active monitors.")
+        parts.append("5. ACT: if rollback is needed, call deploy.suggest_rollback "
+                     "to identify the target; then call jira.create_incident "
+                     "and slack.notify_oncall to record and escalate.")
+        parts.append("</workflow>")
 
         return "\n".join(parts)

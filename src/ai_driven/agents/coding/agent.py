@@ -522,12 +522,23 @@ class CodingAgent(BaseAgent):
         return self._registry.tool_names
 
     def _build_initial_message(self, task_input: dict[str, Any]) -> str:
-        """Build comprehensive initial message with task context."""
+        """Build the initial user message for a coding run.
+
+        Structure follows .claude/skills/building-with-the-claude-api/
+        references/prompt-engineering.md:
+          * Leads with a direct-action instruction line.
+          * Wraps variable context in descriptive XML tags (<user_request>,
+            <repository>, <jira_ticket>, <transition>, <additional>).
+          * Consolidates workflow + rules + budget discipline under two
+            tag blocks (<workflow>, <rules>) so the model treats them as
+            structured guidance, not free-form prose.
+          * Interpolates SCM / ticket specifics only when they exist —
+            empty branches produce no lines at all.
+        """
         jira_key = task_input.get("jira_key", "")
         repo = task_input.get("repo_full_name", "")
         scm_type = task_input.get("scm_type", "github")
         pr_tool = "bitbucket.create_pr" if scm_type == "bitbucket" else "github.create_pr"
-        # User's original chat message — the primary intent
         user_message = task_input.get("message", "")
         extra = task_input.get("instructions", "")
         from_status = task_input.get("from_status", "")
@@ -535,56 +546,85 @@ class CodingAgent(BaseAgent):
 
         parts: list[str] = []
 
-        # Lead with the user's own words so the model treats them as the
-        # primary objective, not just Jira metadata.
+        # Direct-action instruction line — no rambling context, no question.
+        if jira_key:
+            parts.append(f"Implement the Jira ticket {jira_key} and open a pull request.")
+        elif user_message:
+            parts.append("Implement the user request below and open a pull request.")
+        else:
+            parts.append("Complete the task described below and open a pull request.")
+        parts.append("")
+
+        # Variable context in descriptive XML tags. Keep each block short.
         if user_message:
-            parts.append(f"**User request:** {user_message}")
+            parts.append("<user_request>")
+            parts.append(user_message)
+            parts.append("</user_request>")
+            parts.append("")
+
+        if repo:
+            parts.append("<repository>")
+            parts.append(f"full_name: {repo}")
+            parts.append(f"scm_type: {scm_type}")
+            parts.append(f"pr_tool: {pr_tool}")
+            parts.append("</repository>")
             parts.append("")
 
         if jira_key:
-            parts.append(
-                f"Jira ticket: {jira_key}  ·  Repository: {repo}"
-            )
-            parts.append(
-                "Use jira.get_issue to fetch the ticket details — but the user's request above "
-                "takes priority when it conflicts with or goes beyond the Jira description."
-            )
-        elif repo:
-            parts.append(f"Repository: {repo}")
+            parts.append("<jira_ticket>")
+            parts.append(f"key: {jira_key}")
+            parts.append(f"branch_name: feature/{jira_key}")
+            parts.append(f"pr_title_format: {jira_key}: <summary-from-jira>")
+            if from_status and to_status:
+                parts.append(f"status_transition: {from_status} -> {to_status}")
+            parts.append("</jira_ticket>")
+            parts.append("")
 
-        parts += [
-            "",
-            "Follow this workflow:",
-            "1. UNDERSTAND: Use jira.get_issue to fetch the ticket details, acceptance criteria, and comments (only if a Jira ticket key is provided — skip otherwise).",
-            "2. EXPLORE: Use repo.list_files and repo.read_file to understand the codebase structure and relevant code.",
-            "3. PLAN: Think through the implementation approach, considering existing patterns and test strategy.",
-            "4. IMPLEMENT: Use git.create_branch to create a feature branch, then file.write to make changes.",
-            f"5. DELIVER: Submit the PR with **{pr_tool}** (this repo is hosted on {scm_type}). Then post a Jira comment with the PR link if a Jira ticket exists.",
-            "",
-            "Important rules:",
-            "- Always pass the exact `repo_full_name` from the context above into every tool call. Never substitute or guess a different repo name.",
-            "- If no Jira ticket is provided in the context, do NOT invent one — skip jira.get_issue entirely and work from the user's request.",
-            "- Follow existing code patterns and conventions found in the repository.",
-            f"- Create a feature branch named `feature/{jira_key}` from the default branch." if jira_key else "",
-            "- Write clean, tested code that matches the acceptance criteria.",
-            f"- The PR title should be `{jira_key}: <summary>` where summary comes from Jira." if jira_key else "",
-            "- Post a Jira comment with the PR link when done." if jira_key else "",
-            "",
-            "BUDGET DISCIPLINE — read this carefully:",
-            "- You have a fixed iteration budget. Opening the PR (step 5) is the most important action: a partially-written branch with a PR is always better than a complete branch with no PR, because a PR gets reviewed and the branch can keep evolving.",
-            f"- As a rule of thumb, STOP writing files and call {pr_tool} by the **two-thirds mark** of your budget. If you have 50 iterations, open the PR by iteration 33 even if the work feels incomplete — add a TODO section to the PR body and mention the remaining work.",
-            "- Never end a run without calling the PR tool. If you cannot finish, still open a draft PR referencing what's left.",
-        ]
+        # Process-steps block — numbered because order matters.
+        parts.append("<workflow>")
+        if jira_key:
+            parts.append("1. UNDERSTAND: call jira.get_issue to fetch ticket details, "
+                         "acceptance criteria, and comments.")
+        else:
+            parts.append("1. UNDERSTAND: read the user_request above; do NOT call "
+                         "jira.get_issue (no ticket provided).")
+        parts.append("2. EXPLORE: use repo.list_files and repo.read_file to map the "
+                     "codebase and find existing patterns.")
+        parts.append("3. PLAN: pick an approach that matches existing conventions and "
+                     "the test strategy already in the repo.")
+        parts.append("4. IMPLEMENT: call git.create_branch, then file.write for each "
+                     "change. Run tests via sandbox.execute.")
+        parts.append(f"5. DELIVER: call {pr_tool} to open the PR. Post a Jira comment "
+                     "with the PR link if a ticket exists.")
+        parts.append("</workflow>")
+        parts.append("")
 
-        # Remove empty strings from conditional lines
-        parts = [p for p in parts if p or p == ""]
-
-        if from_status and to_status:
-            parts.append(
-                f"\nTransition context: ticket is moving from '{from_status}' to '{to_status}'."
-            )
+        # Output-guidelines block — the "must be" list for a correct run.
+        parts.append("<rules>")
+        parts.append("- Pass the exact repository.full_name from the <repository> block "
+                     "into every tool call. Do not substitute or guess a different name.")
+        if jira_key:
+            parts.append("- The user_request above takes priority if it conflicts with "
+                         "or goes beyond the Jira description.")
+        else:
+            parts.append("- Do NOT invent a Jira ticket key — work only from the "
+                         "user_request above.")
+        parts.append("- Follow existing code patterns and conventions found in the repo; "
+                     "do not refactor unrelated files.")
+        parts.append("- Write clean, tested code. Include tests for every new code path.")
+        parts.append("- Opening the PR (step 5) is the single most important action. A "
+                     "partial branch with a PR beats a complete branch with no PR.")
+        parts.append(f"- Budget: stop writing files and call {pr_tool} by the two-thirds "
+                     "mark of your iteration budget. If incomplete, open the PR anyway "
+                     "with a TODO section in the body listing what remains.")
+        parts.append(f"- Never end the run without calling {pr_tool}. If blocked, open a "
+                     "draft PR referencing what is left.")
+        parts.append("</rules>")
 
         if extra:
-            parts.append(f"\nAdditional instructions: {extra}")
+            parts.append("")
+            parts.append("<additional_instructions>")
+            parts.append(extra)
+            parts.append("</additional_instructions>")
 
         return "\n".join(parts)
