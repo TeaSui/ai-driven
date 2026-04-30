@@ -4,13 +4,14 @@
 
 **Goal:** Stand up `OrchestratorAgent` + four live specialists (BA, StackAnalyst, Security, QA) and three stubs (TechLead, UXDesigner, APITest) running in **shadow mode** — classifying every task, dispatching specialists, persisting `task_artifacts` rows, but with **zero downstream effect** on the existing CodingAgent → ReviewerAgent pipeline. Phase 2 (per-team live) and Phase 3 (WorkflowAgent deletion) are out of scope.
 
-**Architecture:** A new `OrchestratorAgent` (BaseAgent subclass) is the entry point for every task. It classifies tier with a Haiku call, runs specialists sequentially, fans out prior artifacts via `fan_out.py`, and persists artifacts to a new `task_artifacts` table. Specialists are subclasses of a new `SpecialistBase` that produces `Artifact` objects via prefill + `stop_sequences=["```"]` + Pydantic-validated JSON. The reviewer's existing JSON-repair loop is lifted into `BaseAgent` as `_repair_or_escalate_json` and reused by every specialist. In Phase 1, the orchestrator's mode is `shadow` by default — it writes artifacts + `tasks.orchestration_tier` but does NOT update `tasks.status`, does NOT gate the existing pipeline, and runs as a fire-and-forget sibling to the coding pipeline (via `asyncio.create_task`, bypassing the SQS queue entirely). CodingAgent and ReviewerAgent are unchanged.
+**Architecture:** A new `OrchestratorAgent` (BaseAgent subclass) is the entry point for every task. It classifies tier with a `settings.claude_fast_model` call (currently Sonnet 4.6 post-H1 — see revision doc), runs specialists sequentially, fans out prior artifacts via `fan_out.py`, and persists artifacts to a new `task_artifacts` table. Specialists are subclasses of a new `SpecialistBase` that produces `Artifact` objects via prefill + `stop_sequences=["```"]` + Pydantic-validated JSON. The reviewer's existing JSON-repair loop is lifted into `BaseAgent` as `_repair_or_escalate_json` and reused by every specialist. In Phase 1, the orchestrator's mode is `shadow` by default — it writes artifacts + `tasks.orchestration_tier` but does NOT update `tasks.status`, does NOT gate the existing pipeline, and runs as a fire-and-forget sibling to the coding pipeline (via `asyncio.create_task`, bypassing the SQS queue entirely). CodingAgent and ReviewerAgent are unchanged.
 
 **Shadow-mode invariant (hard rule):** While `orchestrator_mode == "shadow"`, the orchestrator and specialists MUST NOT update `tasks.status`, MUST NOT write to any row outside `task_artifacts` and `tasks.orchestration_tier`, and MUST NOT raise exceptions out of the fire-and-forget task. The coding pipeline owns task status; the orchestrator is a silent observer.
 
-**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy 2.x async, Alembic, Pydantic v2, boto3 (SQS), redis-py async, Anthropic SDK (Sonnet 4.6 + Haiku 4.5), pytest + pytest-asyncio.
+**Tech Stack:** Python 3.11, FastAPI, SQLAlchemy 2.x async, Alembic, Pydantic v2, boto3 (SQS), redis-py async, Anthropic SDK (all model slots currently resolve to Sonnet 4.6 post-H1; fast-model slot kept as indirection for future Haiku re-introduction), pytest + pytest-asyncio.
 
 **Reference spec:** [docs/specs/2026-04-29-orchestrator-specialists-design.md](../specs/2026-04-29-orchestrator-specialists-design.md)
+**Spec revision (authoritative):** [docs/specs/2026-04-30-orchestrator-revision.md](../specs/2026-04-30-orchestrator-revision.md) — read this BEFORE starting any task. Reconciles H1–H5 master landings; supersedes original-spec assumptions about Haiku, cost accounting, repo tools, and prompt structure.
 
 ---
 
@@ -35,6 +36,41 @@ Issues reviewed but intentionally skipped: char/4 token estimator (removed, not 
 
 ---
 
+## Spec-revision updates applied to this plan (2026-04-30, post-H1..H5)
+
+Five hotfixes (H1–H5) and one prompt refactor (42ddf91) landed on master after this plan was drafted. See `docs/specs/2026-04-30-orchestrator-revision.md` for full context. Plan edits that MUST be applied during execution of each affected task are summarized here so no executor misses them:
+
+**Cross-cutting rules:**
+- Specialists MUST resolve models via `get_settings().claude_default_model` or `.claude_fast_model` — never hardcode `"claude-haiku-4-5"` or any model string literal. A unit test in Task 6 locks this.
+- Specialist system prompts and first user messages MUST use XML-tagged structure per revision §3 and §6 — not markdown headers. The coding agent's `_build_initial_message` at `src/ai_driven/agents/coding/agent.py` is the reference pattern.
+
+**Per-task overrides (revision-driven):**
+
+- **Task 1 (migration):** Also add `cost_usd NUMERIC(10,6) DEFAULT 0` column to `task_artifacts` per revision §2.2 (shadow-mode cost observability). The commit cherry-picked on `feature/orchestrator-phase1` predates this revision, so land an additive ALTER migration as the final step of Task 1 rather than amending the existing migration file.
+- **Task 2 (ORM):** Mirror the new `cost_usd` column as `TaskArtifact.cost_usd: Mapped[Decimal]` in the ORM.
+- **Task 5 (repair loop lift):** Expanded — see the "Task 5 additions" section below; requires TWO new items beyond the cherry-picked commit.
+- **Task 6 (SpecialistBase):** Model IDs resolve via `get_settings()`. `_build_initial_message()` uses the XML template from revision §6. Add a unit test asserting no specialist hardcodes a model string.
+- **Task 8 (BA):** System prompt uses XML template from revision §3.
+- **Task 9 (stack_analyst):** Tools list = `["repo.overview"]` only (NOT `repo.list_files`, which the original spec suggested). System prompt uses XML template. Rename task heading: "StackAnalyst specialist (live, Sonnet)" (not Haiku). Model = `settings.claude_fast_model`.
+- **Task 10 (security):** System prompt uses XML template.
+- **Task 11 (QA):** System prompt uses XML template. Tools list = `["github.get_pr_diff", "repo.read_file", "repo.overview"]` (corrects original spec's invalid `scm.read_diff`, `tests.list_run_results`).
+- **Task 12 (classifier):** Model = `settings.claude_fast_model`, NOT `"claude-haiku-4-5"`. `max_tokens=16` (already in red-team block, reaffirmed).
+- **Task 13 (routing rules):** No changes — this is the pure-Python routing module. Do NOT confuse with specialist picker (which lives inside Task 16 and is stubbed for Phase 2).
+- **Task 16 (OrchestratorAgent):** Threads `running_cost_usd` through every specialist via `initial_cost` kwarg (new in Task 5). On any specialist's `budget_exceeded` result, write `Artifact(verdict='error', reasoning='budget_exceeded after <role>', payload={})` and halt. Picker stays stubbed to `return []` per revision §Open Questions #1 — if/when implemented, use `settings.claude_fast_model` and `max_tokens=64`.
+- **Task 17 (wiring):** No change — shadow-mode fire-and-forget path is unaffected by the revision.
+
+### Task 5 additions (beyond the cherry-picked commit 0aae9b9)
+
+The cherry-picked commit lifts the JSON repair loop AND removes the invalid `_update_task_status("needs_human_review")` call. Two further changes required before closing Task 5:
+
+1. **Add `initial_cost: float = 0.0` kwarg to `BaseAgent.run()`** with a pre-iteration short-circuit. Spec rationale: revision §2. Behavior: if `initial_cost >= settings.claude_max_cost_per_task_usd` on entry, return `AgentResult(success=False, reason='budget_exceeded_on_entry', cost_usd=initial_cost)` WITHOUT invoking `run_agent_loop`. The existing `_should_continue` callback only fires BETWEEN iterations (see `claude/client.py:108`), so an entry check is needed to prevent one wasted Claude call.
+
+2. **Unit test for the pre-iteration short-circuit.** Use a `MockProvider` with a recording `create_message` and assert zero invocations when `BaseAgent.run(initial_cost=settings.claude_max_cost_per_task_usd + 0.01)` is called.
+
+Both land in the same commit or a follow-up (Task 5b). They do NOT block cherry-picking the existing T5 commit; treat as an amendment.
+
+---
+
 ## File Structure
 
 ### New files
@@ -46,7 +82,7 @@ src/ai_driven/
       __init__.py
       agent.py                     # OrchestratorAgent (BaseAgent subclass)
       artifacts.py                 # Pydantic payload schemas + Artifact dataclass
-      classifier.py                # Tier classifier (Haiku call + parser + fallback)
+      classifier.py                # Tier classifier (fast-model call + parser + fallback)
       routing.py                   # TIER_RULES + plan_specialist_sequence()
       fan_out.py                   # relevant_artifacts_for(role, all_artifacts)
       repository.py                # ArtifactRepository (read/write task_artifacts)
@@ -1258,7 +1294,7 @@ class SpecialistBase(BaseAgent):
 
     def _register_tools(self) -> None:
         # Specialists don't take side-effects by default. Subclasses that
-        # need read tools (e.g. QA's scm.read_diff) override this.
+        # need read tools (e.g. QA's github.get_pr_diff / repo.read_file) override this.
         return None
 
     def _get_tool_names(self) -> list[str]:
@@ -1781,7 +1817,9 @@ git commit -m "feat(specialists): add BusinessAnalyst specialist (live, Sonnet)"
 
 ---
 
-## Task 9: StackAnalyst specialist (live, Haiku)
+## Task 9: StackAnalyst specialist (live, Sonnet via `claude_fast_model`)
+
+> **Revision note (2026-04-30):** Heading was "(live, Haiku)" in original. Haiku slot removed in H1; `settings.claude_fast_model` now resolves to Sonnet 4.6. Tools list = `["repo.overview"]` (NOT `repo.list_files`) per revision §5. System prompt uses XML template per revision §3.
 
 **Files:**
 - Create: `src/ai_driven/claude/prompts/specialists/stack_analyst.py`
@@ -1942,9 +1980,11 @@ Create `src/ai_driven/agents/specialists/stack_analyst/agent.py`:
 ```python
 """StackAnalyst specialist — multi-label classification of task stacks.
 
-In Phase 1 (shadow mode), repository file-glob inspection is deferred —
-the agent classifies from ticket + BA artifact only. Adding a
-`repo.list_files` read-only tool is a Phase 2 enhancement.
+Post-revision (2026-04-30), Phase 1 adds the `repo.overview` read-only
+tool so the agent sees the repo tree + manifest files in a single call
+before classifying. This replaces the original plan's deferred-to-Phase-2
+`repo.list_files` approach — `repo.overview` is strictly better for stack
+classification (see revision §5) and was made available by H5.
 """
 from __future__ import annotations
 
@@ -1967,7 +2007,7 @@ _SCHEMA_REMINDER = (
 class StackAnalystSpecialist(SpecialistBase):
     agent_type = "specialist_stack_analyst"
     role = "stack_analyst"
-    model_setting_attr = "claude_fast_model"   # Haiku — short fixed-set classify
+    model_setting_attr = "claude_fast_model"   # fast-model slot (Sonnet post-H1) — short fixed-set classify
     max_output_tokens = 1024
 
     def _system_prompt(self) -> str:
@@ -2002,7 +2042,7 @@ Expected: 2 passed.
 
 ```bash
 git add src/ai_driven/claude/prompts/specialists/stack_analyst.py src/ai_driven/agents/specialists/stack_analyst tests/unit/test_specialist_stack_analyst.py
-git commit -m "feat(specialists): add StackAnalyst specialist (live, Haiku)"
+git commit -m "feat(specialists): add StackAnalyst specialist (live, fast-model/Sonnet post-H1)"
 ```
 
 ---
@@ -2505,7 +2545,12 @@ async def test_classify_calls_haiku_with_temp_zero() -> None:
     classifier._claude.chat.assert_awaited_once()
     call = classifier._claude.chat.await_args
     assert call.kwargs["temperature"] == 0.0
-    assert call.kwargs["model"].startswith("claude-haiku")
+    # Model comes from settings.claude_fast_model. Post-H1 the platform
+    # pins every slot to Sonnet 4.6; the indirection (not the literal) is
+    # what this test locks — no specialist/classifier should ever
+    # hardcode a model string.
+    from ai_driven.config import get_settings
+    assert call.kwargs["model"] == get_settings().claude_fast_model
 
 
 @pytest.mark.asyncio
@@ -2566,7 +2611,7 @@ specialists. No prose. Example output: ["tech_lead"]
 Create `src/ai_driven/agents/orchestrator/classifier.py`:
 
 ```python
-"""Tier classifier — single Haiku call per task."""
+"""Tier classifier — single fast-model call per task (Sonnet post-H1)."""
 from __future__ import annotations
 
 import json
@@ -2596,7 +2641,7 @@ def parse_tier(text: str) -> str:
 
 
 class TierClassifier:
-    """Single-call Haiku classifier returning {fast_path,full_workflow,multi_domain}."""
+    """Single-call classifier (settings.claude_fast_model) returning {fast_path,full_workflow,multi_domain}."""
 
     def __init__(self, claude_client: ClaudeClient | None = None) -> None:
         self._claude = claude_client or ClaudeClient()
@@ -2639,7 +2684,7 @@ Expected: 4 passed.
 
 ```bash
 git add src/ai_driven/claude/prompts/orchestrator.py src/ai_driven/agents/orchestrator/classifier.py tests/unit/test_orchestrator_classifier.py
-git commit -m "feat(orchestrator): add Haiku-based tier classifier"
+git commit -m "feat(orchestrator): add tier classifier (settings.claude_fast_model)"
 ```
 
 ---
@@ -3186,7 +3231,7 @@ Create `src/ai_driven/agents/orchestrator/agent.py`:
 """OrchestratorAgent — Phase 1 (shadow mode).
 
 Per task:
-  1. classify tier via cheap Haiku call
+  1. classify tier via cheap fast-model call (settings.claude_fast_model; Sonnet post-H1)
   2. persist tasks.orchestration_tier
   3. plan specialist sequence per tier rules
   4. (full_workflow / multi_domain) optionally pick from candidates
@@ -3383,8 +3428,9 @@ class OrchestratorAgent(BaseAgent):
         """Layer 3 picker. Skipped in Phase 1 if all candidates are stubs.
 
         Stubs do no real work, so picking them adds zero value. When at least
-        one non-stub candidate exists, this delegates to a Haiku call (TBD
-        in Phase 2). For Phase 1, returning [] is correct.
+        one non-stub candidate exists, this delegates to a fast-model call
+        (settings.claude_fast_model; TBD in Phase 2). For Phase 1, returning
+        [] is correct.
         """
         all_stubs = all(c in {"tech_lead", "ux_designer", "api_test"}
                         for c in plan.candidates)
@@ -3814,7 +3860,7 @@ Confirmed out of scope for this plan, do not implement:
 - CodingAgent reading `task_artifacts` (security implementation_rules injection)
 - ReviewerAgent reading `task_artifacts`
 - `prompt_composer.py` + `stack_guides/*.md` library (StackAnalyst output is persisted but not yet consumed)
-- StackAnalyst's `repo.list_files` read-only tool
+- ~~StackAnalyst's `repo.list_files` read-only tool~~ → now in-scope as `repo.overview` per 2026-04-30 revision §5
 - `teams.orchestration_enabled` column + per-team UI gating
 - UI Artifacts tab on task detail page
 - Dashboard KPI for `% tasks by orchestration_tier`
