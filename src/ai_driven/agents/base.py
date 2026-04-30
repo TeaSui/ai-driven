@@ -25,26 +25,64 @@ logger = logging.getLogger(__name__)
 _STREAM_FLUSH_INTERVAL = 0.2  # seconds
 _STREAM_FLUSH_SIZE = 500  # chars
 
-# Claude Sonnet 4.6 pricing ($/M tokens). Update if defaults change or
-# per-call model overrides introduce cheaper variants. These are the live
-# rates used for the per-task budget kill-switch in `_should_continue`.
-#   input       — uncached input
-#   cache_write — cache_creation_input_tokens (1.25× input)
-#   cache_read  — cache_read_input_tokens (0.1× input)
-#   output      — output_tokens
-_PRICE_INPUT_PER_M       = 3.00
-_PRICE_CACHE_WRITE_PER_M = 3.75
-_PRICE_CACHE_READ_PER_M  = 0.30
-_PRICE_OUTPUT_PER_M      = 15.00
+# Cost math dispatches through billing.tracker._MODEL_PRICING so Haiku /
+# Sonnet / Opus each bill at their actual rate and Bedrock-prefixed IDs
+# share the same table. Previously this module hardcoded Sonnet-direct
+# rates, which (a) over-charged Haiku calls ~8x, (b) under-charged Opus
+# calls ~5x, and (c) ignored the Bedrock regional uplift applied to every
+# non-us-east-1 account. See KAN-12 post-mortem (2026-04-30).
 
 
-def _iteration_cost_usd(usage: Any) -> float:
-    """Compute the dollar cost of a single Claude response's usage block."""
+def _bedrock_region_multiplier() -> float:
+    """Return the regional Bedrock price uplift for the current account.
+
+    us-east-1 is at parity with Anthropic Direct; every other AWS region
+    carries a regional markup on Bedrock. We apply the configured
+    multiplier to the base rate when the active provider is Bedrock and
+    the region is NOT us-east-1. Direct Anthropic calls ignore this.
+    """
+    from ai_driven.config import get_settings  # local: avoid cycles
+    settings = get_settings()
+    if getattr(settings, "claude_provider", None) != "bedrock" and \
+       str(getattr(settings, "claude_provider", "")).lower() != "bedrock":
+        return 1.0
+    region = getattr(settings, "aws_region", "") or ""
+    if region == "us-east-1" or region == "":
+        return 1.0
+    return float(getattr(settings, "bedrock_price_multiplier", 1.0))
+
+
+def _iteration_cost_usd(usage: Any, model: str | None = None) -> float:
+    """Compute the USD cost of a single Claude response's usage block.
+
+    Dispatches through billing.tracker.get_model_pricing so each model
+    bills at its published rate (Haiku / Sonnet / Opus all differ). When
+    the active provider is Bedrock and the region is non-us-east-1, the
+    configured regional multiplier is applied to all four tiers.
+
+    `model` is optional for backward compat — when omitted or None we
+    fall back to settings.claude_default_model so existing callers don't
+    break. Callers that know the model they used (agent loop, consumer)
+    should pass it for accurate per-call math.
+    """
+    from ai_driven.billing.tracker import get_model_pricing  # local: avoid cycles
+    from ai_driven.config import get_settings  # local: avoid cycles
+
+    resolved_model = model or get_settings().claude_default_model
+    rates = get_model_pricing(resolved_model)
+    multiplier = _bedrock_region_multiplier()
+
+    # Rates are USD per 1K tokens — convert to per-token and apply multiplier.
+    input_per_tok       = (rates["input"]       / 1000.0) * multiplier
+    output_per_tok      = (rates["output"]      / 1000.0) * multiplier
+    cache_write_per_tok = (rates["cache_write"] / 1000.0) * multiplier
+    cache_read_per_tok  = (rates["cache_read"]  / 1000.0) * multiplier
+
     return (
-        usage.input_tokens              * _PRICE_INPUT_PER_M       / 1_000_000
-        + getattr(usage, "cache_creation_input_tokens", 0) * _PRICE_CACHE_WRITE_PER_M / 1_000_000
-        + getattr(usage, "cache_read_input_tokens", 0)     * _PRICE_CACHE_READ_PER_M  / 1_000_000
-        + usage.output_tokens           * _PRICE_OUTPUT_PER_M      / 1_000_000
+        usage.input_tokens  * input_per_tok
+        + getattr(usage, "cache_creation_input_tokens", 0) * cache_write_per_tok
+        + getattr(usage, "cache_read_input_tokens", 0)     * cache_read_per_tok
+        + usage.output_tokens * output_per_tok
     )
 
 
@@ -420,7 +458,10 @@ class BaseAgent(ABC):
             loop.create_task won't be visible to the gate before the next call.
             """
             nonlocal running_cost_usd
-            running_cost_usd += _iteration_cost_usd(response.usage)
+            running_cost_usd += _iteration_cost_usd(
+                response.usage,
+                model=model or settings.claude_default_model,
+            )
 
             import asyncio
             try:

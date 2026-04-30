@@ -9,23 +9,46 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Claude model pricing (USD per 1K tokens) — as of 2025
-# These are approximate; update as pricing changes.
+# Claude model pricing (USD per 1K tokens) — as of 2026-04.
+# Keys map to model IDs used in the codebase; values carry the four
+# pricing tiers we bill against.
+#   input        — uncached input_tokens
+#   output       — output_tokens
+#   cache_write  — cache_creation_input_tokens (1.25x input per Anthropic)
+#   cache_read   — cache_read_input_tokens (0.1x input per Anthropic)
+# Cache tiers are populated explicitly rather than computed so tests can
+# detect drift against the published price list.
 _MODEL_PRICING: dict[str, dict[str, float]] = {
     # Anthropic Direct
-    "claude-opus-4-7": {"input": 0.015, "output": 0.075},
-    "claude-opus-4-6": {"input": 0.015, "output": 0.075},
-    "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
-    "claude-haiku-4-5": {"input": 0.0008, "output": 0.004},
-    # Bedrock model IDs
-    "anthropic.claude-opus-4-7-v1": {"input": 0.015, "output": 0.075},
-    "anthropic.claude-opus-4-6-v1": {"input": 0.015, "output": 0.075},
-    "anthropic.claude-sonnet-4-6-v1": {"input": 0.003, "output": 0.015},
-    "anthropic.claude-haiku-4-5-v1": {"input": 0.0008, "output": 0.004},
+    "claude-opus-4-7":   {"input": 0.015,  "output": 0.075, "cache_write": 0.01875, "cache_read": 0.0015},
+    "claude-opus-4-6":   {"input": 0.015,  "output": 0.075, "cache_write": 0.01875, "cache_read": 0.0015},
+    "claude-sonnet-4-6": {"input": 0.003,  "output": 0.015, "cache_write": 0.00375, "cache_read": 0.0003},
+    "claude-haiku-4-5":  {"input": 0.0008, "output": 0.004, "cache_write": 0.001,   "cache_read": 0.00008},
+    # Bedrock model IDs (v1 suffix). Base rates match Anthropic Direct;
+    # regional uplift is applied at call-site (see
+    # ai_driven.agents.base._bedrock_region_multiplier). DO NOT pre-multiply
+    # here or the uplift compounds.
+    "anthropic.claude-opus-4-7-v1":   {"input": 0.015,  "output": 0.075, "cache_write": 0.01875, "cache_read": 0.0015},
+    "anthropic.claude-opus-4-6-v1":   {"input": 0.015,  "output": 0.075, "cache_write": 0.01875, "cache_read": 0.0015},
+    "anthropic.claude-sonnet-4-6-v1": {"input": 0.003,  "output": 0.015, "cache_write": 0.00375, "cache_read": 0.0003},
+    "anthropic.claude-haiku-4-5-v1":  {"input": 0.0008, "output": 0.004, "cache_write": 0.001,   "cache_read": 0.00008},
 }
 
-# Default fallback pricing for unknown models
-_DEFAULT_PRICING = {"input": 0.003, "output": 0.015}
+# Default fallback pricing for unknown models.
+# Treat unknowns as Sonnet to avoid silent under-pricing — a new model
+# being over-priced in the dashboard is a much better failure mode than
+# being under-priced.
+_DEFAULT_PRICING = {"input": 0.003, "output": 0.015, "cache_write": 0.00375, "cache_read": 0.0003}
+
+
+def get_model_pricing(model: str) -> dict[str, float]:
+    """Return the USD-per-1K-tokens pricing dict for a model ID.
+
+    Falls back to Sonnet-tier pricing for unknown IDs. Public so callers
+    outside this module (e.g. agents.base) can bill against the same
+    table rather than hardcoding their own constants.
+    """
+    return _MODEL_PRICING.get(model, _DEFAULT_PRICING)
 
 # Default daily budget per team (USD)
 DEFAULT_DAILY_BUDGET_USD = 50.0

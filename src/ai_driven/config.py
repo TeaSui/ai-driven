@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     # _should_continue and returns success=False with a budget_exceeded
     # reason. Prevents runaway $6+ incidents like KAN-12 (2026-04-30).
     claude_max_cost_per_task_usd: float = 3.0
+    # Bedrock regional uplift on Claude pricing. us-east-1 is at parity
+    # with Anthropic Direct; every other region carries a regional markup
+    # (commonly ~1.10 for ap-southeast-1 as of 2026-04). Applied by
+    # agents.base._iteration_cost_usd when claude_provider == bedrock and
+    # aws_region != us-east-1. Override via env if the AWS price list
+    # changes or you use reserved/provisioned throughput with different
+    # economics.
+    bedrock_price_multiplier: float = 1.10
     anthropic_api_key: str = ""
 
     # AWS

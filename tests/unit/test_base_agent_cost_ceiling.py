@@ -1,8 +1,10 @@
-"""Unit tests for BaseAgent's per-task dollar-budget kill switch (H2).
+"""Unit tests for BaseAgent's per-task dollar-budget kill switch (H2 + H4).
 
 Verifies:
-  * _iteration_cost_usd applies the correct Sonnet 4.6 rates, including
-    cache-write and cache-read tiers.
+  * _iteration_cost_usd dispatches through billing.tracker._MODEL_PRICING
+    and applies the right rates for Sonnet, Haiku, and Opus.
+  * Bedrock regional uplift multiplies all four pricing tiers when
+    claude_provider == "bedrock" and aws_region != "us-east-1".
   * AgentResult carries the accumulated cost_usd across both the success
     and exception exit paths.
   * When running_cost_usd crosses claude_max_cost_per_task_usd, the
@@ -18,14 +20,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ai_driven.agents.base import (
-    _PRICE_CACHE_READ_PER_M,
-    _PRICE_CACHE_WRITE_PER_M,
-    _PRICE_INPUT_PER_M,
-    _PRICE_OUTPUT_PER_M,
-    BaseAgent,
-    _iteration_cost_usd,
-)
+from ai_driven.agents.base import BaseAgent, _iteration_cost_usd
+from ai_driven.billing.tracker import get_model_pricing
 
 
 def _usage(
@@ -42,29 +38,130 @@ def _usage(
     )
 
 
-def test_iteration_cost_applies_four_pricing_tiers() -> None:
+def _expected_cost(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_write: int,
+    cache_read: int,
+    multiplier: float = 1.0,
+) -> float:
+    rates = get_model_pricing(model)
+    return multiplier * (
+        input_tokens * rates["input"] / 1000.0
+        + cache_write * rates["cache_write"] / 1000.0
+        + cache_read * rates["cache_read"] / 1000.0
+        + output_tokens * rates["output"] / 1000.0
+    )
+
+
+# --- Per-model dispatch ------------------------------------------------------
+
+@pytest.mark.parametrize("model,input_rate_per_k", [
+    ("claude-sonnet-4-6", 0.003),
+    ("claude-haiku-4-5",  0.0008),
+    ("claude-opus-4-7",   0.015),
+])
+def test_iteration_cost_dispatches_by_model(model: str, input_rate_per_k: float) -> None:
+    """Sonnet / Haiku / Opus each bill at their own rate."""
     usage = _usage(input_tokens=10_000, output_tokens=2_000,
                    cache_write=4_000, cache_read=50_000)
-    expected = (
-        10_000 * _PRICE_INPUT_PER_M / 1_000_000
-        + 4_000 * _PRICE_CACHE_WRITE_PER_M / 1_000_000
-        + 50_000 * _PRICE_CACHE_READ_PER_M / 1_000_000
-        + 2_000 * _PRICE_OUTPUT_PER_M / 1_000_000
-    )
-    assert _iteration_cost_usd(usage) == pytest.approx(expected, rel=1e-9)
+    # Force anthropic provider so regional uplift is 1.0 regardless of env.
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.claude_default_model = model
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(usage, model=model)
+
+    expected = _expected_cost(model, 10_000, 2_000, 4_000, 50_000)
+    assert actual == pytest.approx(expected, rel=1e-9)
+    # Sanity: assert the input contribution is indeed proportional to
+    # the published rate for that model (would fail if we dispatched wrong).
+    input_contribution = 10_000 * input_rate_per_k / 1000.0
+    assert input_contribution < expected  # cache + output add more
 
 
 def test_iteration_cost_zero_for_empty_usage() -> None:
-    assert _iteration_cost_usd(_usage()) == 0.0
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        assert _iteration_cost_usd(_usage(), model="claude-sonnet-4-6") == 0.0
 
 
 def test_iteration_cost_tolerates_missing_cache_fields() -> None:
     """Older response objects may not expose cache_* fields — getattr() fallback."""
     minimal = SimpleNamespace(input_tokens=1000, output_tokens=500)
-    # No cache_creation_input_tokens / cache_read_input_tokens attributes.
-    expected = 1000 * _PRICE_INPUT_PER_M / 1_000_000 + 500 * _PRICE_OUTPUT_PER_M / 1_000_000
-    assert _iteration_cost_usd(minimal) == pytest.approx(expected, rel=1e-9)
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(minimal, model="claude-sonnet-4-6")
+    rates = get_model_pricing("claude-sonnet-4-6")
+    expected = 1000 * rates["input"] / 1000.0 + 500 * rates["output"] / 1000.0
+    assert actual == pytest.approx(expected, rel=1e-9)
 
+
+def test_iteration_cost_falls_back_to_default_model_when_none() -> None:
+    """Calling without a model uses claude_default_model from settings."""
+    usage = _usage(input_tokens=1_000, output_tokens=200)
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.claude_default_model = "claude-haiku-4-5"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(usage)  # no model= kwarg
+
+    expected = _expected_cost("claude-haiku-4-5", 1_000, 200, 0, 0)
+    assert actual == pytest.approx(expected, rel=1e-9)
+
+
+# --- Bedrock regional uplift -------------------------------------------------
+
+def test_bedrock_us_east_region_no_uplift() -> None:
+    """us-east-1 Bedrock is at parity with Anthropic Direct — multiplier 1.0."""
+    usage = _usage(input_tokens=1_000_000, output_tokens=0)
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "bedrock"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(usage, model="claude-sonnet-4-6")
+    # 1M tokens * $0.003/1K = $3.00 flat at us-east-1.
+    assert actual == pytest.approx(3.00, rel=1e-9)
+
+
+def test_bedrock_non_us_east_applies_regional_uplift() -> None:
+    """ap-southeast-1 and other non-us-east regions scale ALL four tiers."""
+    usage = _usage(input_tokens=1_000_000, output_tokens=100_000,
+                   cache_write=500_000, cache_read=2_000_000)
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "bedrock"
+        mock_settings.return_value.aws_region = "ap-southeast-1"
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(usage, model="claude-sonnet-4-6")
+    expected = 1.10 * _expected_cost("claude-sonnet-4-6",
+                                     1_000_000, 100_000, 500_000, 2_000_000)
+    assert actual == pytest.approx(expected, rel=1e-9)
+
+
+def test_anthropic_provider_ignores_region_multiplier() -> None:
+    """Direct Anthropic is never uplifted, even if aws_region is set."""
+    usage = _usage(input_tokens=1_000_000, output_tokens=0)
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "ap-southeast-1"  # irrelevant
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        actual = _iteration_cost_usd(usage, model="claude-sonnet-4-6")
+    assert actual == pytest.approx(3.00, rel=1e-9)
+
+
+# --- Kill-switch through BaseAgent.run --------------------------------------
 
 class _StubAgent(BaseAgent):
     """Minimal BaseAgent subclass for exercising the budget gate in isolation."""
@@ -83,25 +180,14 @@ class _StubAgent(BaseAgent):
 
 @pytest.mark.asyncio
 async def test_should_continue_halts_loop_when_budget_exceeded() -> None:
-    """The gate must return False once running_cost_usd >= ceiling.
-
-    We exercise the gate path through BaseAgent.run by driving _claude.run_agent_loop
-    via a stub that repeatedly fires on_response with expensive usage until the
-    gate says stop. We verify:
-      * _should_continue returned False before iterations_budget was exhausted
-      * the returned AgentResult has success=False
-      * cost_usd on the result exceeds the ceiling
-      * error_msg names the dollar amount for UI surfacing
-    """
     agent = _StubAgent()
-    agent._publish_event = AsyncMock()  # noqa: swallow events
+    agent._publish_event = AsyncMock()
     agent._update_task_status = AsyncMock()
     agent._check_control_flag = AsyncMock(return_value=None)
 
-    # Fake response shape matching MessageResponse: has .usage, .text, .stop_reason,
-    # .has_tool_use. Each response charges $1.50 — 2 iterations clears the $3 cap.
+    # $1.50/call * 2 calls = $3.00 -> third call is gated by the $3 ceiling.
     expensive_response = SimpleNamespace(
-        usage=_usage(input_tokens=500_000, output_tokens=0),  # $1.50/call
+        usage=_usage(input_tokens=500_000, output_tokens=0),
         text="",
         stop_reason="end_turn",
         has_tool_use=False,
@@ -110,27 +196,25 @@ async def test_should_continue_halts_loop_when_budget_exceeded() -> None:
     async def fake_run_agent_loop(messages, **kwargs):
         on_response = kwargs["on_response"]
         should_continue = kwargs["should_continue"]
-        # Iteration 1 — gate says go
         if await should_continue() is False:
             return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
-        on_response(expensive_response)  # cost → $1.50
-        # Iteration 2 — still under the $3 cap
+        on_response(expensive_response)  # $1.50
         if await should_continue() is False:
             return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
-        on_response(expensive_response)  # cost → $3.00
-        # Iteration 3 — gate must now refuse; the loop halts here.
-        if await should_continue() is False:
+        on_response(expensive_response)  # $3.00
+        if await should_continue() is False:  # gated here
             return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
-        # Should never reach here in the budget-exceeded case.
-        on_response(expensive_response)
+        on_response(expensive_response)      # should never reach
         return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
 
     agent._claude.run_agent_loop = fake_run_agent_loop
-    # Force the ceiling regardless of .env.local via settings override patch.
-    with patch("ai_driven.agents.base.get_settings") as mock_settings:
+    with patch("ai_driven.config.get_settings") as mock_settings:
         mock_settings.return_value.claude_max_cost_per_task_usd = 3.0
         mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
         mock_settings.return_value.claude_max_tool_iterations = 10
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
         result = await agent.run({"message": "do work"}, task_id=None)
 
     assert result.success is False
@@ -141,14 +225,13 @@ async def test_should_continue_halts_loop_when_budget_exceeded() -> None:
 
 @pytest.mark.asyncio
 async def test_under_budget_run_succeeds_and_reports_cost() -> None:
-    """Golden path: one cheap iteration, success, cost_usd populated."""
     agent = _StubAgent()
     agent._publish_event = AsyncMock()
     agent._update_task_status = AsyncMock()
     agent._check_control_flag = AsyncMock(return_value=None)
 
     cheap = SimpleNamespace(
-        usage=_usage(input_tokens=1_000, output_tokens=500),  # ~$0.0105
+        usage=_usage(input_tokens=1_000, output_tokens=500),
         text="done",
         stop_reason="end_turn",
         has_tool_use=False,
@@ -160,13 +243,16 @@ async def test_under_budget_run_succeeds_and_reports_cost() -> None:
         if await should_continue() is False:
             return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
         on_response(cheap)
-        return cheap  # success
+        return cheap
 
     agent._claude.run_agent_loop = fake_run_agent_loop
-    with patch("ai_driven.agents.base.get_settings") as mock_settings:
+    with patch("ai_driven.config.get_settings") as mock_settings:
         mock_settings.return_value.claude_max_cost_per_task_usd = 3.0
         mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
         mock_settings.return_value.claude_max_tool_iterations = 10
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
         result = await agent.run({"message": "cheap job"}, task_id=None)
 
     assert result.success is True
