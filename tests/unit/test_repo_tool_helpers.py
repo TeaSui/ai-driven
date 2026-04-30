@@ -10,10 +10,10 @@ from dataclasses import dataclass
 
 import pytest
 
-from ai_driven.agents.coding.agent import (
-    _build_repo_overview,
-    _list_files_batched,
-    _read_files_batched,
+from ai_driven.agents._shared.repo_tools import (
+    build_repo_overview,
+    list_files_batched,
+    read_files_batched,
 )
 
 
@@ -88,7 +88,7 @@ def _fixture_scm() -> _StubSCM:
 @pytest.mark.asyncio
 async def test_list_files_single_path_non_recursive() -> None:
     scm = _fixture_scm()
-    out = await _list_files_batched(
+    out = await list_files_batched(
         scm, "o/r", paths=["src"], recursive=False, max_depth=3,
         pattern=None, ref="main",
     )
@@ -101,7 +101,7 @@ async def test_list_files_single_path_non_recursive() -> None:
 @pytest.mark.asyncio
 async def test_list_files_multiple_paths_batched() -> None:
     scm = _fixture_scm()
-    out = await _list_files_batched(
+    out = await list_files_batched(
         scm, "o/r", paths=["src", "tests"], recursive=False, max_depth=3,
         pattern=None, ref="main",
     )
@@ -115,7 +115,7 @@ async def test_list_files_multiple_paths_batched() -> None:
 @pytest.mark.asyncio
 async def test_list_files_recursive_walks_tree() -> None:
     scm = _fixture_scm()
-    out = await _list_files_batched(
+    out = await list_files_batched(
         scm, "o/r", paths=[""], recursive=True, max_depth=3,
         pattern=None, ref="main",
     )
@@ -127,7 +127,7 @@ async def test_list_files_recursive_walks_tree() -> None:
 @pytest.mark.asyncio
 async def test_list_files_glob_pattern_filters_results() -> None:
     scm = _fixture_scm()
-    out = await _list_files_batched(
+    out = await list_files_batched(
         scm, "o/r", paths=[""], recursive=True, max_depth=3,
         pattern="*.py", ref="main",
     )
@@ -147,7 +147,7 @@ async def test_list_files_depth_cap_prevents_infinite_walk() -> None:
         "a/b": [_Entry("a/b/c.py", "c.py", False, 1)],
     }
     scm = _StubSCM(tree, {})
-    out = await _list_files_batched(
+    out = await list_files_batched(
         scm, "o/r", paths=[""], recursive=True, max_depth=1,
         pattern=None, ref="main",
     )
@@ -161,7 +161,7 @@ async def test_list_files_depth_cap_prevents_infinite_walk() -> None:
 @pytest.mark.asyncio
 async def test_read_files_batched_returns_all_requested() -> None:
     scm = _fixture_scm()
-    out = await _read_files_batched(
+    out = await read_files_batched(
         scm, "o/r",
         ["package.json", "src/app.py", "src/models/user.py"], "main",
     )
@@ -174,7 +174,7 @@ async def test_read_files_batched_returns_all_requested() -> None:
 @pytest.mark.asyncio
 async def test_read_files_batched_handles_missing_file() -> None:
     scm = _fixture_scm()
-    out = await _read_files_batched(
+    out = await read_files_batched(
         scm, "o/r", ["does/not/exist.py", "package.json"], "main",
     )
     assert len(out) == 2
@@ -187,7 +187,7 @@ async def test_read_files_batched_handles_missing_file() -> None:
 @pytest.mark.asyncio
 async def test_repo_overview_returns_tree_and_manifests() -> None:
     scm = _fixture_scm()
-    overview = await _build_repo_overview(scm, "o/r", max_depth=3, ref="main")
+    overview = await build_repo_overview(scm, "o/r", max_depth=3, ref="main")
     assert "tree" in overview
     assert "manifests" in overview
     # Manifest files surfaced by name.

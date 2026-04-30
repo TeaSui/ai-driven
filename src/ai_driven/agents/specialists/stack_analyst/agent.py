@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ai_driven.agents.coding.agent import _build_repo_overview
+from ai_driven.agents._shared.repo_tools import build_repo_overview
 from ai_driven.agents.specialists.base import SpecialistBase, SpecialistContext
 from ai_driven.claude.prompts.specialists.stack_analyst import (
     STACK_ANALYST_SYSTEM_PROMPT,
@@ -127,7 +127,7 @@ class StackAnalystSpecialist(SpecialistBase):
         ) -> dict[str, Any]:
             if not self._scm:
                 return {"error": "SCM client not configured"}
-            return await _build_repo_overview(
+            return await build_repo_overview(
                 self._scm, repo_full_name, max_depth, ref,
             )
 
