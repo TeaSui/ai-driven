@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Automatically grade every completed agent task for quality, providing consistent feedback on Claude's output. Uses a separate grading model (`claude-haiku-4-5`) to assess correctness, completeness, code quality, and security.
+Automatically grade every completed agent task for quality, providing consistent feedback on Claude's output. Uses a separate grading model (`claude-sonnet-4-6 (fast slot, pinned to Sonnet)`) to assess correctness, completeness, code quality, and security.
 
 ## When It Activates
 
@@ -38,7 +38,7 @@ Agent completes task
 │  1. Check eval enabled      │
 │  2. Build grading prompt    │
 │     (task input + output)   │
-│  3. Call claude-haiku-4-5   │
+│  3. Call claude-sonnet-4-6 (fast slot, pinned to Sonnet) │
 │  4. Parse JSON scores       │
 │  5. Store in DB             │
 └─────────────────────────────┘

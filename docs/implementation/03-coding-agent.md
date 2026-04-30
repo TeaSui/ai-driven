@@ -91,10 +91,11 @@ The CodingAgent uses a single `run_agent_loop()` with extended thinking instead 
 
 - [x] CodingAgent always enables extended thinking (`budget_tokens: 16000`)
 - [x] XML-structured system prompt with `<role>`, `<workflow>`, `<constraints>`, `<examples>` tags
-- [x] 10 registered tools: `get_jira_issue`, `add_jira_comment`, `list_repo_files`, `read_file`, `search_code`, `write_file`, `create_branch`, `create_pull_request`, `update_jira_status`, `execute_in_sandbox`
+- [x] 11 registered tools: `get_jira_issue`, `add_jira_comment`, `list_repo_files`, `read_file`, `search_code`, `write_file`, `create_branch`, `create_pull_request`, `update_jira_status`, `execute_in_sandbox`, `repo.overview`. `repo.list_files` now also accepts `paths: list[str]`, `recursive`, `max_depth`, and `pattern`; `repo.read_file` accepts batch `paths: list[str]`.
 - [x] Optional: `semantic_search_code` (if RAG enabled), MCP tools (if MCP enabled)
 - [x] Events published to Redis at each step for real-time UI visibility
-- [x] Calculate and store total token usage and cost (`$3/M input + $15/M output`)
+- [x] Calculate and store total token usage and cost (cache-aware per-model pricing via billing/tracker.get_model_pricing())
+- As of commit 42ddf91 the initial user message is XML-tagged: `<user_request>`, `<repository>`, `<jira_ticket>`, `<repo_map>` (pre-loaded tree + manifests), `<workflow>`, `<rules>`.
 - [x] MockProvider returns scripted 10-step tool_use sequence for local dev
 
 ### 3.5 SQS Worker — Production-Ready Consumer

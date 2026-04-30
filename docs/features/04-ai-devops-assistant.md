@@ -182,9 +182,10 @@ Severity is determined by Claude based on error rates, user impact scope, and se
 |--------|-------|
 | Model | `claude-sonnet-4-6` |
 | Extended thinking | OFF (speed is critical for incidents) |
-| Max tool iterations | 15 |
+| Max tool iterations | 50 (claude_max_tool_iterations) |
 | Prompt caching | System prompt + tool schemas cached |
 | Structured output | `IncidentReport` JSON via prompt instructions |
+| Per-task cost ceiling | $3.00 USD (claude_max_cost_per_task_usd) — agent loop halts when cumulative cost crosses this. Primary runaway-loop defense. |
 
 ## Error Handling
 

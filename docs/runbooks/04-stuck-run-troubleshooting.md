@@ -69,3 +69,11 @@ Contact the platform team with this information.
 | Redis disconnection | No WebSocket events | Restart Redis or check network |
 | Task timeout (20min) | Status changes to "failed" with timeout message | Task was too complex — break into smaller tasks |
 | Budget exceeded | 429 on new tasks | Wait for next day or increase budget |
+
+### Task halted at cost ceiling
+
+Symptom: UI shows task status `failed` with error message containing `cost ceiling` or `AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD`.
+
+Cause: Cumulative Claude spend on the single task crossed `claude_max_cost_per_task_usd` (default $3.00). Distinct from the daily team budget (`DEFAULT_DAILY_BUDGET_USD=$50`).
+
+Remediation: Investigate whether the ticket scope was too wide (multi-domain migration, wholesale rewrite) — split the ticket. If the ceiling itself is the problem, raise `AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD` in .env.local after confirming the new ceiling is acceptable per-run.

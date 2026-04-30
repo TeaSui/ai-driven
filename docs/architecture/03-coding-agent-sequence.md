@@ -59,7 +59,7 @@ sequenceDiagram
     Redis-->>WS: Forward
     WS-->>U: Show system prompt
 
-    loop Agent Loop (max 20 iterations)
+    loop Agent Loop (max 50 iterations, halts at $3.00 cost ceiling)
         Agent->>Redis: GET task:{taskId}:control
         alt Control = "stopped"
             Agent->>Redis: PUBLISH complete (stopped by user)

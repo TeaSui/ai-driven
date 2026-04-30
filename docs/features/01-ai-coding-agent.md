@@ -64,7 +64,7 @@ ClaudeClient.run_agent_loop()
 ├── Tools: get_jira_issue, list_repo_files, read_file, search_code, write_file,
 │          create_branch, create_pull_request, execute_in_sandbox, update_jira_status,
 │          add_jira_comment, semantic_search_code (if RAG enabled)
-└── Multi-turn loop (max 20 iterations)
+└── Max tool iterations: 50 (claude_max_tool_iterations)
 ```
 
 **Tool calls the agent typically makes:**
@@ -73,6 +73,11 @@ ClaudeClient.run_agent_loop()
 2. `list_repo_files(path="src/")` → understands project structure (capped at 200 lines)
 3. `search_code(query="class UserService")` → finds related implementations
 4. `read_file(path="src/models/user.py")` → reads existing code (truncated at 10KB)
+- `repo.list_files` also accepts `paths: list[str]` for batch listing, `recursive: bool` + `max_depth: int` for tree walks, and `pattern: str` for fnmatch filtering.
+- `repo.read_file` also accepts `paths: list[str]` for batch reads (up to 20 files per call, parallel).
+- `repo.overview` returns `{tree, manifests}` in one call — preferred at the EXPLORE phase to skip directory-by-directory walks.
+- On startup, `CodingAgent.run()` pre-loads a `<repo_map>` block (directory tree + top-level manifests) into the first user message so the model sees the whole layout without burning a tool call.
+- The initial user message is XML-tagged with `<user_request>`, `<repository>`, `<jira_ticket>`, `<repo_map>`, `<workflow>`, `<rules>`.
 
 **Output:** `ImplementationPlan` with:
 - Summary of what needs to change
@@ -141,14 +146,15 @@ Using the agent's tool loop:
 |--------|-------|
 | Model | `claude-sonnet-4-6` (default), configurable per call |
 | Extended thinking | Always enabled for CodingAgent (`budget_tokens: 16000`) |
-| Max tool iterations | 20 (configurable via `claude_max_tool_iterations`) |
+| Max tool iterations | 50 (claude_max_tool_iterations) |
+| Per-task cost ceiling | $3.00 USD (claude_max_cost_per_task_usd) — agent loop halts when cumulative cost crosses this. Primary runaway-loop defense. |
 | Prompt caching | System prompt + tool schemas cached (>1024 tokens, `cache_control: ephemeral`) |
 | Conversation management | Full history — messages list resent each iteration (stateless API) |
 | Few-shot examples | `<examples>` XML section in system prompt with ideal workflow |
 | Provider | `AnthropicProvider` (direct), `BedrockProvider` (AWS), or `MockProvider` (local dev) |
-| Resilience | `ResilientProvider` wraps provider with circuit breaker + model fallback (opus → sonnet → haiku) |
+| Resilience | ResilientProvider retries failed calls against the same configured model (all slots currently pinned to claude-sonnet-4-6); fall-through to cheaper tiers is disabled — see config.py commit 36a8780 for rationale. |
 | Local dev | `MockProvider` returns scripted tool_use sequences (10 steps, 11 iterations) |
-| Cost tracking | `$3/M input + $15/M output` — stored per task in `total_cost_usd` |
+| Cost tracking | Cost tracking: cache-aware per-model dispatch via billing.tracker.get_model_pricing (input/output/cache_write/cache_read). Bedrock regions other than us-east-1 apply bedrock_price_multiplier (default 1.10). |
 
 ### RAG — Semantic Code Search
 
@@ -190,7 +196,7 @@ When `AI_DRIVEN_EVALUATION_ENABLED=true`, every completed task is automatically 
 | Code Quality | 25% | Clean code, patterns, maintainability |
 | Security | 15% | No vulnerabilities introduced |
 
-Grading uses `claude-haiku-4-5` with structured JSON output. Results are stored in `task_evaluations` and visible in the task detail UI.
+Grading uses `claude-sonnet-4-6 (all model slots pinned to Sonnet; see config.py)` with structured JSON output. Results are stored in `task_evaluations` and visible in the task detail UI.
 
 **Files:** `src/ai_driven/evaluation/` — `grader.py`, `runner.py`, `models.py`
 

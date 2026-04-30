@@ -54,7 +54,7 @@ The review agent gathers the PR diff and surrounding context:
 
 ```
 Claude API Call: Review
-├── Model: claude-sonnet-4-6 (standard PRs) OR claude-opus-4-7 (>500 line diffs)
+├── Model: claude-sonnet-4-6 (all slots pinned to Sonnet)
 ├── Extended thinking: ON for large diffs, OFF for small
 ├── System prompt: review guidelines + team custom rules
 ├── Tools: get_pr_diff, read_file, list_repo_files, search_code, post_pr_comment
@@ -159,12 +159,13 @@ Stored in `teams.settings_json` under the `"review"` key.
 
 | Aspect | Value |
 |--------|-------|
-| Model (small diff <500 lines) | `claude-sonnet-4-6` |
-| Model (large diff >500 lines) | `claude-opus-4-7` with extended thinking |
+| Model (small diff <500 lines) | `claude-sonnet-4-6 (all slots pinned to Sonnet)` |
+| Model (large diff >500 lines) | `claude-sonnet-4-6 (all slots pinned to Sonnet)` with extended thinking |
 | Prompt caching | System prompt + review guidelines cached (`cache_control: ephemeral`) |
 | Structured output | JSON via `stop_sequences=["```"]` — stops after JSON code fence |
 | Few-shot examples | `<examples>` section with sample review (1 critical + 1 suggestion + approve verdict) |
 | Team rules injection | Appended to system prompt via `ReviewConfig.to_prompt_section()` |
+| Per-task cost ceiling | $3.00 USD (claude_max_cost_per_task_usd) — agent loop halts when cumulative cost crosses this. Primary runaway-loop defense. |
 
 ### Local Repository Access
 

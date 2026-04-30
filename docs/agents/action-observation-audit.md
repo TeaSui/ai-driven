@@ -21,7 +21,9 @@ is added.
 
 | Action tool | Observation tool | Status | Notes |
 |---|---|---|---|
-| `file.write` | `repo.read_file` | ✅ Paired | Agent can re-read after write |
+| `file.write` | `repo.read_file` | ✅ Paired | Agent can re-read after write. `repo.read_file` now supports batch `paths: list[str]` (up to 20 files per call, parallel) |
+| — | `repo.overview` | n/a | New observation tool — returns `{tree, manifests}` in one call for whole-repo orientation without directory walks |
+| — | `repo.list_files` | n/a | Now supports batch `paths: list[str]`, `recursive: bool` + `max_depth: int` tree walks, and `pattern: str` fnmatch filtering |
 | `git.create_branch` | — | ❌ Unpaired | Add `git.list_branches` or `git.current_branch` so the agent can confirm the branch exists before pushing |
 | `sandbox.execute` | (returns stdout/stderr) | ⚠️ Partial | Tool result is the observation. Acceptable, but the prompt must instruct the model to *read* it — current prompt does, keep an eye |
 | `github.create_pr` | — | ❌ Unpaired | Add `github.get_pr` so the agent can verify URL and confirm the PR was created with the expected base/head |

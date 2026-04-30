@@ -35,7 +35,7 @@ flowchart LR
         direction TB
         SYS["System Prompt\ncache_control: ephemeral\n(if > 1024 tokens)"]
         TOOLS["Tool Schemas\ncache_control on last tool\n(if total > 1024 tokens)"]
-        MSGS["Conversation Messages\ncache_control on last user msg\n(if > 5 turns + 1024 tokens)"]
+        MSGS["Conversation Messages\ncache_control on FIRST user msg\n(stable prefix across iterations;\npinning the last msg caused\nper-turn cache misses)"]
         HIT["Cache HIT\n90% cost reduction\non cached input"]
 
         SYS --> HIT
@@ -51,7 +51,7 @@ flowchart LR
         DIM_R["Review Dimensions\nIssue Detection (35%)\nFalse Positive Rate (25%)\nActionability (25%)\nTone (15%)"]
         DIM_D["DevOps Dimensions\nRoot Cause Accuracy (35%)\nCompleteness (25%)\nActionability (25%)\nUrgency Assessment (15%)"]
 
-        GRADE["Haiku Grader\nScore 0-10 per dimension\n+ Strengths + Weaknesses"]
+        GRADE["Sonnet Grader\nScore 0-10 per dimension\n+ Strengths + Weaknesses"]
         STORE[("task_evaluations\nPersisted scores")]
 
         TASK --> DIM_C
