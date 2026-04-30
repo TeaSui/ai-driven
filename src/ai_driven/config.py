@@ -35,9 +35,16 @@ class Settings(BaseSettings):
 
     # Claude
     claude_provider: ClaudeProviderType = ClaudeProviderType.ANTHROPIC
+    # All three slots pinned to Sonnet 4.6 (2026-04-30). Rationale:
+    # KAN-12 cost post-mortem showed Opus planning iterations alone could
+    # eclipse the Sonnet per-task budget at $15/M input, and Haiku's
+    # per-token savings get swamped by quality-gap reruns when coding.
+    # Consistency beats per-token delta for a 17-iteration agent loop.
+    # Restore per-tier model choice if/when a tier-aware routing layer
+    # (orchestrator classifier) is in place to bound the blast radius.
     claude_default_model: str = "claude-sonnet-4-6"
-    claude_planning_model: str = "claude-opus-4-7"  # bumped 2026-04-22 — see docs/implementation/09 §11
-    claude_fast_model: str = "claude-haiku-4-5"
+    claude_planning_model: str = "claude-sonnet-4-6"
+    claude_fast_model: str = "claude-sonnet-4-6"
     # Output token cap. 4096 was too tight for coding runs — Sonnet 4.6's
     # final "open the PR, summarize, update Jira" turn routinely writes
     # >4k tokens (full PR body + tool calls) and got truncated mid-response,
