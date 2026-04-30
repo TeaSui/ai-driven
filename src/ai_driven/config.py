@@ -141,6 +141,18 @@ class Settings(BaseSettings):
     sqs_review_queue_url: str = ""
     sqs_devops_queue_url: str = ""
 
+    # SQS — orchestrator + specialists (Phase 1 of orchestrator rollout)
+    sqs_orchestrator_queue_url: str = ""
+    sqs_specialists_queue_url: str = ""
+
+    # Orchestrator mode — controls whether the orchestrator's classification
+    # affects downstream pipelines. Default 'shadow' for safe rollout.
+    #   shadow: classify + write artifacts, but do NOT gate the existing
+    #           coding/review pipeline (Phase 1 default).
+    #   live:   gate the pipeline on specialist verdicts (Phase 2).
+    #   off:    skip orchestrator entirely; tasks route as before.
+    orchestrator_mode: str = "shadow"
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
