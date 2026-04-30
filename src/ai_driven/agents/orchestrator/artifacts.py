@@ -174,8 +174,8 @@ class Artifact:
 
     role: Role
     verdict: Verdict
-    reasoning: str
+    reasoning: str | None
     payload: dict[str, Any]
-    model_used: str
+    model_used: str | None
     input_tokens: int
     output_tokens: int

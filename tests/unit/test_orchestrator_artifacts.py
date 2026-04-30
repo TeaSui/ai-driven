@@ -6,6 +6,9 @@ the file reads top-to-bottom matching the plan.
 """
 from __future__ import annotations
 
+import uuid
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from pydantic import ValidationError
 
@@ -18,6 +21,7 @@ from ai_driven.agents.orchestrator.artifacts import (
     StackAnalystPayload,
     validate_payload,
 )
+from ai_driven.agents.orchestrator.repository import ArtifactRepository
 from ai_driven.db.postgres.models import Task, TaskArtifact
 
 
@@ -154,3 +158,65 @@ def test_artifact_dataclass_carries_all_fields() -> None:
         output_tokens=50,
     )
     assert a.role == "business_analyst" and a.input_tokens == 100
+
+
+@pytest.mark.asyncio
+async def test_artifact_repository_upsert_inserts_new_row() -> None:
+    """When no row exists for (task_id, role), upsert calls session.add()
+    and flushes but does NOT commit — the caller owns the transaction."""
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
+    repo = ArtifactRepository(session)
+    art = Artifact(
+        role="security",
+        verdict="pass",
+        reasoning="no issues",
+        payload={"threat_model": [], "implementation_rules": [],
+                 "compliance_notes": [], "blocking_concerns": []},
+        model_used="claude-sonnet-4-6",
+        input_tokens=120,
+        output_tokens=80,
+    )
+    await repo.upsert(uuid.uuid4(), art)
+    session.add.assert_called_once()
+    session.flush.assert_awaited_once()
+    session.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_artifact_repository_upsert_updates_existing_row() -> None:
+    """When a row exists for (task_id, role), upsert mutates it instead of inserting."""
+    existing = MagicMock()
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=existing))
+    )
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
+    repo = ArtifactRepository(session)
+    art = Artifact(
+        role="security",
+        verdict="block",
+        reasoning="blocker",
+        payload={"threat_model": [], "implementation_rules": [],
+                 "compliance_notes": [], "blocking_concerns": ["x"]},
+        model_used="claude-sonnet-4-6",
+        input_tokens=1,
+        output_tokens=1,
+    )
+    await repo.upsert(uuid.uuid4(), art)
+
+    session.add.assert_not_called()
+    assert existing.verdict == "block"
+    assert existing.reasoning == "blocker"
+    assert existing.payload == art.payload
+    session.flush.assert_awaited_once()
+    session.commit.assert_not_called()
