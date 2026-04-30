@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -17,7 +18,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -71,6 +72,7 @@ class Task(Base):
     repo_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("repositories.id"), nullable=True)
     jira_key: Mapped[str | None] = mapped_column(String(50), nullable=True)
     agent_type: Mapped[str] = mapped_column(String(50), nullable=False)  # coding | review | workflow | devops
+    orchestration_tier: Mapped[str | None] = mapped_column(String(16), nullable=True)  # fast_path | full_workflow | multi_domain | NULL (pre-orchestrator)
     status: Mapped[str] = mapped_column(String(50), default="queued")
     # Status flow: queued → planning → coding → testing → pr_created → completed | failed
     title: Mapped[str] = mapped_column(String(500), default="")
@@ -170,3 +172,40 @@ class ConversationRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     task: Mapped[Task] = relationship(back_populates="conversations")
+
+
+class TaskArtifact(Base):
+    """Structured output of a specialist run, one row per (task_id, role).
+
+    Written by the orchestrator after each specialist completes. Enforces
+    one artifact per (task_id, role) via a unique composite index —
+    re-runs UPDATE, repair/retry history is in the agent_events stream.
+    Column set mirrors the migration at
+    alembic/versions/a1b2c3d4e5fa_orchestration_artifacts.py.
+    """
+
+    __tablename__ = "task_artifacts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+    __table_args__ = (
+        sa.Index("idx_task_artifacts_task", "task_id"),
+        sa.Index("idx_task_artifacts_task_role", "task_id", "role", unique=True),
+    )
