@@ -35,6 +35,8 @@ class TaskConsumer:
                 settings.sqs_task_queue_url,
                 settings.sqs_review_queue_url,
                 settings.sqs_devops_queue_url,
+                settings.sqs_orchestrator_queue_url,
+                settings.sqs_specialists_queue_url,
             ]
             if url
         ]
@@ -274,8 +276,64 @@ class TaskConsumer:
             ),
             "review": lambda: ReviewAgent(scm_client=scm_client),
             "devops": lambda: DevOpsAgent(jira_client=jira_client),
+            "orchestrator": lambda: _OrchestratorWrapper(),
         }
         factory = agents.get(agent_type)
         if not factory:
             raise ValueError(f"Unknown agent type: {agent_type}")
         return factory()
+
+
+class _OrchestratorWrapper:
+    """Adapter exposing OrchestratorAgent.orchestrate() through `.run()`.
+
+    The consumer expects every dispatched agent to expose `.run(payload)`
+    and return an AgentResult whose `.conversation` carries token counts.
+    The orchestrator doesn't use the agent loop, so we synthesize a
+    minimal AgentResult, populating token totals from the orchestrator's
+    own accumulator (classifier + specialist usage).
+
+    This wrapper is future-proofing for Phase 2, when the orchestrator is
+    enqueued through SQS. Phase 1 shadow mode runs the orchestrator
+    fire-and-forget from producer._schedule_shadow_orchestrator and never
+    touches this code path.
+    """
+
+    def __init__(self) -> None:
+        from ai_driven.agents.orchestrator.agent import OrchestratorAgent
+        self._inner = OrchestratorAgent()
+
+    async def run(self, payload: dict[str, Any]) -> Any:
+        from ai_driven.agents.base import AgentResult
+        from ai_driven.claude.conversation import Conversation
+
+        # Adapt the consumer payload shape to the orchestrator's expected shape
+        ticket = payload.get("context", {}).get("ticket") or payload.get("ticket") or {
+            "summary": payload.get("title") or payload.get("message", ""),
+            "description": payload.get("message", ""),
+        }
+        repo = payload.get("context", {}).get("repo") or payload.get("repo") or {
+            "full_name": payload.get("repo_full_name", ""),
+            "scm_type": payload.get("scm_type", "github"),
+            "default_branch": "main",
+        }
+        result = await self._inner.orchestrate({
+            "task_id": payload.get("task_id"),
+            "ticket": ticket,
+            "repo": repo,
+        })
+
+        # Surface token usage via Conversation so TaskConsumer.total_tokens
+        # reflects the orchestrator's real spend.
+        conv = Conversation()
+        totals = result.get("total_tokens") or {}
+        conv.total_input_tokens = int(totals.get("input", 0) or 0)
+        conv.total_output_tokens = int(totals.get("output", 0) or 0)
+        return AgentResult(
+            success=True,
+            output=json.dumps(result),
+            conversation=conv,
+            tool_calls=0,
+            iterations=0,
+            duration_seconds=0.0,
+        )

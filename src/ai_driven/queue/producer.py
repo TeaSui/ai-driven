@@ -24,6 +24,8 @@ class TaskProducer:
             "coding": settings.sqs_task_queue_url,
             "review": settings.sqs_review_queue_url,
             "devops": settings.sqs_devops_queue_url,
+            "orchestrator": settings.sqs_orchestrator_queue_url,
+            "specialist": settings.sqs_specialists_queue_url,
         }
 
     async def enqueue_task(
@@ -36,6 +38,24 @@ class TaskProducer:
         (F1/F2/F4) keep working without AWS. Returns a synthetic message id.
         """
         settings = get_settings()
+
+        # SHADOW: every coding-task submission also kicks off the orchestrator.
+        # The orchestrator runs fire-and-forget via asyncio.create_task — do
+        # NOT re-enqueue through enqueue_task (would silently drop the call if
+        # the orchestrator queue URL is empty and inline-fallback doesn't know
+        # the 'orchestrator' agent_type). See revision red-team block in
+        # docs/plans/2026-04-29-orchestrator-build.md (line 32).
+        if (
+            agent_type == "coding"
+            and settings.orchestrator_mode != "off"
+        ):
+            try:
+                self._schedule_shadow_orchestrator(task_id, payload)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "shadow orchestrator dispatch failed (non-fatal)"
+                )
+
         queue_url = self._queue_map.get(agent_type)
 
         # Local-dev / debug fallback: if SQS is unconfigured or the queue URL
@@ -96,3 +116,37 @@ class TaskProducer:
             extra={"sqs_message_id": message_id, "queue": agent_type},
         )
         return message_id
+
+    def _schedule_shadow_orchestrator(
+        self, task_id: str, payload: dict[str, Any],
+    ) -> None:
+        """Fire-and-forget direct invocation of OrchestratorAgent.
+
+        We do NOT re-enter enqueue_task with agent_type='orchestrator' —
+        that would either hit an empty queue URL or the inline-fallback
+        dispatch in consumer.py, neither of which knows about the
+        orchestrator agent factory. Instead we invoke orchestrate()
+        directly inside the current event loop.
+        """
+        import asyncio
+
+        from ai_driven.agents.orchestrator.agent import OrchestratorAgent
+
+        shadow_payload = {**payload, "task_id": task_id}
+        orch = OrchestratorAgent()
+        asyncio.create_task(_run_shadow(orch, shadow_payload))
+
+
+async def _run_shadow(orch: Any, payload: dict[str, Any]) -> None:
+    """Run the orchestrator in the background, swallowing all errors.
+
+    Module-level async helper (not a method) so asyncio.create_task has
+    a clean coroutine object to schedule without dragging `self` through
+    event-loop garbage collection semantics.
+    """
+    try:
+        await orch.orchestrate(payload)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "shadow orchestrator orchestrate() crashed (non-fatal)"
+        )

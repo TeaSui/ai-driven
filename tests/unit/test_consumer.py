@@ -19,6 +19,8 @@ def mock_settings():
     settings.sqs_task_queue_url = "https://sqs.us-east-1.amazonaws.com/123/tasks"
     settings.sqs_review_queue_url = ""
     settings.sqs_devops_queue_url = ""
+    settings.sqs_orchestrator_queue_url = ""
+    settings.sqs_specialists_queue_url = ""
     settings.jira_base_url = ""
     settings.jira_api_token = ""
     settings.github_token = ""
