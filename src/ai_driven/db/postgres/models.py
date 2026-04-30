@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     func,
@@ -201,6 +203,14 @@ class TaskArtifact(Base):
     model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Per-artifact dollar cost. Added by the orchestrator-revision spec
+    # (docs/specs/2026-04-30-orchestrator-revision.md §2.2) so shadow-mode
+    # orchestration spend is visible to the cost-attribution dashboard.
+    # NUMERIC(10,6) gives exact micro-dollar precision — avoids binary
+    # float drift when summing many small specialist costs.
+    cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
     )

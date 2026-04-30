@@ -335,6 +335,7 @@ class BaseAgent(ABC):
         max_iterations: int | None = None,
         use_thinking: bool = False,
         stop_sequences: list[str] | None = None,
+        initial_cost: float = 0.0,
     ) -> AgentResult:
         """Execute the agent's main workflow.
 
@@ -355,6 +356,16 @@ class BaseAgent(ABC):
         stop_sequences:
             Optional list of sequences that will cause the model to stop
             generating. Passed through to the provider on every iteration.
+        initial_cost:
+            Pre-seed the running-cost accumulator so the per-task
+            ``claude_max_cost_per_task_usd`` ceiling applies to the
+            COMBINED orchestration run (classifier + specialists +
+            coding/review), not per-specialist. When ``initial_cost`` is
+            already at-or-above the ceiling the method short-circuits
+            BEFORE calling the Claude provider — otherwise the first
+            iteration would fire and waste money before ``_should_continue``
+            (only consulted between iterations) ever got a chance to gate.
+            See docs/specs/2026-04-30-orchestrator-revision.md §2.
         """
         self._task_id = task_id
         if task_id:
@@ -366,6 +377,32 @@ class BaseAgent(ABC):
         user_message = self._build_initial_message(task_input)
         conversation.add_user_message(user_message)
 
+        # Pre-iteration budget short-circuit. The agent-loop _should_continue
+        # gate is only consulted BETWEEN iterations (see
+        # src/ai_driven/claude/client.py lines 107-116); if the orchestrator
+        # pre-seeds initial_cost at-or-above the ceiling, the first
+        # create_message call would still fire and burn cost before the gate
+        # had a chance to run. Fail fast with zero Claude calls and stay
+        # shadow-mode-safe (no event publish, no status write) so downstream
+        # observers only see real spend.
+        if initial_cost >= settings.claude_max_cost_per_task_usd:
+            return AgentResult(
+                success=False,
+                output="",
+                conversation=conversation,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+                error=(
+                    f"Agent refused to start: pre-seeded cost "
+                    f"${initial_cost:.2f} already at or above the "
+                    f"${settings.claude_max_cost_per_task_usd:.2f} per-task "
+                    f"ceiling (budget_exceeded_on_entry)."
+                ),
+                metadata={"reason": "budget_exceeded_on_entry"},
+                cost_usd=round(initial_cost, 4),
+            )
+
         thinking = None
         if use_thinking:
             thinking = {"type": "enabled", "budget_tokens": 16000}
@@ -373,10 +410,12 @@ class BaseAgent(ABC):
         start_time = time.monotonic()
         tool_call_count = 0
         iteration_count = 0
-        # Running dollar cost of this task's Claude calls. Incremented on
-        # every iteration; read by _should_continue to enforce the per-task
-        # budget ceiling (AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD).
-        running_cost_usd = 0.0
+        # Running dollar cost of this task's Claude calls. Seeded from
+        # initial_cost so orchestrator-dispatched specialists inherit the
+        # running orchestration tally; incremented on every iteration; read
+        # by _should_continue to enforce the per-task budget ceiling
+        # (AI_DRIVEN_CLAUDE_MAX_COST_PER_TASK_USD).
+        running_cost_usd = initial_cost
         budget_exceeded = False
 
         # Publish phase_change when the agent starts

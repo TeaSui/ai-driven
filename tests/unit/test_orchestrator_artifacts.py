@@ -7,6 +7,7 @@ the file reads top-to-bottom matching the plan.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,7 +30,7 @@ def test_task_artifact_model_columns() -> None:
     cols = {c.name for c in TaskArtifact.__table__.columns}
     assert cols == {
         "id", "task_id", "role", "payload", "verdict", "reasoning",
-        "model_used", "input_tokens", "output_tokens", "created_at",
+        "model_used", "input_tokens", "output_tokens", "cost_usd", "created_at",
     }
 
 
@@ -42,6 +43,21 @@ def test_task_artifact_unique_index_on_task_role() -> None:
 def test_task_has_orchestration_tier_column() -> None:
     cols = {c.name for c in Task.__table__.columns}
     assert "orchestration_tier" in cols
+
+
+def test_task_artifact_cost_usd_defaults_to_zero() -> None:
+    """Per-revision §2.2: new TaskArtifact rows must start at $0 so the
+    cost-attribution dashboard can sum orchestration spend safely.
+    Regression guard against accidentally dropping the default or the
+    NOT NULL constraint.
+
+    SQLAlchemy `default=` fires on flush (not __init__), so assert the
+    column metadata directly — that's what SQLAlchemy will apply and what
+    the migration's server_default mirrors for existing-row backfill."""
+    col = TaskArtifact.__table__.columns["cost_usd"]
+    assert col.default is not None
+    assert col.default.arg == Decimal("0")
+    assert col.nullable is False
 
 
 def test_business_analyst_payload_accepts_full_shape() -> None:

@@ -224,6 +224,49 @@ async def test_should_continue_halts_loop_when_budget_exceeded() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_short_circuits_when_initial_cost_over_ceiling() -> None:
+    """Orchestrator pre-seeds initial_cost when dispatching specialists so the
+    per-task ceiling applies to the combined run. If the seed is ALREADY at or
+    over the ceiling, BaseAgent.run must return success=False with ZERO Claude
+    calls — the _should_continue gate only runs between iterations, so the
+    first create_message would otherwise fire and burn cost.
+
+    Per docs/specs/2026-04-30-orchestrator-revision.md §2.
+    """
+    agent = _StubAgent()
+    agent._publish_event = AsyncMock()
+    agent._update_task_status = AsyncMock()
+    agent._check_control_flag = AsyncMock(return_value=None)
+
+    # Replace the agent loop with a spy that records invocations. If the
+    # short-circuit works, this must never be awaited.
+    fake_loop = AsyncMock()
+    agent._claude.run_agent_loop = fake_loop
+
+    initial_cost = 3.50  # well over the $3.00 default ceiling
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_max_cost_per_task_usd = 3.0
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.claude_max_tool_iterations = 10
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        result = await agent.run(
+            {"message": "work"}, task_id=None, initial_cost=initial_cost,
+        )
+
+    # Zero Claude calls — the whole point of the pre-iteration check.
+    fake_loop.assert_not_awaited()
+
+    assert result.success is False
+    assert result.cost_usd == pytest.approx(initial_cost)
+    # Failure reason surfaces the short-circuit path. Check both the metadata
+    # key (the machine-readable marker) and the human-readable error string.
+    assert result.metadata.get("reason") == "budget_exceeded_on_entry"
+    assert "budget_exceeded_on_entry" in (result.error or "")
+
+
+@pytest.mark.asyncio
 async def test_under_budget_run_succeeds_and_reports_cost() -> None:
     agent = _StubAgent()
     agent._publish_event = AsyncMock()
