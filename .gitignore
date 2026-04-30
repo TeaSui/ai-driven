@@ -56,3 +56,6 @@ Thumbs.db
 .terraform/
 *.tfstate
 *.tfstate.backup
+
+# Git worktrees (local isolated workspaces)
+.worktrees/
