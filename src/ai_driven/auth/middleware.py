@@ -97,13 +97,21 @@ async def _resolve_session(token: str) -> dict[str, Any] | None:
     """
     settings = get_settings()
     if settings.debug and token == "debug-session":
-        return {"team_id": "00000000-0000-0000-0000-000000000000", "role": "owner"}
+        return {
+            "team_id": "00000000-0000-0000-0000-000000000000",
+            "role": "owner",
+            "member_id": None,
+        }
     try:
         from ai_driven.auth import sessions as session_store
         sess = await session_store.load_session(token)
         if not sess:
             return None
-        return {"team_id": sess.team_id, "role": sess.role}
+        return {
+            "team_id": sess.team_id,
+            "role": sess.role,
+            "member_id": sess.member_id,
+        }
     except Exception as ex:
         logger.warning("session resolution failed: %s", ex)
         return None
@@ -234,6 +242,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                     content={"error": {"code": "UNAUTHORIZED", "message": "Session expired or invalid", "details": []}},
                 )
             request.state.team_id = session_data["team_id"]
+            request.state.team_role = session_data.get("role", "member")
+            request.state.member_id = session_data.get("member_id")
             request.state.session_token = session_token
             bind_team(session_data["team_id"])
             response = await call_next(request)
@@ -299,3 +309,132 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         response.headers["X-Trace-Id"] = trace_id
         clear_trace()
         return response
+
+
+# ---------------------------------------------------------------------------
+# T24: require_admin dependency
+# ---------------------------------------------------------------------------
+
+# UUID of the seeded "system" team_member row used by background reapers.
+# The migration f6a7b8c9d0e1 inserts this member as admin@system with a
+# fixed UUID so reapers can reference it without a bootstrap lookup.
+SYSTEM_MEMBER_ID = "00000000-0000-0000-0000-000000000001"
+
+
+class TeamMemberInfo:
+    """Lightweight view of the authenticated team member.
+
+    Populated by ``require_admin``. Carries just the fields the override
+    endpoint needs (member id for audit rows, team id for scoping, role
+    for the guard we just passed). Deliberately not a Pydantic model —
+    no validation cost, this is an in-process contract between the
+    dependency and its callers.
+    """
+
+    __slots__ = ("member_id", "team_id", "role", "email")
+
+    def __init__(
+        self,
+        *,
+        member_id: str,
+        team_id: str,
+        role: str,
+        email: str | None = None,
+    ) -> None:
+        self.member_id = member_id
+        self.team_id = team_id
+        self.role = role
+        self.email = email
+
+
+async def require_admin(request: Request) -> TeamMemberInfo:
+    """FastAPI dependency: resolve the authenticated team_member and
+    assert ``role in {"admin", "owner"}``.
+
+    Auth paths accepted (mirrors APIKeyMiddleware):
+      1. Session token (UI): middleware has set ``request.state.team_id``,
+         ``team_role``, ``member_id``. We trust these.
+      2. X-API-Key: middleware has set ``team_id`` + ``api_key_hash``.
+         We look up the matching team_member row by api_key_hash; if the
+         key is team-level (no member row), we use the seeded system
+         member for owners, else 403.
+      3. Debug bypass: when settings.debug and the sentinel team is set,
+         we resolve to the system member with role='admin' so local dev
+         can exercise the override endpoint without creating a real
+         member.
+
+    Returns ``TeamMemberInfo``. Raises:
+      * 401 — no authenticated team on request.state
+      * 403 — authenticated but role is not admin/owner
+    """
+    from fastapi import HTTPException
+
+    team_id = getattr(request.state, "team_id", None)
+    if not team_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    settings = get_settings()
+
+    # Debug bypass: sentinel team id + debug mode = system admin.
+    # Keeps local dev ergonomics — the existing debug path in the
+    # middleware sets team_id without a member row, and we don't want
+    # to force developers to seed a team_member to exercise admin APIs.
+    if settings.debug and team_id == "00000000-0000-0000-0000-000000000000":
+        return TeamMemberInfo(
+            member_id=SYSTEM_MEMBER_ID,
+            team_id=team_id,
+            role="admin",
+            email="debug@local",
+        )
+
+    # Session-token path: middleware has populated role + member_id.
+    role = getattr(request.state, "team_role", None)
+    member_id = getattr(request.state, "member_id", None)
+
+    if role and member_id:
+        if role not in {"admin", "owner"}:
+            raise HTTPException(status_code=403, detail="Admin role required")
+        return TeamMemberInfo(
+            member_id=member_id, team_id=team_id, role=role
+        )
+
+    # X-API-Key path: role was set by middleware (team-level keys are
+    # 'owner' by convention), but we need to resolve member_id from the
+    # api_key_hash. Team-level keys have no matching team_member row —
+    # we treat those as 'owner' and map them to the system member for
+    # audit purposes.
+    api_key_hash = getattr(request.state, "api_key_hash", None)
+    if api_key_hash:
+        import uuid as _uuid
+        from ai_driven.db.postgres.models import TeamMember
+        from ai_driven.db.postgres.session import async_session_factory
+        from sqlalchemy import select
+
+        async with async_session_factory() as s:
+            res = await s.execute(
+                select(TeamMember).where(
+                    TeamMember.team_id == _uuid.UUID(team_id),
+                    TeamMember.api_key_hash == api_key_hash,
+                )
+            )
+            member = res.scalar_one_or_none()
+            if member is not None:
+                if member.role not in {"admin", "owner"}:
+                    raise HTTPException(
+                        status_code=403, detail="Admin role required"
+                    )
+                return TeamMemberInfo(
+                    member_id=str(member.id),
+                    team_id=team_id,
+                    role=member.role,
+                    email=member.email,
+                )
+
+        # No member row — the key is team-level. Treat it as an owner
+        # (middleware already did) and audit under the system member.
+        if role == "owner":
+            return TeamMemberInfo(
+                member_id=SYSTEM_MEMBER_ID, team_id=team_id, role="owner"
+            )
+
+    raise HTTPException(status_code=403, detail="Admin role required")

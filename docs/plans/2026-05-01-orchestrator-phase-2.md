@@ -34,7 +34,8 @@ Flipping straight to strict gating would halt a majority of pipelines for infras
 
 ### What changed vs v5
 
-1. **Lenient gating ships first** (as T18). Strict gating is contingent on T0-rerun passing.
+0. **T18 runs before T19 (reorder)**. v5/v6 draft put T19 first so "dogfood corpus reflects Phase 2 topology" — but a stub composer (T19 without T18) produces identical output to the current static prompt, so the topology signal is zero. Building T18 first as a pure function is independently testable and gives T19 a real signature to wire against. Red-team round 6 confirmed.
+1. **Lenient gating ships first** (as the T18+T19+T19b bundle). Strict gating is contingent on T0-rerun passing.
 2. **T-A2 cost-attribution scope expanded** to end-to-end fix (dataclass field + base class compute + repo writer + reader + Decimal precision + cost-ceiling rollup). 1 day, not 0.5.
 3. **T-A1 has a fallback spec** — if error rate can't drop <15% after max_tokens tuning + retry-on-ValidationException, we stay on lenient gating permanently and document.
 4. **T19 moved forward** so dogfood corpus reflects actual Phase 2 topology.
