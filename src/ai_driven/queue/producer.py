@@ -30,6 +30,10 @@ class TaskProducer:
             "devops": settings.sqs_devops_queue_url,
             "orchestrator": settings.sqs_orchestrator_queue_url,
             "specialist": settings.sqs_specialists_queue_url,
+            # T22: post-coding QA runs on its own queue (longer visibility
+            # timeout, independent DLQ tuning). No rerouting — QA tasks
+            # are enqueued directly by the Coding worker hook.
+            "qa": settings.sqs_qa_queue_url,
         }
 
     async def enqueue_task(
@@ -78,6 +82,17 @@ class TaskProducer:
             effective_queue_type = "orchestrator"
 
         queue_url = self._queue_map.get(effective_queue_type)
+
+        # T22 blocker-fix 1: QA never runs inline. The debug/inline fallback
+        # below dispatches through `_process_task_inline` which only knows
+        # the legacy agent types (coding/review/devops). A QA payload hitting
+        # that path would crash. Fail loudly so a misconfigured env surfaces
+        # immediately instead of silently dropping QA runs.
+        if agent_type == "qa" and (settings.debug or not queue_url):
+            raise RuntimeError(
+                "QA worker cannot run inline/debug — configure "
+                "AI_DRIVEN_SQS_QA_QUEUE_URL and disable debug mode."
+            )
 
         # Local-dev / debug fallback: if SQS is unconfigured or the queue URL
         # is missing, process inline instead of crashing the webhook.

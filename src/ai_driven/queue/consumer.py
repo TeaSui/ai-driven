@@ -41,6 +41,8 @@ class TaskConsumer:
                 settings.sqs_devops_queue_url,
                 settings.sqs_orchestrator_queue_url,
                 settings.sqs_specialists_queue_url,
+                # T22: poll the QA post-coding queue too.
+                settings.sqs_qa_queue_url,
             ]
             if url
         ]

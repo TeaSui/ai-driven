@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     sqs_orchestrator_queue_url: str = ""
     sqs_specialists_queue_url: str = ""
 
+    # SQS — QA post-coding worker (T22). Dedicated queue so QA's long
+    # visibility timeout (1800s) and independent DLQ tuning don't affect
+    # the other worker queues. When unset, the T22 coding-worker hook
+    # skips QA enqueue (graceful — matches a pre-T22 deploy).
+    sqs_qa_queue_url: str = ""
+
     # Orchestrator mode — controls whether the orchestrator's classification
     # affects downstream pipelines. Default 'shadow' for safe rollout.
     #   shadow: classify + write artifacts, but do NOT gate the existing
