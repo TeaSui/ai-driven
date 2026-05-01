@@ -23,6 +23,12 @@ from ai_driven.domain.enums import IncidentSeverity
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# T24: admin override endpoint. Defined in its own module for length
+# (override.py) but mounted onto the same /api/admin router so callers
+# see a single admin surface.
+from ai_driven.api.admin.override import router as _override_router  # noqa: E402
+router.include_router(_override_router)
+
 # ---- Validation constants ----
 _FULL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 _VALID_SCM_TYPES = {"github", "bitbucket"}
