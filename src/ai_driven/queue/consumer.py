@@ -378,44 +378,198 @@ class TaskConsumer:
         return factory()
 
 
+def _build_orchestrate_payload(payload: dict[str, Any], task_id: Any) -> dict[str, Any]:
+    """Normalize a flat consumer payload into orchestrate()'s nested shape.
+
+    Accepts either:
+    - nested: ``{ticket: {...}, repo: {...}}`` (already orchestrate-shaped)
+    - flat:   ``{message, jira_key, repo_full_name, scm_type, labels, ...}``
+
+    Returns the orchestrate() input (``task_id + ticket + repo``). Shared by
+    the SQS worker wrapper and the debug-mode inline path so both routes
+    build identical inputs.
+    """
+    ticket = payload.get("context", {}).get("ticket") or payload.get("ticket") or {
+        "key": payload.get("jira_key", ""),
+        "summary": payload.get("title") or payload.get("message", ""),
+        "description": payload.get("message", ""),
+        "labels": payload.get("labels", []),
+        "acceptance_criteria": payload.get("acceptance_criteria", []),
+    }
+    repo = payload.get("context", {}).get("repo") or payload.get("repo") or {
+        "full_name": payload.get("repo_full_name", ""),
+        "scm_type": payload.get("scm_type", "github"),
+        "default_branch": payload.get("default_branch", "main"),
+    }
+    return {"task_id": task_id, "ticket": ticket, "repo": repo}
+
+
 class _OrchestratorWrapper:
     """Adapter exposing OrchestratorAgent.orchestrate() through `.run()`.
 
-    The consumer expects every dispatched agent to expose `.run(payload)`
-    and return an AgentResult whose `.conversation` carries token counts.
-    The orchestrator doesn't use the agent loop, so we synthesize a
-    minimal AgentResult, populating token totals from the orchestrator's
-    own accumulator (classifier + specialist usage).
+    T20 makes this the primary dispatch path: the SQS orchestrator worker
+    dequeues an orchestrator-task, calls `.run(payload)` here, which:
 
-    This wrapper is future-proofing for Phase 2, when the orchestrator is
-    enqueued through SQS. Phase 1 shadow mode runs the orchestrator
-    fire-and-forget from producer._schedule_shadow_orchestrator and never
-    touches this code path.
+      1. Reads the idempotency marker (``Task.output_data.orchestrator_completed_at``)
+         — if present, skips orchestrate() entirely (crash-recovery path:
+         at-least-once SQS delivery re-runs a task that already produced
+         artifacts; we MUST NOT re-spend Claude tokens on specialists).
+      2. Otherwise runs `orchestrate()` (classifier + specialists + artifacts).
+      3. Writes the marker via `TaskRepository.update_output_data`
+         BEFORE enqueueing coding — so a crash between steps 3 and 4 still
+         lets us resume safely.
+      4. Enqueues the coding-task (agent_type='coding') via
+         ``TaskProducer().enqueue_task`` with the ORIGINAL payload, so
+         downstream CodingAgent sees the same shape the user sent.
+
+    T20 is SHADOW-MODE ONLY — `halted_on` is logged but never halts the
+    pipeline. T21 adds strict gating + `blocked` status.
     """
 
     def __init__(self) -> None:
         from ai_driven.agents.orchestrator.agent import OrchestratorAgent
         self._inner = OrchestratorAgent()
 
-    async def run(self, payload: dict[str, Any]) -> Any:
+    async def run(self, payload: dict[str, Any], **run_kwargs: Any) -> Any:
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
         from ai_driven.agents.base import AgentResult
         from ai_driven.claude.conversation import Conversation
 
-        # Adapt the consumer payload shape to the orchestrator's expected shape
-        ticket = payload.get("context", {}).get("ticket") or payload.get("ticket") or {
-            "summary": payload.get("title") or payload.get("message", ""),
-            "description": payload.get("message", ""),
-        }
-        repo = payload.get("context", {}).get("repo") or payload.get("repo") or {
-            "full_name": payload.get("repo_full_name", ""),
-            "scm_type": payload.get("scm_type", "github"),
-            "default_branch": "main",
-        }
-        result = await self._inner.orchestrate({
-            "task_id": payload.get("task_id"),
-            "ticket": ticket,
-            "repo": repo,
-        })
+        # run_kwargs (task_id kwarg from TaskConsumer) is accepted for
+        # signature parity with other agents. We prefer payload['task_id']
+        # when present (nested orchestrator shape) but fall back to the
+        # TaskConsumer-provided kwarg.
+        task_id_str = str(payload.get("task_id") or run_kwargs.get("task_id") or "")
+        task_uuid: _uuid.UUID | None = None
+        try:
+            task_uuid = _uuid.UUID(task_id_str) if task_id_str else None
+        except (ValueError, TypeError):
+            task_uuid = None
+
+        # 1. Idempotency check: skip orchestrate() if marker already written.
+        existing_output: dict[str, Any] = {}
+        already_ran = False
+        if task_uuid is not None:
+            try:
+                async with async_session_factory() as session:
+                    repo = TaskRepository(session)
+                    task_row = await repo.get_by_id(task_uuid)
+                    if task_row is not None:
+                        existing_output = dict(task_row.output_data or {})
+                        if existing_output.get("orchestrator_completed_at"):
+                            already_ran = True
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "orchestrator_idempotency_lookup_failed",
+                    extra={"task_id": task_id_str},
+                    exc_info=True,
+                )
+
+        result: dict[str, Any]
+        if already_ran:
+            logger.info(
+                "orchestrator_skip_idempotent",
+                extra={
+                    "task_id": task_id_str,
+                    "completed_at": existing_output.get("orchestrator_completed_at"),
+                },
+            )
+            # Synthesize a minimal result for the AgentResult below. We do
+            # NOT re-load the full artifact set — the coding worker will
+                # load prior_artifacts from the DB itself (T19 behaviour).
+            result = {
+                "tier": existing_output.get("classifier_tier"),
+                "specialists_run": [],
+                "halted_on": existing_output.get("orchestrator_halted_on"),
+                "artifacts": {},
+                "total_tokens": {"input": 0, "output": 0},
+                "idempotent_replay": True,
+            }
+        else:
+            # 2. Run orchestrate(). Any exception here transitions the task
+            #    to failed with failure_reason='orchestrator_error' and
+            #    re-raises so SQS redelivers (DLQ catches 3rd failure).
+            orchestrate_input = _build_orchestrate_payload(payload, task_id_str)
+            try:
+                result = await self._inner.orchestrate(orchestrate_input)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "orchestrator_run_failed",
+                    extra={"task_id": task_id_str},
+                    exc_info=True,
+                )
+                if task_uuid is not None:
+                    try:
+                        async with async_session_factory() as session:
+                            repo = TaskRepository(session)
+                            await repo.update_output_data(
+                                task_uuid,
+                                {"failure_reason": "orchestrator_error",
+                                 "error": str(exc)[:500]},
+                            )
+                            await repo.update_status(task_uuid, "failed")
+                            await session.commit()
+                    except Exception:  # noqa: BLE001
+                        logger.error(
+                            "orchestrator_failure_persist_failed",
+                            exc_info=True,
+                        )
+                raise
+
+            # 3. Write the idempotency marker BEFORE enqueueing coding-task.
+            #    If we crash between 3 and 4, SQS redelivery hits the
+            #    already_ran branch and skips orchestrate() — cheap replay.
+            if task_uuid is not None:
+                marker_patch: dict[str, Any] = {
+                    "orchestrator_completed_at": datetime.now(timezone.utc).isoformat(),
+                    "classifier_tier": result.get("tier"),
+                }
+                halted_on = result.get("halted_on")
+                if halted_on:
+                    # T20: log specialist blocks but do NOT halt. T21 adds
+                    # strict gating + 'blocked' status migration.
+                    logger.info(
+                        "orchestrator_halted_on_specialist",
+                        extra={"task_id": task_id_str, "halted_on": halted_on},
+                    )
+                    marker_patch["orchestrator_halted_on"] = halted_on
+                try:
+                    async with async_session_factory() as session:
+                        repo = TaskRepository(session)
+                        await repo.update_output_data(task_uuid, marker_patch)
+                        await session.commit()
+                except Exception:  # noqa: BLE001
+                    logger.error(
+                        "orchestrator_marker_persist_failed",
+                        extra={"task_id": task_id_str},
+                        exc_info=True,
+                    )
+
+        # 4. Enqueue the coding-task with the ORIGINAL payload. We import
+        #    locally to avoid a circular import between queue.producer and
+        #    queue.consumer at module load. `skip_orchestrator_routing=True`
+        #    prevents the producer from re-routing this back to the
+        #    orchestrator queue (which would cause an infinite loop since
+        #    orchestrator_mode is still 'shadow'/'live' at this point).
+        if task_id_str:
+            try:
+                from ai_driven.queue.producer import TaskProducer
+
+                await TaskProducer().enqueue_task(
+                    task_id=task_id_str,
+                    agent_type="coding",
+                    payload=payload,
+                    skip_orchestrator_routing=True,
+                )
+            except Exception:  # noqa: BLE001
+                logger.error(
+                    "orchestrator_coding_enqueue_failed",
+                    extra={"task_id": task_id_str},
+                    exc_info=True,
+                )
+                raise
 
         # Surface token usage via Conversation so TaskConsumer.total_tokens
         # reflects the orchestrator's real spend.
