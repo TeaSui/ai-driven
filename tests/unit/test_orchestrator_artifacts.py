@@ -96,17 +96,108 @@ def test_security_payload_severity_enum() -> None:
 
 
 def test_qa_payload_regression_risk_enum() -> None:
-    QaPayload(
-        checks_performed=[{"check": "c", "passed": True, "detail": "d"}],
-        test_coverage_gap=[],
-        regression_risk="low",
-    )
+    # QaPayload is a discriminated-union TypeAdapter after T22 — must call
+    # validate_python (not the bare constructor). Pre-coding / legacy
+    # payloads omit ``schema_version``; validate_payload infers v1.
+    QaPayload.validate_python({
+        "schema_version": "v1",
+        "checks_performed": [{"check": "c", "passed": True, "detail": "d"}],
+        "test_coverage_gap": [],
+        "regression_risk": "low",
+    })
     with pytest.raises(ValidationError):
-        QaPayload(
-            checks_performed=[],
-            test_coverage_gap=[],
-            regression_risk="apocalyptic",
-        )
+        QaPayload.validate_python({
+            "schema_version": "v1",
+            "checks_performed": [],
+            "test_coverage_gap": [],
+            "regression_risk": "apocalyptic",
+        })
+
+
+def test_qa_payload_v1_missing_schema_version_is_inferred_via_validate_payload() -> None:
+    """Back-compat: pre-T22 rows in task_artifacts omit schema_version.
+
+    validate_payload fills in ``schema_version='v1'`` so legacy rows keep
+    parsing. The TypeAdapter itself refuses a missing discriminator —
+    the inference is at the validate_payload layer only.
+    """
+    raw = {
+        "checks_performed": [{"check": "c", "passed": True, "detail": "d"}],
+        "test_coverage_gap": [],
+        "regression_risk": "low",
+    }
+    # Legacy-shape parses via validate_payload.
+    parsed = validate_payload("qa", raw)
+    assert parsed.schema_version == "v1"
+    # Same raw via the bare TypeAdapter → ValidationError.
+    with pytest.raises(ValidationError):
+        QaPayload.validate_python(raw)
+
+
+def test_qa_payload_v2_requires_schema_version_key() -> None:
+    """Post-coding QA (v2) MUST set schema_version explicitly — no default.
+
+    A v2-intent payload that forgets the key gets classified as v1 by the
+    validate_payload fallback (so pre-T22 rows still parse). The wrapper
+    belt-and-braces check (qa.post_coding.schema_drift) catches the case
+    where the specialist meant v2 but silently produced v1.
+    """
+    v2_payload = {
+        "schema_version": "v2",
+        "checks_performed": [],
+        "acceptance_criteria_verification": [
+            {
+                "criterion": "AC1",
+                "satisfied": True,
+                "evidence": "src/foo.py:42",
+                "reason": "implemented",
+            },
+        ],
+        "security_rules_verification": [
+            {
+                "rule": "argon2id",
+                "followed": True,
+                "evidence": "src/auth.py:12",
+                "severity": "high",
+            },
+        ],
+        "test_coverage_gap": [],
+        "regression_risk": "low",
+    }
+    parsed = QaPayload.validate_python(v2_payload)
+    assert parsed.schema_version == "v2"
+    # Nested verification sub-models parsed:
+    assert parsed.acceptance_criteria_verification[0].satisfied is True
+    assert parsed.security_rules_verification[0].severity == "high"
+
+    # Missing the required v2 sub-arrays → ValidationError.
+    with pytest.raises(ValidationError):
+        QaPayload.validate_python({
+            "schema_version": "v2",
+            "checks_performed": [],
+            "test_coverage_gap": [],
+            "regression_risk": "low",
+        })
+
+
+def test_qa_payload_v2_security_severity_enum() -> None:
+    """severity MUST be one of low/medium/high/critical (Severity enum)."""
+    with pytest.raises(ValidationError):
+        QaPayload.validate_python({
+            "schema_version": "v2",
+            "checks_performed": [],
+            "acceptance_criteria_verification": [],
+            "security_rules_verification": [
+                {
+                    "rule": "r",
+                    "followed": False,
+                    "evidence": "",
+                    "severity": "catastrophic",  # invalid
+                },
+            ],
+            "test_coverage_gap": [],
+            "regression_risk": "low",
+        })
 
 
 def test_payload_schemas_registry_has_seven_roles() -> None:

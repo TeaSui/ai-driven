@@ -22,9 +22,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 Role = Literal[
     "business_analyst", "stack_analyst", "security",
@@ -72,6 +72,33 @@ class QaCheck(_Strict):
     detail: str
 
 
+class AcceptanceCriterionVerification(_Strict):
+    """One row per BusinessAnalyst acceptance_criterion in post-coding QA.
+
+    Added in T22 so the post-coding QA specialist can cite concrete
+    evidence from the PR diff (satisfied=True) or a concrete reason the
+    criterion is unmet (satisfied=False). T23 will gate status
+    transitions on ``satisfied=false``.
+    """
+    criterion: str
+    satisfied: bool
+    evidence: str
+    reason: str
+
+
+class SecurityRuleVerification(_Strict):
+    """One row per Security implementation_rule in post-coding QA.
+
+    Added in T22. ``severity`` (low/medium/high/critical) gates T23's
+    blocking decision — only high/critical + followed=False will halt
+    the pipeline. Low / medium downgrade to pass_with_notes.
+    """
+    rule: str
+    followed: bool
+    evidence: str
+    severity: Severity
+
+
 class SelectedTech(_Strict):
     choice: str
     rationale: str
@@ -113,10 +140,52 @@ class SecurityPayload(_Tolerant):
     blocking_concerns: list[str]
 
 
-class QaPayload(_Tolerant):
+class QaPayloadV1(_Tolerant):
+    """Legacy pre-coding QA payload (schema_version='v1', default).
+
+    Kept for backward compatibility with any QA artifacts written before
+    T22. The pre-coding final_gate path has been removed in T22, but
+    existing rows in task_artifacts may still contain v1 payloads and
+    MUST continue to parse.
+    """
+    schema_version: Literal["v1"] = "v1"
     checks_performed: list[QaCheck]
     test_coverage_gap: list[str]
     regression_risk: RegressionRisk
+
+
+class QaPayloadV2(_Tolerant):
+    """Post-coding QA payload (schema_version='v2', REQUIRED — no default).
+
+    Added in T22. The post-coding QA specialist MUST emit this shape:
+    ``schema_version: "v2"`` is required (no default) so a missing key
+    becomes a hard validation error — the specialist's JSON repair loop
+    then reinforces the schema. Belt-and-braces: the consumer wrapper
+    checks ``schema_version == "v2"`` post-validation and forces
+    ``verdict='error'`` + emits ``qa.post_coding.schema_drift`` if it
+    slipped through.
+
+    T23 will gate status transitions off v2-only — v1 (legacy pre-
+    coding) is invisible to the T23 transition hook.
+    """
+    schema_version: Literal["v2"]  # NO default — required
+    checks_performed: list[QaCheck]
+    acceptance_criteria_verification: list[AcceptanceCriterionVerification]
+    security_rules_verification: list[SecurityRuleVerification]
+    test_coverage_gap: list[str]
+    regression_risk: RegressionRisk
+
+
+# Discriminated union over ``schema_version`` so pydantic dispatches to
+# the right variant. ``Annotated[Union, Field(discriminator=...)]`` is
+# NOT a ``BaseModel`` subclass — it has no ``.model_validate`` — so we
+# wrap it in a ``TypeAdapter``. ``PAYLOAD_SCHEMAS`` stores the adapter
+# directly; ``validate_payload`` dispatches on ``isinstance(schema,
+# TypeAdapter)`` vs ``BaseModel`` subclass (see B-v3-1 in the T22 brief).
+_QaPayloadUnion = Annotated[
+    QaPayloadV1 | QaPayloadV2, Field(discriminator="schema_version")
+]
+QaPayload = TypeAdapter(_QaPayloadUnion)
 
 
 class TechLeadPayload(_Tolerant):
@@ -142,7 +211,7 @@ class ApiTestPayload(_Tolerant):
     failures: list[str]
 
 
-PAYLOAD_SCHEMAS: dict[Role, type[BaseModel]] = {
+PAYLOAD_SCHEMAS: dict[Role, type[BaseModel] | TypeAdapter[Any]] = {
     "business_analyst": BusinessAnalystPayload,
     "stack_analyst": StackAnalystPayload,
     "security": SecurityPayload,
@@ -154,10 +223,32 @@ PAYLOAD_SCHEMAS: dict[Role, type[BaseModel]] = {
 
 
 def validate_payload(role: str, raw: dict[str, Any]) -> BaseModel:
-    """Validate `raw` against the schema for `role`. Raises ValidationError."""
+    """Validate `raw` against the schema for `role`. Raises ValidationError.
+
+    ``PAYLOAD_SCHEMAS`` entries are either ``type[BaseModel]`` (the normal
+    case) OR a pydantic ``TypeAdapter`` (used for discriminated unions
+    like the QA v1/v2 payload). The two expose DIFFERENT validation
+    methods — ``BaseModel.model_validate`` vs ``TypeAdapter.validate_python``
+    — so we dispatch on the concrete type. See B-v3-1 in the T22 brief.
+    """
     schema = PAYLOAD_SCHEMAS.get(role)
     if schema is None:
         raise ValueError(f"Unknown specialist role: {role}")
+    if isinstance(schema, TypeAdapter):
+        # Pydantic's tagged-union validator refuses a payload that is
+        # missing the discriminator key — it cannot tell which variant
+        # to dispatch to. For the QA v1/v2 union we treat a missing
+        # ``schema_version`` as the legacy v1 shape so pre-T22 callers
+        # keep working. Post-coding QA (v2) MUST set ``schema_version``
+        # explicitly; the specialist wrapper additionally asserts
+        # ``== "v2"`` after validation and flags schema drift.
+        if (
+            role == "qa"
+            and isinstance(raw, dict)
+            and "schema_version" not in raw
+        ):
+            raw = {**raw, "schema_version": "v1"}
+        return schema.validate_python(raw)
     return schema.model_validate(raw)
 
 
