@@ -321,16 +321,29 @@ async def list_tasks(
         )
         tasks = list(result.scalars().all())
     else:
-        api_key_hash = getattr(request.state, "api_key_hash", None)
-        if not api_key_hash:
-            return TaskListResponse(tasks=[], total=0)
+        # Resolve team — auth middleware has set either (a) team_id via the
+        # session-token path (browser /login) or (b) api_key_hash via the
+        # X-API-Key header path (agents, webhooks, scripts). Try session
+        # path first, then fall back to api_key_hash.
+        team_id_uuid: uuid.UUID | None = None
+        if team_id_str:
+            try:
+                team_id_uuid = uuid.UUID(team_id_str)
+            except ValueError:
+                team_id_uuid = None
 
-        team_repo = TeamRepository(session)
-        team = await team_repo.get_by_api_key_hash(api_key_hash)
-        if not team:
-            return TaskListResponse(tasks=[], total=0)
+        if team_id_uuid is None:
+            api_key_hash = getattr(request.state, "api_key_hash", None)
+            if not api_key_hash:
+                return TaskListResponse(tasks=[], total=0)
 
-        tasks = await task_repo.list_for_team(team.id, limit=limit, offset=offset)
+            team_repo = TeamRepository(session)
+            team = await team_repo.get_by_api_key_hash(api_key_hash)
+            if not team:
+                return TaskListResponse(tasks=[], total=0)
+            team_id_uuid = team.id
+
+        tasks = await task_repo.list_for_team(team_id_uuid, limit=limit, offset=offset)
 
     def _task_duration_ms(t: Any) -> int | None:
         if t.started_at and t.completed_at:
