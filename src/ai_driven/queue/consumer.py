@@ -210,6 +210,26 @@ class TaskConsumer:
             else:
                 logger.error("task_failed", extra={"error": result.error})
 
+            # T22: enqueue post-coding QA (best-effort). Wrapped in its
+            # OWN try/except so a QA-enqueue failure NEVER propagates to
+            # the outer _process_message except — that would flip a
+            # completed coding run to status='failed' and clobber
+            # pr_number via output_data={"error":...}. See T22 brief
+            # red-team blocker #1.
+            try:
+                await _enqueue_qa_best_effort(
+                    task_id=task_id,
+                    agent_type=agent_type,
+                    result=result,
+                    stamped_mode=stamped_orchestrator_mode,
+                    payload=payload,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "qa_enqueue_outer_guard_tripped",
+                    extra={"task_id": task_id},
+                )
+
             # Delete message on success (or permanent failure)
             await asyncio.get_running_loop().run_in_executor(
                 None,
@@ -775,6 +795,168 @@ class _OrchestratorWrapper:
             iterations=0,
             duration_seconds=0.0,
         )
+
+
+async def _enqueue_qa_best_effort(
+    *,
+    task_id: Any,
+    agent_type: str,
+    result: Any,
+    stamped_mode: str,
+    payload: dict[str, Any],
+) -> None:
+    """Best-effort post-coding QA enqueue (T22).
+
+    Invoked by ``_process_message`` immediately after a coding-task has
+    transitioned to ``status='completed'``. If the tier is
+    full_workflow / multi_domain AND a ``pr_number`` was persisted AND
+    ``sqs_qa_queue_url`` is configured, enqueue a qa-task via
+    :class:`TaskProducer`.
+
+    Safety invariants (T22 red-team blockers 1 + 2 + M2):
+
+    * Exceptions are logged + counter'd + swallowed — a QA-enqueue
+      failure must never flip a completed coding task back to ``failed``.
+      The caller also wraps this in its own try/except as belt-and-braces.
+    * ``qa_enqueued_at`` is written BEFORE ``SendMessage`` so a crash
+      between marker-set and send is recoverable (marker cleared on
+      failure → next redelivery retries). Read-modify-write semantics
+      keep replays idempotent.
+    * Status transition to ``awaiting_qa`` is gated on
+      ``stamped_mode == "live"``. Shadow mode STILL enqueues QA (for
+      telemetry) but leaves status at ``completed`` so admin dashboards
+      that filter on ``status == "completed"`` keep working across T22-
+      only deploys.
+    """
+    from datetime import datetime, timezone
+
+    from ai_driven.config import get_settings
+    from ai_driven.observability.metrics import emit_counter
+
+    if agent_type != "coding":
+        return
+    if not getattr(result, "success", False):
+        return
+
+    settings = get_settings()
+    if not settings.sqs_qa_queue_url:
+        # Graceful skip: deploys pre-dating the T22 infra still work.
+        return
+
+    # Re-read output_data AFTER the coding-run's status=completed commit
+    # so ``pr_number`` and ``classifier_tier`` reflect post-coding state
+    # (not the stale top-of-_process_message snapshot).
+    existing_output: dict[str, Any] = {}
+    try:
+        async with async_session_factory() as session:
+            task_row = await TaskRepository(session).get_by_id(task_id)
+            if task_row is not None:
+                existing_output = dict(task_row.output_data or {})
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "qa_enqueue_output_data_load_failed",
+            extra={"task_id": str(task_id)},
+            exc_info=True,
+        )
+        return
+
+    tier = existing_output.get("classifier_tier")
+    pr_number = existing_output.get("pr_number")
+
+    if tier is None:
+        emit_counter("qa.post_coding.classifier_tier_missing")
+        logger.warning(
+            "qa_enqueue_skipped_tier_missing",
+            extra={"task_id": str(task_id)},
+        )
+        return
+    if tier not in {"full_workflow", "multi_domain"}:
+        return  # fast_path doesn't run QA.
+    if not pr_number:
+        # Coding run succeeded but never persisted a pr_number — typical
+        # for non-PR-emitting tickets or a T19b regression. The T22
+        # wrapper's Sev-1 counter catches this too; here we just skip.
+        logger.info(
+            "qa_enqueue_skipped_no_pr_number",
+            extra={"task_id": str(task_id)},
+        )
+        return
+    if existing_output.get("qa_enqueued_at"):
+        # Idempotent: a prior partial attempt already set the marker.
+        return
+
+    # T22 blocker-fix 2: write marker BEFORE SendMessage. If SendMessage
+    # fails we clear it so the next SQS redelivery retries cleanly.
+    try:
+        async with async_session_factory() as session:
+            await TaskRepository(session).update_output_data(
+                task_id,
+                {"qa_enqueued_at": datetime.now(timezone.utc).isoformat()},
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "qa_enqueue_marker_persist_failed",
+            extra={"task_id": str(task_id)},
+            exc_info=True,
+        )
+        emit_counter("qa.post_coding.enqueue_failed")
+        return
+
+    try:
+        from ai_driven.queue.producer import TaskProducer
+
+        await TaskProducer().enqueue_task(
+            task_id=str(task_id),
+            agent_type="qa",
+            payload=payload,
+            skip_orchestrator_routing=True,
+        )
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "qa_enqueue_failed",
+            extra={"task_id": str(task_id)},
+            exc_info=True,
+        )
+        emit_counter("qa.post_coding.enqueue_failed")
+        # Clear the marker so the next redelivery retries.
+        try:
+            async with async_session_factory() as session:
+                await TaskRepository(session).update_output_data(
+                    task_id, {"qa_enqueued_at": None}
+                )
+                await session.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "qa_enqueue_marker_clear_failed",
+                extra={"task_id": str(task_id)},
+                exc_info=True,
+            )
+        # Swallow — coding succeeded, don't flip the outer task to
+        # failed. Stuck tasks without QA are recoverable via T24's
+        # reaper; a failed task with clobbered pr_number is not.
+        return
+
+    # T22 M2: only live mode transitions to awaiting_qa. Shadow mode
+    # keeps status=completed so admin dashboards / webhooks that treat
+    # completed as terminal continue to work during the T22-only
+    # window (before T23 lands).
+    if stamped_mode == "live":
+        try:
+            async with async_session_factory() as session:
+                await TaskRepository(session).update_status(
+                    task_id, "awaiting_qa"
+                )
+                await session.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "qa_enqueue_status_transition_failed",
+                extra={"task_id": str(task_id)},
+                exc_info=True,
+            )
+            # Don't swallow here? We already have qa_enqueued_at set +
+            # the QA message in flight. Leaving status=completed is a
+            # soft degradation, not a data-loss bug. Swallow.
 
 
 class _QaPostCodingWrapper:
