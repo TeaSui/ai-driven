@@ -521,3 +521,118 @@ export async function getTaskEvaluations(taskId: string): Promise<TaskEvaluation
   if (Array.isArray(r)) return r
   return r.evaluations ?? []
 }
+
+// ── T25: Specialists tab — artifact envelope + override hint ─────────────────
+
+export type ArtifactVerdict =
+  | 'pass'
+  | 'pass_with_notes'
+  | 'block'
+  | 'error'
+  | 'not_implemented'
+  | string
+
+export interface Artifact {
+  id: string
+  role: string
+  verdict: ArtifactVerdict
+  reasoning: string | null
+  payload: Record<string, unknown>
+  modelUsed: string | null
+  inputTokens: number
+  outputTokens: number
+  /** Serialized as a string to preserve NUMERIC(10,6) precision across JSON.
+   * Parse to float only for display — keep the raw string for exact math. */
+  costUsd: string
+  createdAt: string | null
+}
+
+export interface QAFailure {
+  kind?: 'ac_unsatisfied' | 'security_rule_unfollowed' | string
+  criterion?: string
+  rule?: string
+  reason?: string
+  evidence?: string
+  severity?: 'critical' | 'high' | 'medium' | 'low' | string
+}
+
+export type OverrideAction =
+  | 'rerun_coding'
+  | 'rerun_qa'
+  | 'force_pass'
+  | 'reap'
+
+export interface TaskArtifactsResponse {
+  taskId: string
+  classifierTier: string | null
+  artifacts: Artifact[]
+  qaVerdict: 'pass' | 'block' | null
+  qaFailures: QAFailure[] | null
+  canOverride: boolean
+  overrideActions: OverrideAction[]
+}
+
+/**
+ * Fetch all specialist artifacts + QA outcome + override hints for a task.
+ * Backend: T25's `GET /api/admin/tasks/{id}/artifacts`.
+ *
+ * Unwraps the `{data, meta}` envelope. Callers use the returned object
+ * directly.
+ */
+export async function getTaskArtifacts(
+  taskId: string,
+): Promise<TaskArtifactsResponse> {
+  const r = await f(`/api/admin/tasks/${taskId}/artifacts`)
+  // Endpoint returns `{ data: {...}, meta: {...} }`. Tolerate both the
+  // wrapped and bare shape so a backend shim change doesn't break the UI.
+  return (r?.data ?? r) as TaskArtifactsResponse
+}
+
+export interface OverrideResponseData {
+  taskId: string
+  fromStatus: string
+  toStatus: string
+  action: string
+  auditId: string
+}
+
+/** Narrow error thrown by overrideTaskBlock so the UI can branch on status. */
+export class OverrideError extends Error {
+  status: number
+  detail: string
+  constructor(status: number, detail: string) {
+    super(detail)
+    this.status = status
+    this.detail = detail
+    this.name = 'OverrideError'
+  }
+}
+
+/**
+ * Apply an admin override to a blocked / qa_failed / stuck task.
+ * Backend: T24's `POST /api/admin/tasks/{id}/override-block`.
+ *
+ * Throws `OverrideError` on non-2xx so callers can branch on status
+ * (409 → task status changed; 403 → lost admin; 400 → action not legal).
+ */
+export async function overrideTaskBlock(
+  taskId: string,
+  action: OverrideAction,
+  reason: string,
+): Promise<OverrideResponseData> {
+  const res = await authFetch(`/api/admin/tasks/${taskId}/override-block`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, reason }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    const detail =
+      err?.detail ??
+      err?.error?.message ??
+      `Override failed: ${res.status}`
+    throw new OverrideError(res.status, detail)
+  }
+  const json = await res.json()
+  return (json?.data ?? json) as OverrideResponseData
+}
