@@ -491,8 +491,14 @@ class ReviewAgent(BaseAgent):
         max_iterations: int | None = None,
         use_thinking: bool = False,
         stop_sequences: list[str] | None = None,
+        initial_cost: float = 0.0,
     ) -> Any:
-        """Override to enforce JSON output by stopping after the closing code fence."""
+        """Override to enforce JSON output by stopping after the closing code fence.
+
+        ``initial_cost`` forwarded to ``BaseAgent.run`` so the consumer's
+        T-A2 cost-ceiling rollup reaches the ceiling check. See matching
+        comment in ``coding/agent.py``.
+        """
         # Register MCP tools (async, must be done here)
         await self._register_mcp_tools()
 
@@ -509,6 +515,7 @@ class ReviewAgent(BaseAgent):
             max_iterations=max_iterations,
             use_thinking=use_thinking,
             stop_sequences=stop_sequences if stop_sequences is not None else ["```"],
+            initial_cost=initial_cost,
         )
 
         # Bounded evaluator-optimizer pass: if the output isn't valid review

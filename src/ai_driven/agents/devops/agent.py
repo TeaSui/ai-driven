@@ -337,8 +337,13 @@ class DevOpsAgent(BaseAgent):
         max_iterations: int | None = None,
         use_thinking: bool = False,
         stop_sequences: list[str] | None = None,
+        initial_cost: float = 0.0,
     ) -> Any:
-        """Register MCP tools before running."""
+        """Register MCP tools before running.
+
+        ``initial_cost`` forwarded to ``BaseAgent.run`` so the consumer's
+        T-A2 cost-ceiling rollup reaches the ceiling check.
+        """
         await self._register_mcp_tools()
         return await super().run(
             task_input,
@@ -347,6 +352,7 @@ class DevOpsAgent(BaseAgent):
             max_iterations=max_iterations,
             use_thinking=use_thinking,
             stop_sequences=stop_sequences,
+            initial_cost=initial_cost,
         )
 
     def _build_initial_message(self, task_input: dict[str, Any]) -> str:

@@ -764,8 +764,16 @@ class CodingAgent(BaseAgent):
         max_iterations: int | None = None,
         use_thinking: bool = False,
         stop_sequences: list[str] | None = None,
+        initial_cost: float = 0.0,
     ) -> Any:
-        """Enable extended thinking and register async tools before running."""
+        """Enable extended thinking and register async tools before running.
+
+        ``initial_cost`` is passed through to ``BaseAgent.run`` so the T-A2
+        cost-ceiling-compounding path (consumer.py seeds it from
+        ``sum(task_artifacts.cost_usd)``) actually reaches the ceiling check.
+        Without this forward, CodingAgent silently dropped the kwarg with
+        a TypeError (smoke-tested 2026-05-01 on KAN-17).
+        """
         # Register MCP tools (async, must be done here)
         await self._register_mcp_tools()
 
@@ -837,6 +845,7 @@ class CodingAgent(BaseAgent):
             max_iterations=max_iterations,
             use_thinking=True,
             stop_sequences=stop_sequences,
+            initial_cost=initial_cost,
         )
 
     def _get_system_prompt(self, context: dict[str, Any]) -> str:
