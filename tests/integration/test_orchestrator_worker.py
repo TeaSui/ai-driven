@@ -436,15 +436,19 @@ async def test_t21_live_mode_block_halts_and_persists_blocked_status() -> None:
 
 
 @pytest.mark.asyncio
-async def test_t21_live_mode_qa_block_still_enqueues_coding() -> None:
-    """Live mode + QA block (pre-coding final_gate) → coding-task STILL enqueued.
+async def test_live_mode_qa_block_halts_pipeline_post_t28() -> None:
+    """Defensive: if orchestrate() ever surfaces ``halted_on='qa'`` in live
+    mode, the pipeline MUST halt — no pre-coding QA carve-out remains.
 
-    routing.py currently runs QA BEFORE CodingAgent as ``final_gate``.
-    Pre-coding QA has no PR to validate so it would false-halt every
-    full_workflow / multi_domain task. T22 will split pre/post QA; until
-    then _should_halt_pipeline hard-codes the qa exclusion.
+    History: T21 excluded ``halted_on == 'qa'`` from strict-gating because
+    routing.py ran QA as pre-coding ``final_gate``. T22 moved QA to a
+    post-coding specialist invoked by its own qa-worker; orchestrate() no
+    longer includes QA in its blocking set. T28 removed the exclusion.
 
-    See pre-baked red-team finding #1 in the T21 task brief.
+    No real code path today produces ``halted_on='qa'`` through
+    orchestrate(), but this test pins the invariant so a future refactor
+    that reintroduces QA into the orchestrate() result will halt loudly
+    (status=blocked) rather than silently leaking through.
     """
     task_uuid = uuid.uuid4()
     task_id_str = str(task_uuid)
@@ -462,9 +466,24 @@ async def test_t21_live_mode_qa_block_still_enqueues_coding() -> None:
     from ai_driven.queue import consumer as consumer_module
     from ai_driven.queue import producer as producer_module
 
+    # Stub the blocker-artifact lookup so the halt path has a reason.
+    blocker_row = _FakeArtifactRow(
+        "qa",
+        payload={},
+        reasoning="qa blocked",
+        artifact_id="qa-row-1",
+    )
+
+    async def _load_blocker(task_uuid_arg, role):
+        assert role == "qa"
+        return blocker_row, blocker_row.id
+
     with patch.object(consumer_module, "async_session_factory", fake_session_factory), \
          patch.object(consumer_module, "TaskRepository",
                       side_effect=lambda _s: fake_repo), \
+         patch.object(consumer_module._OrchestratorWrapper,
+                      "_load_blocker_artifact",
+                      staticmethod(_load_blocker)), \
          patch.object(producer_module, "get_settings",
                       return_value=settings_mock), \
          patch.object(producer_module, "boto3") as mock_boto3, \
@@ -483,9 +502,8 @@ async def test_t21_live_mode_qa_block_still_enqueues_coding() -> None:
             orchestrator_mode="live",
         )
 
-    # QA halt is IGNORED — coding-task still enqueued.
-    assert len(sent) == 1
-    assert sent[0]["QueueUrl"] == "https://sqs.local/coding"
-    # Task NOT blocked.
-    assert fake_task.status != "blocked"
-    assert "blocked_by" not in fake_task.output_data
+    # Post-T28: QA halt is NOT carved out — pipeline halts like any other role.
+    assert fake_task.status == "blocked"
+    assert fake_task.output_data["blocked_by"] == "qa"
+    # No coding-task enqueued.
+    assert sent == []

@@ -56,17 +56,26 @@ def test_no_halt_when_no_halted_on() -> None:
     assert _should_halt_pipeline(result, stamped_mode="live") is False
 
 
-def test_no_halt_on_qa_even_in_live_mode() -> None:
-    """Pre-coding QA is the final_gate in routing.py and must NEVER halt.
+def test_halt_on_qa_is_not_carved_out_post_t22() -> None:
+    """T28 removed the ``halted_on == 'qa'`` exclusion from T21.
 
-    T22 splits pre- and post-coding QA. Until then, letting QA block would
-    halt every full_workflow / multi_domain task (no PR yet exists).
+    Historical invariant (T21): the exclusion existed because routing.py
+    ran QA pre-coding as final_gate; a block there would have halted every
+    full_workflow/multi_domain task (no PR yet to validate).
+
+    Post-T22 invariant (current): QA is a post-coding specialist invoked
+    by its own qa-worker — orchestrate() no longer includes QA in its
+    blocking set, so no real code path produces ``halted_on == 'qa'``
+    here. This test is defensive: if a future refactor accidentally
+    reintroduces pre-coding QA into the orchestrate() result, we want
+    the halt predicate to treat it like any other role (halt on block)
+    rather than silently carve it out and break strict gating for QA.
     """
     result = {
         "halted_on": "qa",
         "artifacts": {"qa": "block"},
     }
-    assert _should_halt_pipeline(result, stamped_mode="live") is False
+    assert _should_halt_pipeline(result, stamped_mode="live") is True
 
 
 def test_no_halt_on_error_verdict() -> None:

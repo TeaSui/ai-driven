@@ -486,11 +486,17 @@ def _should_halt_pipeline(
     - orchestrate() reported a ``halted_on`` role, AND
     - that role's verdict is specifically ``'block'`` (NOT ``'error'`` —
       strict-error mode sets ``halted_on`` on Bedrock flakes and we do
-      not want silent flake-to-blocked conversion), AND
-    - the halting role is NOT ``'qa'`` — routing.py currently runs QA
-      BEFORE CodingAgent as ``final_gate``. Pre-coding QA has no PR to
-      validate so it would block every full_workflow/multi_domain task.
-      T22 will split pre/post QA; until then we exclude it here.
+      not want silent flake-to-blocked conversion).
+
+    Historical note: T21 carved out a ``halted_on == 'qa'`` exclusion
+    because routing.py ran QA BEFORE CodingAgent as ``final_gate`` and a
+    pre-coding block would halt every full_workflow/multi_domain task
+    (no PR yet to validate). T22 moved QA to post-coding via a separate
+    qa-worker — orchestrate() no longer invokes QA at all, so no code
+    path can produce ``halted_on == 'qa'`` in this predicate. The
+    exclusion was removed in T28. If a future refactor reintroduces
+    pre-coding QA, either re-add the exclusion here or restructure
+    routing to keep QA out of orchestrate()'s blocking set.
 
     See pre-baked red-team findings #1 (QA pre-coding false-halt) and
     #2 (block-vs-error disambiguation) in the T21 task brief.
@@ -499,8 +505,6 @@ def _should_halt_pipeline(
         return False
     halted_on = result.get("halted_on")
     if not halted_on:
-        return False
-    if halted_on == "qa":
         return False
     artifacts = result.get("artifacts") or {}
     return artifacts.get(halted_on) == "block"
@@ -735,7 +739,8 @@ class _OrchestratorWrapper:
 
         # T21: strict-gating halt check. Only evaluated in live mode; shadow
         # mode pre-T21 behaviour (always enqueue coding) is preserved.
-        # Pre-coding QA is excluded — see _should_halt_pipeline docstring.
+        # (QA moved to post-coding in T22 — no pre-coding QA block to carve
+        # out here anymore. See _should_halt_pipeline docstring.)
         if _should_halt_pipeline(result, stamped_mode) and task_uuid is not None:
             halted_on = str(result.get("halted_on"))
             blocker_artifact, blocker_id = await self._load_blocker_artifact(
