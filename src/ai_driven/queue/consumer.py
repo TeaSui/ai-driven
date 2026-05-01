@@ -383,6 +383,10 @@ class TaskConsumer:
             "review": lambda: ReviewAgent(scm_client=scm_client),
             "devops": lambda: DevOpsAgent(jira_client=jira_client),
             "orchestrator": lambda: _OrchestratorWrapper(),
+            # T22: post-coding QA validates the real PR diff + prior
+            # artifacts. Wrapper owns idempotency + shared-session
+            # persistence (artifact + output_data markers in ONE commit).
+            "qa": lambda: _QaPostCodingWrapper(scm_client=scm_client),
         }
         factory = agents.get(agent_type)
         if not factory:
@@ -771,3 +775,326 @@ class _OrchestratorWrapper:
             iterations=0,
             duration_seconds=0.0,
         )
+
+
+class _QaPostCodingWrapper:
+    """Post-coding QA adapter exposed through ``.run()`` like a regular agent.
+
+    Dispatched by :meth:`TaskConsumer._create_agent` when a qa-task is
+    dequeued from ``sqs_qa_queue_url``. The wrapper:
+
+      1. Idempotency check — if ``output_data.qa_completed_at`` is set,
+         short-circuit. SQS at-least-once delivery means a worker crash
+         between artifact-persist and sqs_delete re-delivers the task;
+         QA must not re-spend Claude tokens on a replay.
+      2. Missing-pr_number guard — if ``output_data.pr_number`` is not
+         set (CodingAgent T19b regression), emit a Sev-1 counter and
+         persist an error artifact so the row is marked
+         ``qa_completed_at`` and a T24 reaper can resolve it.
+      3. Load prior artifacts (BA + Security at minimum) and run
+         :class:`QaSpecialist` with ``pr_ref`` populated. The specialist
+         prompt switches to post-coding mode (v2 payload).
+      4. Persist the artifact + ``output_data.qa_*`` markers in ONE
+         shared session commit so a partial write never leaves the
+         task in a half-QA state.
+      5. Schema-drift belt-and-braces — if the specialist returned a
+         payload without ``schema_version=='v2'``, emit
+         ``qa.post_coding.schema_drift`` and force ``verdict='error'``
+         so T23 treats it as lenient-pass, not a clean verdict.
+
+    The wrapper writes ONLY these keys to ``output_data``:
+    ``qa_completed_at``, ``qa_verdict``, ``qa_artifact_id``,
+    ``qa_reasoning``. It MUST NOT write ``output``, ``tool_calls``,
+    ``iterations``, or ``error`` — the generic ``_process_message``
+    post-run patch (consumer.py:~188) owns those four and any overlap
+    would clobber. See T22 brief red-team finding M5.
+    """
+
+    def __init__(self, scm_client: Any = None) -> None:
+        self._scm = scm_client
+
+    async def run(
+        self, payload: dict[str, Any], **run_kwargs: Any
+    ) -> Any:
+        from dataclasses import replace
+        from datetime import datetime, timezone
+        import uuid as _uuid
+
+        from ai_driven.agents.base import AgentResult
+        from ai_driven.agents.orchestrator.artifacts import Artifact
+        from ai_driven.agents.orchestrator.repository import ArtifactRepository
+        from ai_driven.agents.specialists.base import SpecialistContext
+        from ai_driven.agents.specialists.qa.agent import QaSpecialist
+        from ai_driven.claude.conversation import Conversation
+        from ai_driven.observability.metrics import emit_counter
+
+        task_id_str = str(
+            payload.get("task_id") or run_kwargs.get("task_id") or ""
+        )
+        try:
+            task_uuid = _uuid.UUID(task_id_str) if task_id_str else None
+        except (ValueError, TypeError):
+            task_uuid = None
+
+        if task_uuid is None:
+            # Without a task_id we cannot load prior artifacts or persist
+            # a marker. Emit a counter and return a no-op success so the
+            # message is deleted from SQS.
+            logger.error(
+                "qa_post_coding_missing_task_id",
+                extra={"payload_keys": sorted(payload.keys())},
+            )
+            emit_counter("qa.post_coding.missing_task_id")
+            return _synthesize_noop_result()
+
+        # 1. Idempotency + load existing output_data.
+        existing_output: dict[str, Any] = {}
+        try:
+            async with async_session_factory() as session:
+                task_row = await TaskRepository(session).get_by_id(task_uuid)
+                if task_row is not None:
+                    existing_output = dict(task_row.output_data or {})
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "qa_post_coding_task_load_failed",
+                extra={"task_id": task_id_str},
+                exc_info=True,
+            )
+
+        if existing_output.get("qa_completed_at"):
+            logger.info(
+                "qa_post_coding_skip_idempotent",
+                extra={"task_id": task_id_str,
+                       "qa_completed_at": existing_output.get("qa_completed_at")},
+            )
+            return _synthesize_noop_result()
+
+        # 2. Missing pr_number — Sev-1 signal (CodingAgent T19b regression).
+        pr_number = existing_output.get("pr_number")
+        if not pr_number:
+            emit_counter("qa.post_coding.missing_pr_number")
+            logger.error(
+                "qa_post_coding_missing_pr_number",
+                extra={"task_id": task_id_str,
+                       "output_data_keys": sorted(existing_output.keys())},
+            )
+            await _persist_qa_artifact_and_marker(
+                task_uuid,
+                Artifact(
+                    role="qa",
+                    verdict="error",
+                    reasoning=(
+                        "pr_number missing on task output_data — likely "
+                        "CodingAgent T19b regression. Lenient pass-through."
+                    ),
+                    payload={
+                        "schema_version": "v2",
+                        "checks_performed": [],
+                        "acceptance_criteria_verification": [],
+                        "security_rules_verification": [],
+                        "test_coverage_gap": [],
+                        "regression_risk": "low",
+                    },
+                    model_used="",
+                    input_tokens=0,
+                    output_tokens=0,
+                ),
+            )
+            return _synthesize_noop_result()
+
+        # 3. Load prior artifacts (BA + Security minimum).
+        prior_map: dict[str, Any] = {}
+        try:
+            async with async_session_factory() as session:
+                prior_map = await ArtifactRepository(session).list_for_task(
+                    task_uuid
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "qa_post_coding_prior_artifacts_load_failed",
+                extra={"task_id": task_id_str},
+                exc_info=True,
+            )
+
+        # Build SpecialistContext. ticket + repo shapes mirror
+        # _build_orchestrate_payload so QA's envelope looks the same as
+        # every other specialist run.
+        ticket = payload.get("context", {}).get("ticket") or payload.get(
+            "ticket"
+        ) or {
+            "key": payload.get("jira_key", ""),
+            "summary": payload.get("title") or payload.get("message", ""),
+            "description": payload.get("message", ""),
+            "labels": payload.get("labels", []),
+            "acceptance_criteria": payload.get("acceptance_criteria", []),
+        }
+        repo = payload.get("context", {}).get("repo") or payload.get(
+            "repo"
+        ) or {
+            "full_name": payload.get("repo_full_name", ""),
+            "scm_type": payload.get("scm_type", "github"),
+            "default_branch": payload.get("default_branch", "main"),
+        }
+        ctx = SpecialistContext(
+            task_id=task_id_str,
+            ticket=ticket,
+            repo=repo,
+            tier=existing_output.get("classifier_tier") or "full_workflow",
+            prior_artifacts=prior_map,
+            team_settings={},
+            pr_ref={
+                "pr_number": pr_number,
+                "pr_url": existing_output.get("pr_url") or "",
+            },
+        )
+
+        specialist = QaSpecialist(scm_client=self._scm)
+        try:
+            artifact = await specialist.run_specialist(ctx)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "qa_post_coding_specialist_raised",
+                extra={"task_id": task_id_str, "error": str(exc)[:300]},
+                exc_info=True,
+            )
+            artifact = Artifact(
+                role="qa",
+                verdict="error",
+                reasoning=f"QA specialist raised: {exc}",
+                payload={
+                    "schema_version": "v2",
+                    "checks_performed": [],
+                    "acceptance_criteria_verification": [],
+                    "security_rules_verification": [],
+                    "test_coverage_gap": [],
+                    "regression_risk": "low",
+                },
+                model_used="",
+                input_tokens=0,
+                output_tokens=0,
+            )
+
+        # 5. Schema-drift belt-and-braces. POST-coding QA MUST emit
+        # schema_version="v2". A specialist that slipped through to v1
+        # (missing key → validate_payload fallback) is schema drift; we
+        # force verdict=error so T23 treats it as lenient-pass.
+        schema_version = (artifact.payload or {}).get("schema_version")
+        if schema_version != "v2":
+            emit_counter("qa.post_coding.schema_drift")
+            logger.error(
+                "qa_post_coding_schema_drift",
+                extra={"task_id": task_id_str,
+                       "got_schema_version": schema_version,
+                       "had_verdict": artifact.verdict},
+            )
+            artifact = replace(
+                artifact,
+                verdict="error",
+                reasoning=(
+                    "schema_version drift; post-coding QA must emit v2. "
+                    f"Got: {schema_version!r}. Original reasoning: "
+                    f"{artifact.reasoning or '(none)'}"
+                ),
+            )
+
+        # 4. Shared-session persistence (artifact + markers in ONE commit).
+        await _persist_qa_artifact_and_marker(task_uuid, artifact)
+        emit_counter(f"qa.post_coding.verdict.{artifact.verdict}")
+
+        # Return an AgentResult so TaskConsumer.run_result_patch doesn't
+        # clobber our markers (the generic path writes {output,
+        # tool_calls, iterations, error}; we write qa_* keys so they
+        # don't collide).
+        conv = Conversation()
+        conv.total_input_tokens = int(artifact.input_tokens or 0)
+        conv.total_output_tokens = int(artifact.output_tokens or 0)
+        return AgentResult(
+            success=True,
+            output=json.dumps({
+                "qa_verdict": artifact.verdict,
+                "schema_version": (artifact.payload or {}).get("schema_version"),
+            }),
+            conversation=conv,
+            tool_calls=0,
+            iterations=0,
+            duration_seconds=0.0,
+        )
+
+
+def _synthesize_noop_result() -> Any:
+    """Return a lightweight AgentResult so TaskConsumer treats the run as
+    a clean success and deletes the SQS message without writing extra
+    output keys."""
+    from ai_driven.agents.base import AgentResult
+    from ai_driven.claude.conversation import Conversation
+
+    return AgentResult(
+        success=True,
+        output="",
+        conversation=Conversation(),
+        tool_calls=0,
+        iterations=0,
+        duration_seconds=0.0,
+    )
+
+
+async def _persist_qa_artifact_and_marker(
+    task_uuid: Any, artifact: Any
+) -> None:
+    """Upsert the QA artifact AND the ``qa_*`` output_data markers in
+    one shared session / one commit.
+
+    M1 red-team fix: the artifact row and the ``qa_completed_at`` /
+    ``qa_verdict`` / ``qa_artifact_id`` markers must be written
+    atomically. A two-commit implementation leaves a small window where
+    the artifact exists but the task row still looks un-QA'd, which
+    would cause an idempotent replay to re-run QA and double-charge.
+
+    Both :class:`ArtifactRepository` and :class:`TaskRepository` accept
+    an externally-managed AsyncSession in their constructors, so we
+    instantiate a single ``async_session_factory()`` context and commit
+    once at the end.
+    """
+    from datetime import datetime, timezone
+
+    from ai_driven.agents.orchestrator.repository import ArtifactRepository
+
+    try:
+        async with async_session_factory() as session:
+            art_repo = ArtifactRepository(session)
+            task_repo = TaskRepository(session)
+            await art_repo.upsert(task_uuid, artifact)
+
+            # Fetch the artifact row id post-upsert so we can stamp
+            # qa_artifact_id. Avoids adding a new return type to
+            # ArtifactRepository.upsert and keeps that contract stable.
+            from sqlalchemy import select
+            from ai_driven.db.postgres.models import TaskArtifact
+
+            res = await session.execute(
+                select(TaskArtifact.id).where(
+                    TaskArtifact.task_id == task_uuid,
+                    TaskArtifact.role == "qa",
+                )
+            )
+            qa_artifact_id = res.scalar_one_or_none()
+
+            await task_repo.update_output_data(task_uuid, {
+                "qa_completed_at": datetime.now(timezone.utc).isoformat(),
+                "qa_verdict": artifact.verdict,
+                "qa_artifact_id": (
+                    str(qa_artifact_id) if qa_artifact_id is not None else None
+                ),
+                "qa_reasoning": (artifact.reasoning or "")[:500],
+            })
+            await session.commit()
+    except Exception:  # noqa: BLE001
+        logger.error(
+            "qa_post_coding_persist_failed",
+            extra={"task_id": str(task_uuid)},
+            exc_info=True,
+        )
+        # Re-raise so SQS redelivers — an idempotent replay will re-run
+        # QA (expensive but correct) rather than silently dropping the
+        # verdict.
+        raise
