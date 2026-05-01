@@ -984,22 +984,33 @@ async def _get_team_from_request(
 ) -> Any:
     """Resolve the authenticated team from the request.
 
-    In debug mode the middleware sets team_id directly (no API key needed).
-    Raises 401 if no API key is present or the key does not match
-    an active team.
+    Three auth paths set something on request.state (from auth/middleware.py):
+      1. Debug mode          → team_id (no api_key_hash)
+      2. Session token (UI)  → team_id + session_token (no api_key_hash)
+      3. X-API-Key (agents)  → api_key_hash + team_id
+
+    We accept any of these. Only fail when NONE of them is present, which means
+    middleware didn't authenticate the request at all.
     """
     from ai_driven.config import get_settings
 
     team_repo = TeamRepository(session)
 
-    # Debug mode: middleware sets team_id directly without api_key_hash
-    settings = get_settings()
+    # Path 1 + 2: middleware has already resolved a team_id for us (debug or
+    # session-token). Trust it — middleware only sets team_id after a
+    # successful lookup in DB or Redis.
     team_id_str = getattr(request.state, "team_id", None)
-    if settings.debug and team_id_str:
+    settings = get_settings()
+    if team_id_str:
+        # Skip the lookup in debug mode if the hash path didn't run, to match
+        # the previous behavior that bypassed DB checks for dev ergonomics.
         team = await team_repo.get_by_id(uuid.UUID(team_id_str))
         if team:
             return team
+        if settings.debug:
+            raise HTTPException(status_code=401, detail="Invalid team_id")
 
+    # Path 3: API-key header. Middleware has already hashed it.
     api_key_hash = getattr(request.state, "api_key_hash", None)
     if not api_key_hash:
         raise HTTPException(status_code=401, detail="Missing API key")
