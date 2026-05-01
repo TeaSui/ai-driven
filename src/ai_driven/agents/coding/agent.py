@@ -18,7 +18,9 @@ from ai_driven.agents.orchestrator.artifacts import Artifact
 from ai_driven.agents.orchestrator.repository import ArtifactRepository
 from ai_driven.claude.prompts.coding_agent import CODING_AGENT_SYSTEM_PROMPT
 from ai_driven.config import get_settings
+from ai_driven.db.postgres.repository import TaskRepository
 from ai_driven.db.postgres.session import async_session_factory
+from ai_driven.scm.exceptions import SCMValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -262,12 +264,14 @@ class CodingAgent(BaseAgent):
             repo_full_name: str, title: str, body: str,
             source_branch: str, target_branch: str = "main",
         ) -> dict[str, Any]:
-            if not self._scm:
-                return {"error": "SCM client not configured"}
-            pr = await self._scm.create_pull_request(
-                repo_full_name, title, body, source_branch, target_branch,
+            return await self._persist_and_open_pr(
+                "github",
+                repo_full_name=repo_full_name,
+                title=title,
+                body=body,
+                source_branch=source_branch,
+                target_branch=target_branch,
             )
-            return {"number": pr.number, "url": pr.url, "title": pr.title}
 
         @self._registry.tool(
             name="bitbucket.create_pr",
@@ -288,12 +292,14 @@ class CodingAgent(BaseAgent):
             repo_full_name: str, title: str, body: str,
             source_branch: str, target_branch: str = "main",
         ) -> dict[str, Any]:
-            if not self._scm:
-                return {"error": "SCM client not configured"}
-            pr = await self._scm.create_pull_request(
-                repo_full_name, title, body, source_branch, target_branch,
+            return await self._persist_and_open_pr(
+                "bitbucket",
+                repo_full_name=repo_full_name,
+                title=title,
+                body=body,
+                source_branch=source_branch,
+                target_branch=target_branch,
             )
-            return {"number": pr.number, "url": pr.url, "title": pr.title}
 
         @self._registry.tool(
             name="jira.update_status",
@@ -563,6 +569,191 @@ class CodingAgent(BaseAgent):
         except Exception:
             logger.warning("Auto-indexing failed for %s", repo_full_name, exc_info=True)
             return False
+
+    # ------------------------------------------------------------------
+    # PR persistence + crash-safe idempotency (T19b)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _detail_says_pr_already_exists(detail: dict | None) -> bool:
+        """Return True iff an SCMValidationError.detail signals 'PR already exists'.
+
+        Covers BOTH providers:
+
+        GitHub (422 from POST /repos/{r}/pulls) shape:
+          {"message": "Validation Failed",
+           "errors": [{"message": "A pull request already exists for user:branch",
+                       "resource": "PullRequest", ...}]}
+
+        Bitbucket (400/422 from POST /repositories/{r}/pullrequests) shape:
+          {"type": "error",
+           "error": {"message": "...pull request... already exists..."}}
+
+        Deliberately substring-checks JSON-body fields rather than stringifying
+        the exception and grepping str(e) — that approach was fragile and was
+        called out in the T19b red-team. Non-matching 422s propagate so a
+        schema error / title-too-long / etc. is NOT silently swallowed.
+        """
+        if not isinstance(detail, dict):
+            return False
+        for err in detail.get("errors") or []:
+            msg = (err or {}).get("message") if isinstance(err, dict) else None
+            if isinstance(msg, str) and "already exists" in msg.lower():
+                return True
+        bb_msg = ((detail.get("error") or {}).get("message")
+                  if isinstance(detail.get("error"), dict) else None)
+        if isinstance(bb_msg, str) and "already exists" in bb_msg.lower():
+            return True
+        top_msg = detail.get("message")
+        if isinstance(top_msg, str) and "already exists" in top_msg.lower():
+            # Final fallback — some Bitbucket/GitHub error envelopes put it
+            # at the top level. Only trust this when no structured errors[]
+            # was present (we've already checked those above).
+            return True
+        return False
+
+    async def _load_persisted_pr_ref(self) -> dict[str, Any] | None:
+        """Return ``{pr_number, pr_url}`` if already persisted for this task, else None.
+
+        Read-side of the crash-safe idempotency guard: if SQS redelivers a
+        coding task after the worker died post-PR-create, we must not call
+        ``scm.create_pull_request`` a second time. We detect that by reading
+        ``Task.output_data.pr_number`` first.
+        """
+        if not self._task_id:
+            return None
+        try:
+            async with async_session_factory() as session:
+                repo = TaskRepository(session)
+                task = await repo.get_by_id(uuid.UUID(self._task_id))
+                if task is None:
+                    return None
+                out = task.output_data or {}
+                if out.get("pr_number") is not None:
+                    return {
+                        "pr_number": out.get("pr_number"),
+                        "pr_url": out.get("pr_url"),
+                    }
+        except Exception:
+            logger.warning(
+                "coding_agent.load_persisted_pr_ref_failed",
+                exc_info=True,
+            )
+        return None
+
+    async def _persist_pr_ref(self, pr_number: int, pr_url: str) -> None:
+        """Write ``{pr_number, pr_url}`` into ``Task.output_data`` atomically.
+
+        One patch, two keys, one UPDATE — never split. T22 (QA) will need to
+        read this back; partial writes (pr_number without pr_url, or vice
+        versa) would force QA to handle extra edge cases.
+
+        DB errors are logged and swallowed. We already have a successful PR
+        on the SCM side — failing the tool call would mean the model thinks
+        it has to retry PR creation, which would then hit the "already
+        exists" recovery path. Letting the tool return the PR ref and simply
+        losing persistence is the less-bad failure mode: QA won't get the
+        PR ref but the PR itself still exists and is linkable via the SCM
+        UI.
+        """
+        if not self._task_id:
+            return
+        try:
+            async with async_session_factory() as session:
+                repo = TaskRepository(session)
+                await repo.update_output_data(
+                    uuid.UUID(self._task_id),
+                    {"pr_number": pr_number, "pr_url": pr_url},
+                )
+                await session.commit()
+        except Exception:
+            logger.warning(
+                "coding_agent.persist_pr_ref_failed pr_number=%s",
+                pr_number,
+                exc_info=True,
+            )
+
+    async def _persist_and_open_pr(
+        self,
+        scm_kind: str,
+        *,
+        repo_full_name: str,
+        title: str,
+        body: str,
+        source_branch: str,
+        target_branch: str,
+    ) -> dict[str, Any]:
+        """Shared implementation for ``github.create_pr`` and ``bitbucket.create_pr``.
+
+        Order of operations:
+          1. Check ``Task.output_data.pr_number`` — if set, this is an SQS
+             redelivery or a retried Claude tool call. Return the persisted
+             ref and skip the SCM API entirely.
+          2. Call ``scm.create_pull_request``. On a plain 200, persist both
+             ``pr_number`` and ``pr_url`` as one atomic patch.
+          3. If the create raises ``SCMValidationError`` whose structured
+             detail indicates "pull request already exists", call
+             ``find_pr_by_branch`` to recover the PR number + URL, persist,
+             and return. If recovery fails, re-raise the original error —
+             something else is wrong.
+          4. Any other error (401, 403, 500, validation errors NOT about
+             duplicate PRs) propagates unchanged. We catch only the
+             structured already-exists signal.
+
+        ``scm_kind`` is used for logging/observability; the self._scm client
+        is chosen by the caller (CodingAgent is constructed with a single
+        scm_client per run, not per tool).
+        """
+        if not self._scm:
+            return {"error": "SCM client not configured"}
+
+        persisted = await self._load_persisted_pr_ref()
+        if persisted is not None:
+            logger.info(
+                "coding_agent.pr_idempotent_skip scm=%s task=%s pr=%s",
+                scm_kind, self._task_id, persisted.get("pr_number"),
+            )
+            return {
+                "number": persisted.get("pr_number"),
+                "url": persisted.get("pr_url"),
+                "title": title,
+                "idempotent": True,
+            }
+
+        try:
+            pr = await self._scm.create_pull_request(
+                repo_full_name, title, body, source_branch, target_branch,
+            )
+        except SCMValidationError as exc:
+            if not self._detail_says_pr_already_exists(exc.detail):
+                raise
+            # 422 "already exists" — recover the existing PR ref.
+            try:
+                found = await self._scm.find_pr_by_branch(
+                    repo_full_name, source_branch
+                )
+            except Exception:
+                logger.warning(
+                    "coding_agent.find_pr_by_branch_failed scm=%s branch=%s",
+                    scm_kind, source_branch, exc_info=True,
+                )
+                raise exc
+            if found is None:
+                # The SCM said "already exists" but we can't find it. Don't
+                # lie to the caller — re-raise so the run fails loudly rather
+                # than silently returning a bogus PR ref.
+                raise exc
+            pr_number, pr_url = found
+            await self._persist_pr_ref(pr_number, pr_url)
+            return {
+                "number": pr_number,
+                "url": pr_url,
+                "title": title,
+                "recovered": True,
+            }
+
+        await self._persist_pr_ref(pr.number, pr.url)
+        return {"number": pr.number, "url": pr.url, "title": pr.title}
 
     async def run(
         self,
