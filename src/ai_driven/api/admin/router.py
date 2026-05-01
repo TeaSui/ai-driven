@@ -34,6 +34,12 @@ router.include_router(_override_router)
 from ai_driven.api.admin.artifacts import router as _artifacts_router  # noqa: E402
 router.include_router(_artifacts_router)
 
+# T27: admin GET override-audit endpoint for dogfood report consumption.
+# Same mount pattern — the dogfood harness queries this per ticket to
+# count how often ops had to intervene.
+from ai_driven.api.admin.override_audit import router as _override_audit_router  # noqa: E402
+router.include_router(_override_audit_router)
+
 # ---- Validation constants ----
 _FULL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 _VALID_SCM_TYPES = {"github", "bitbucket"}
