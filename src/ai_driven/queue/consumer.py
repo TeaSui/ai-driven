@@ -163,15 +163,22 @@ class TaskConsumer:
             async with async_session_factory() as session:
                 task_repo = TaskRepository(session)
                 status = "completed" if result.success else "failed"
+
+                # Merge the run-result into output_data instead of overwriting
+                # it. CodingAgent writes `pr_number` + `pr_url` mid-run (via
+                # _persist_pr_ref on successful github.create_pr) and an
+                # overwrite here silently drops those keys, leaving QA with
+                # no PR reference to validate against.
+                run_result_patch = {
+                    "output": result.output[:5000],
+                    "tool_calls": result.tool_calls,
+                    "iterations": result.iterations,
+                    "error": result.error,
+                }
+                await task_repo.update_output_data(task_id, run_result_patch)
                 await task_repo.update_status(
                     task_id,
                     status,
-                    output_data={
-                        "output": result.output[:5000],
-                        "tool_calls": result.tool_calls,
-                        "iterations": result.iterations,
-                        "error": result.error,
-                    },
                     total_tokens=result.total_tokens,
                     total_cost_usd=round(cost_usd, 4),
                     iterations=result.iterations,
