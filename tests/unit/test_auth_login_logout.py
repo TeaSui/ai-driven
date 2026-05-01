@@ -68,14 +68,14 @@ class TestLoginValid:
         ):
             result = asyncio.run(
                 login(
-                    body=LoginRequest(api_key="good-key", email="me@example.com"),
+                    body=LoginRequest(apiKey="good-key", email="me@example.com"),
                     response=response,
                     session=db_session,
                 )
             )
 
-        assert result.session_token == "test-token-abc"
-        assert result.team_id == str(team.id)
+        assert result.sessionToken == "test-token-abc"
+        assert result.teamId == str(team.id)
         assert result.email == "me@example.com"
         assert result.role == "owner"
 
@@ -105,7 +105,7 @@ class TestLoginInvalidKey:
             with pytest.raises(HTTPException) as exc:
                 asyncio.run(
                     login(
-                        body=LoginRequest(api_key="bad-key"),
+                        body=LoginRequest(apiKey="bad-key"),
                         response=MagicMock(),
                         session=db_session,
                     )
@@ -123,7 +123,7 @@ class TestLoginEmptyKey:
         with pytest.raises(HTTPException) as exc:
             asyncio.run(
                 login(
-                    body=LoginRequest(api_key="   "),
+                    body=LoginRequest(apiKey="   "),
                     response=MagicMock(),
                     session=db_session,
                 )
@@ -155,7 +155,7 @@ class TestLoginRedisOutage:
             with pytest.raises(HTTPException) as exc:
                 asyncio.run(
                     login(
-                        body=LoginRequest(api_key="good-key"),
+                        body=LoginRequest(apiKey="good-key"),
                         response=MagicMock(),
                         session=db_session,
                     )

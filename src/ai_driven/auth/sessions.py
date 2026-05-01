@@ -211,13 +211,15 @@ def to_wire(session: Session) -> dict[str, Any]:
         session.created_at + settings.session_max_age_seconds,
     )
 
+    # Keys are camelCase so they can splat directly into the camelCase
+    # Pydantic response model (LoginResponse) without a rename layer.
     return {
-        "session_token": session.token,
-        "team_id": session.team_id,
-        "member_id": session.member_id,
+        "sessionToken": session.token,
+        "teamId": session.team_id,
+        "memberId": session.member_id,
         "email": session.email,
         "role": session.role,
-        "created_at": iso(session.created_at),
-        "last_seen_at": iso(session.last_seen_at),
-        "expires_at": iso(expires_at),
+        "createdAt": iso(session.created_at),
+        "lastSeenAt": iso(session.last_seen_at),
+        "expiresAt": iso(expires_at),
     }

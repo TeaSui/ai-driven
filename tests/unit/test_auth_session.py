@@ -38,8 +38,8 @@ class TestResolveIdentityDebugMode:
             result = asyncio.run(_resolve_identity(request, session))
 
         assert isinstance(result, SessionResponse)
-        assert result.auth_source == "debug"
-        assert result.team_name == "Debug Team"
+        assert result.authSource == "debug"
+        assert result.teamName == "Debug Team"
         assert result.role == "owner"
 
 
@@ -94,7 +94,7 @@ class TestResolveIdentityApiKey:
         ):
             result = asyncio.run(_resolve_identity(request, session))
 
-        assert result.auth_source == "api_key"
-        assert result.team_id == team.id
-        assert result.team_name == "Test Team"
+        assert result.authSource == "api_key"
+        assert result.teamId == team.id
+        assert result.teamName == "Test Team"
         assert result.role == "owner"  # team-level fallback defaults to owner

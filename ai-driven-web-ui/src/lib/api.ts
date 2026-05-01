@@ -173,7 +173,7 @@ export interface TaskDiff {
   deletions: number
   patch: string           // unified-diff format (may be empty for binary files)
   repo: string
-  pr_number: number
+  prNumber: number
   provider?: 'github' | 'bitbucket'
 }
 

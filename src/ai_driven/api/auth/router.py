@@ -25,7 +25,6 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,15 +58,15 @@ class SessionResponse(CamelModel):
     to render without a real session.
     """
 
-    user_id: str
-    team_id: str
-    team_name: str
+    userId: str
+    teamId: str
+    teamName: str
     role: str  # owner | admin | member | viewer
     email: str
-    # `auth_source` is a Sprint-9 migration aid: tells the UI whether the
+    # `authSource` is a Sprint-9 migration aid: tells the UI whether the
     # session was resolved via Cognito JWT, API key, or debug bypass. Remove
     # after Cognito is the only path.
-    auth_source: str  # "cognito" | "api_key" | "debug"
+    authSource: str  # "cognito" | "api_key" | "debug"
 
 
 def verify_cognito_jwt(token: str) -> dict[str, Any]:
@@ -142,13 +141,13 @@ async def _resolve_identity(
                 )
                 member = member_result.scalar_one_or_none()
             return SessionResponse(
-                user_id=s.member_id or s.team_id,
-                team_id=s.team_id,
-                team_name=team.name if team else "unknown",
+                userId=s.member_id or s.team_id,
+                teamId=s.team_id,
+                teamName=team.name if team else "unknown",
                 role=s.role,
                 email=s.email
                 or (member.email if member else f"team-{s.team_id}@example.invalid"),
-                auth_source="session",
+                authSource="session",
             )
 
     # (2) API key — the current production path.
@@ -169,24 +168,24 @@ async def _resolve_identity(
             )
             member = member_result.scalar_one_or_none()
             return SessionResponse(
-                user_id=str(member.id) if member else str(team.id),
-                team_id=str(team.id),
-                team_name=team.name,
+                userId=str(member.id) if member else str(team.id),
+                teamId=str(team.id),
+                teamName=team.name,
                 role=(member.role if member else "owner"),
                 email=(member.email if member else f"team-{team.id}@example.invalid"),
-                auth_source="api_key",
+                authSource="api_key",
             )
 
     # (3) Debug bypass. Only kicks in when settings.debug is true AND nothing
     # else authenticated — keeps real prod traffic from silently landing here.
     if settings.debug:
         return SessionResponse(
-            user_id="00000000-0000-0000-0000-000000000000",
-            team_id="00000000-0000-0000-0000-000000000000",
-            team_name="Debug Team",
+            userId="00000000-0000-0000-0000-000000000000",
+            teamId="00000000-0000-0000-0000-000000000000",
+            teamName="Debug Team",
             role="owner",
             email="debug@local",
-            auth_source="debug",
+            authSource="debug",
         )
 
     raise HTTPException(status_code=401, detail="Not authenticated")
@@ -209,7 +208,7 @@ async def get_session_endpoint(
 # ── Sprint 14: session-token login flow ───────────────────────────────────────
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(CamelModel):
     """Body for POST /api/auth/login.
 
     ``email`` is optional and stored as session metadata for audit purposes
@@ -217,7 +216,7 @@ class LoginRequest(BaseModel):
     is NOT a second authentication factor.
     """
 
-    api_key: str
+    apiKey: str
     email: str | None = None
 
 
@@ -229,14 +228,14 @@ class LoginResponse(CamelModel):
     other API response on the platform (see api/_shared.py).
     """
 
-    session_token: str
-    team_id: str
-    member_id: str | None = None
+    sessionToken: str
+    teamId: str
+    memberId: str | None = None
     email: str | None = None
     role: str
-    created_at: str
-    last_seen_at: str
-    expires_at: str
+    createdAt: str
+    lastSeenAt: str
+    expiresAt: str
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -259,7 +258,7 @@ async def login(
     from ai_driven.config import get_settings
 
     settings = get_settings()
-    key = body.api_key.strip()
+    key = body.apiKey.strip()
     if not key:
         raise HTTPException(status_code=401, detail="API key is required")
 

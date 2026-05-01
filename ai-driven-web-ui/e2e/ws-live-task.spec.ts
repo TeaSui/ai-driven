@@ -43,7 +43,7 @@ test('WS streams events for a newly created task', async ({ page, context }) => 
   const submit = await page.request.post('http://localhost:3000/api/chat/send', {
     data: {
       message: 'Add a hello endpoint to the repo',
-      agent_type: 'coding',
+      agentType: 'coding',
       context: {
         repo_full_name: 'MinnMinn/skills-introduction-to-github',
         scm_type: 'github',
@@ -52,7 +52,7 @@ test('WS streams events for a newly created task', async ({ page, context }) => 
   })
   const submitJson = await submit.json()
   console.log('submit response:', JSON.stringify(submitJson))
-  const taskId = submitJson.taskId || submitJson.task_id
+  const taskId = submitJson.taskId
   expect(taskId, `submit must return task id; got: ${JSON.stringify(submitJson)}`).toBeTruthy()
   console.log('submitted task:', taskId)
 

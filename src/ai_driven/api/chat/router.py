@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 import redis.asyncio as aioredis
 
@@ -71,13 +71,13 @@ from ai_driven.api._shared import CamelModel, to_camel as _to_camel  # noqa: F40
 
 class ChatMessage(CamelModel):
     message: str
-    agent_type: str = "coding"  # coding | review | workflow | devops
+    agentType: str = "coding"  # coding | review | workflow | devops
     context: dict[str, Any] = {}
 
 
 class ChatResponse(CamelModel):
-    task_id: str
-    session_id: str
+    taskId: str
+    sessionId: str
     status: str
     message: str
 
@@ -320,9 +320,9 @@ async def send_message(
     task_id = str(uuid.uuid4())
 
     # Bind task to trace context so all downstream logs correlate
-    bind_task(task_id, agent_type=body.agent_type)
+    bind_task(task_id, agent_type=body.agentType)
 
-    logger.info("chat_message_received", extra={"agent_type": body.agent_type})
+    logger.info("chat_message_received", extra={"agent_type": body.agentType})
 
     # Persist task in PostgreSQL
     try:
@@ -352,7 +352,7 @@ async def send_message(
 
             task = await task_repo.create_task(
                 task_id=task_id,
-                agent_type=body.agent_type,
+                agent_type=body.agentType,
                 title=body.message[:200],
                 input_data={"message": body.message, **body.context},
                 team_id=uuid.UUID(team_id),
@@ -378,7 +378,7 @@ async def send_message(
         not settings.debug and bool(settings.sqs_task_queue_url)
     )
     if (
-        body.agent_type == "coding"
+        body.agentType == "coding"
         and settings.orchestrator_mode != "off"
         and not producer_will_handle
     ):
@@ -411,7 +411,7 @@ async def send_message(
 
     if settings.debug:
         # In debug mode, process inline — no SQS worker needed
-        asyncio.create_task(_process_task_inline(task_id, body.agent_type, body.message, body.context, team_id=team_id))
+        asyncio.create_task(_process_task_inline(task_id, body.agentType, body.message, body.context, team_id=team_id))
     else:
         # Production: enqueue to SQS for async processing by ECS worker
         try:
@@ -420,7 +420,7 @@ async def send_message(
             producer = TaskProducer()
             await producer.enqueue_task(
                 task_id=task_id,
-                agent_type=body.agent_type,
+                agent_type=body.agentType,
                 payload={"message": body.message, **body.context},
             )
         except Exception:
@@ -430,10 +430,10 @@ async def send_message(
     session_id = body.context.get("session_id") or str(uuid.uuid4())
 
     return ChatResponse(
-        task_id=task_id,
-        session_id=session_id,
+        taskId=task_id,
+        sessionId=session_id,
         status="queued",
-        message=f"Task {task_id} queued for {body.agent_type} agent",
+        message=f"Task {task_id} queued for {body.agentType} agent",
     )
 
 

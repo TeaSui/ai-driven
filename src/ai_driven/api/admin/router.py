@@ -10,7 +10,7 @@ from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,18 +34,18 @@ from ai_driven.api._shared import CamelModel, to_camel as _to_camel  # noqa: F40
 # ---- Team DTOs ----
 
 
-class TeamCreate(BaseModel):
+class TeamCreate(CamelModel):
     name: str
-    claude_provider: str = "anthropic"
-    max_concurrent_tasks: int = 5
+    claudeProvider: str = "anthropic"
+    maxConcurrentTasks: int = 5
 
 
 class TeamResponse(CamelModel):
     id: str
     name: str
-    claude_provider: str
-    max_concurrent_tasks: int
-    api_key: str | None = None
+    claudeProvider: str
+    maxConcurrentTasks: int
+    apiKey: str | None = None
 
 
 class TaskListResponse(BaseModel):
@@ -57,42 +57,42 @@ class TaskListResponse(BaseModel):
 
 
 class RepoCreate(CamelModel):
-    full_name: str
-    scm_type: str = "github"
-    default_branch: str = "main"
+    fullName: str
+    scmType: str = "github"
+    defaultBranch: str = "main"
 
-    @field_validator("full_name")
+    @field_validator("fullName")
     @classmethod
     def validate_full_name(cls, v: str) -> str:
         if not _FULL_NAME_PATTERN.match(v):
-            raise ValueError("full_name must be in 'org/repo' format using alphanumeric, dot, dash, or underscore characters")
+            raise ValueError("fullName must be in 'org/repo' format using alphanumeric, dot, dash, or underscore characters")
         return v
 
-    @field_validator("scm_type")
+    @field_validator("scmType")
     @classmethod
     def validate_scm_type(cls, v: str) -> str:
         if v not in _VALID_SCM_TYPES:
-            raise ValueError(f"scm_type must be one of: {', '.join(sorted(_VALID_SCM_TYPES))}")
+            raise ValueError(f"scmType must be one of: {', '.join(sorted(_VALID_SCM_TYPES))}")
         return v
 
 
 class RepoUpdate(CamelModel):
-    default_branch: str | None = None
-    settings_json: dict[str, Any] | None = None
-    # Allow reactivating a soft-deleted repository. Setting is_active=False
+    defaultBranch: str | None = None
+    settingsJson: dict[str, Any] | None = None
+    # Allow reactivating a soft-deleted repository. Setting isActive=False
     # is also allowed but is_equivalent to DELETE /repos/{id} (which is the
     # preferred path for the UI).
-    is_active: bool | None = None
+    isActive: bool | None = None
 
 
 class RepoResponse(CamelModel):
     id: str
-    team_id: str
-    full_name: str
-    scm_type: str
-    default_branch: str
-    is_active: bool
-    created_at: str | None = None
+    teamId: str
+    fullName: str
+    scmType: str
+    defaultBranch: str
+    isActive: bool
+    createdAt: str | None = None
 
 
 class RepoListResponse(BaseModel):
@@ -104,19 +104,19 @@ class RepoListResponse(BaseModel):
 
 
 class UsageResponse(BaseModel):
-    team_id: str
+    teamId: str
     date: str
-    input_tokens: int
-    output_tokens: int
-    total_cost_usd: float
+    inputTokens: int
+    outputTokens: int
+    totalCostUsd: float
     budget: BudgetInfo
 
 
 class BudgetInfo(BaseModel):
-    within_budget: bool
-    usage_percent: float
-    daily_budget_usd: float
-    spent_usd: float
+    withinBudget: bool
+    usagePercent: float
+    dailyBudgetUsd: float
+    spentUsd: float
     warning: bool
 
 
@@ -136,28 +136,28 @@ class TotalTokensResponse(CamelModel):
 
 
 class DashboardSummaryResponse(CamelModel):
-    tasks_today: int
-    tasks_yesterday: int
-    success_rate: float
-    active_agents: ActiveAgentsResponse
-    total_tokens: TotalTokensResponse
-    cost_today: float
-    daily_budget: float
-    budget_usage_percent: float
+    tasksToday: int
+    tasksYesterday: int
+    successRate: float
+    activeAgents: ActiveAgentsResponse
+    totalTokens: TotalTokensResponse
+    costToday: float
+    dailyBudget: float
+    budgetUsagePercent: float
 
 
 class UsageHistoryItem(CamelModel):
     date: str
-    input_tokens: int
-    output_tokens: int
-    cost_usd: float
+    inputTokens: int
+    outputTokens: int
+    costUsd: float
 
 
 class UsageByAgentItem(CamelModel):
-    agent_type: str
-    total_tokens: int
-    total_cost: float
-    task_count: int
+    agentType: str
+    totalTokens: int
+    totalCost: float
+    taskCount: int
 
 
 class TeamListItem(CamelModel):
@@ -203,16 +203,16 @@ async def create_team(
     team = await repo.create(
         name=body.name,
         api_key_hash=hash_api_key(api_key),
-        claude_provider=body.claude_provider,
-        max_concurrent_tasks=body.max_concurrent_tasks,
+        claude_provider=body.claudeProvider,
+        max_concurrent_tasks=body.maxConcurrentTasks,
     )
 
     return TeamResponse(
         id=str(team.id),
         name=team.name,
-        claude_provider=team.claude_provider,
-        max_concurrent_tasks=team.max_concurrent_tasks,
-        api_key=api_key,  # Only returned on creation
+        claudeProvider=team.claude_provider,
+        maxConcurrentTasks=team.max_concurrent_tasks,
+        apiKey=api_key,  # Only returned on creation
     )
 
 
@@ -237,9 +237,9 @@ async def delete_team(
 
 
 class KeyRotateResponse(CamelModel):
-    api_key: str
-    old_key_expires_at: str
-    team_id: str
+    apiKey: str
+    oldKeyExpiresAt: str
+    teamId: str
 
 
 @router.post("/teams/{team_id}/rotate-key", response_model=KeyRotateResponse)
@@ -285,9 +285,9 @@ async def rotate_api_key(
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
 
     return KeyRotateResponse(
-        api_key=new_api_key,
-        old_key_expires_at=expires_at,
-        team_id=str(team.id),
+        apiKey=new_api_key,
+        oldKeyExpiresAt=expires_at,
+        teamId=str(team.id),
     )
 
 
@@ -449,14 +449,14 @@ async def get_dashboard_summary(
     )
 
     return DashboardSummaryResponse(
-        tasks_today=tasks_today,
-        tasks_yesterday=tasks_yesterday,
-        success_rate=success_rate,
-        active_agents=active_agents,
-        total_tokens=total_tokens,
-        cost_today=round(budget.spent_usd, 2),
-        daily_budget=budget.daily_budget_usd,
-        budget_usage_percent=round(budget.usage_percent, 1),
+        tasksToday=tasks_today,
+        tasksYesterday=tasks_yesterday,
+        successRate=success_rate,
+        activeAgents=active_agents,
+        totalTokens=total_tokens,
+        costToday=round(budget.spent_usd, 2),
+        dailyBudget=budget.daily_budget_usd,
+        budgetUsagePercent=round(budget.usage_percent, 1),
     )
 
 
@@ -478,9 +478,9 @@ async def get_usage_history(
         result.append(
             UsageHistoryItem(
                 date=day_str,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cost_usd=round(usage.total_cost_usd, 4),
+                inputTokens=usage.input_tokens,
+                outputTokens=usage.output_tokens,
+                costUsd=round(usage.total_cost_usd, 4),
             )
         )
 
@@ -511,10 +511,10 @@ async def get_usage_by_agent(
     for agent_type, total_tokens, total_cost, task_count in result.all():
         items.append(
             UsageByAgentItem(
-                agent_type=agent_type,
-                total_tokens=int(total_tokens),
-                total_cost=round(float(total_cost), 4),
-                task_count=int(task_count),
+                agentType=agent_type,
+                totalTokens=int(total_tokens),
+                totalCost=round(float(total_cost), 4),
+                taskCount=int(task_count),
             )
         )
 
@@ -840,7 +840,7 @@ async def get_task_diff(
         "deletions": match.deletions,
         "patch": match.patch,
         "repo": repo_full_name,
-        "pr_number": pr_number,
+        "prNumber": pr_number,
         "provider": scm_type,
     }
 
@@ -896,22 +896,22 @@ async def get_task_file(
 
 
 class MeResponse(CamelModel):
-    team_id: str
-    team_name: str
+    teamId: str
+    teamName: str
 
 
 # ---- Data Export / Deletion (GDPR / compliance) ----
 
 
 class DataExportResponse(CamelModel):
-    team_id: str
-    exported_at: str
+    teamId: str
+    exportedAt: str
     data: dict
 
 
 class DataPurgeResponse(CamelModel):
-    team_id: str
-    purged_at: str
+    teamId: str
+    purgedAt: str
     counts: dict
 
 
@@ -930,8 +930,8 @@ async def export_team_data(
 
     data = await _export(session, team.id)
     return DataExportResponse(
-        team_id=str(team.id),
-        exported_at=datetime.now(timezone.utc).isoformat(),
+        teamId=str(team.id),
+        exportedAt=datetime.now(timezone.utc).isoformat(),
         data=data,
     )
 
@@ -959,8 +959,8 @@ async def purge_team_data(
     logger.warning("Team %s data purged: %s", team_id, counts)
 
     return DataPurgeResponse(
-        team_id=team_id,
-        purged_at=datetime.now(timezone.utc).isoformat(),
+        teamId=team_id,
+        purgedAt=datetime.now(timezone.utc).isoformat(),
         counts=counts,
     )
 
@@ -972,7 +972,7 @@ async def get_me(
 ) -> MeResponse:
     """Return the authenticated team identity."""
     team = await _get_team_from_request(request, session)
-    return MeResponse(team_id=str(team.id), team_name=team.name)
+    return MeResponse(teamId=str(team.id), teamName=team.name)
 
 
 # ---- Helpers ----
@@ -1031,12 +1031,12 @@ async def _get_team_from_request(
 def _repo_to_response(repo: Any) -> RepoResponse:
     return RepoResponse(
         id=str(repo.id),
-        team_id=str(repo.team_id),
-        full_name=repo.full_name,
-        scm_type=repo.scm_type,
-        default_branch=repo.default_branch,
-        is_active=repo.is_active,
-        created_at=repo.created_at.isoformat() if repo.created_at else None,
+        teamId=str(repo.team_id),
+        fullName=repo.full_name,
+        scmType=repo.scm_type,
+        defaultBranch=repo.default_branch,
+        isActive=repo.is_active,
+        createdAt=repo.created_at.isoformat() if repo.created_at else None,
     )
 
 
@@ -1062,11 +1062,11 @@ async def create_repo(
     repo_repo = RepoRepository(session)
 
     # Prevent duplicate registration of the same repo name for the team
-    existing = await repo_repo.get_by_full_name(body.full_name)
+    existing = await repo_repo.get_by_full_name(body.fullName)
     if existing and existing.team_id == team.id:
         raise HTTPException(
             status_code=409,
-            detail=f"Repository '{body.full_name}' is already registered for this team",
+            detail=f"Repository '{body.fullName}' is already registered for this team",
         )
 
     # Reachability probe: verify the repo exists and our configured
@@ -1076,7 +1076,7 @@ async def create_repo(
     from ai_driven.scm.exceptions import SCMAuthError, SCMError, SCMNotFoundError
     from ai_driven.scm.factory import get_scm_client_from_settings
     try:
-        probe = get_scm_client_from_settings(body.scm_type)
+        probe = get_scm_client_from_settings(body.scmType)
     except SCMError as ex:
         # Missing credentials for the chosen provider.
         raise HTTPException(
@@ -1087,12 +1087,12 @@ async def create_repo(
         # list_pull_requests is cheap and covers the same access scope
         # the agents will need. We don't care about the result — only
         # that the call succeeds against the repo.
-        await probe.list_pull_requests(body.full_name)
+        await probe.list_pull_requests(body.fullName)
     except SCMNotFoundError:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Repository '{body.full_name}' was not found on {body.scm_type}, "
+                f"Repository '{body.fullName}' was not found on {body.scmType}, "
                 f"or the configured credentials cannot access it."
             ),
         )
@@ -1100,14 +1100,14 @@ async def create_repo(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Cannot authenticate to {body.scm_type} — check the configured "
+                f"Cannot authenticate to {body.scmType} — check the configured "
                 f"credentials. Provider said: {str(ex)[:180]}"
             ),
         )
     except SCMError as ex:
         raise HTTPException(
             status_code=400,
-            detail=f"{body.scm_type} probe failed: {type(ex).__name__}: {str(ex)[:180]}",
+            detail=f"{body.scmType} probe failed: {type(ex).__name__}: {str(ex)[:180]}",
         )
     finally:
         try:
@@ -1117,10 +1117,10 @@ async def create_repo(
 
     repo = await repo_repo.create(
         team_id=team.id,
-        full_name=body.full_name,
-        scm_type=body.scm_type,
-        default_branch=body.default_branch,
-        clone_url=_clone_url_for(body.scm_type, body.full_name),
+        full_name=body.fullName,
+        scm_type=body.scmType,
+        default_branch=body.defaultBranch,
+        clone_url=_clone_url_for(body.scmType, body.fullName),
     )
 
     return _repo_to_response(repo)
@@ -1202,12 +1202,12 @@ async def update_repo(
         raise HTTPException(status_code=404, detail="Repository not found")
 
     update_fields: dict[str, Any] = {}
-    if body.default_branch is not None:
-        update_fields["default_branch"] = body.default_branch
-    if body.settings_json is not None:
-        update_fields["settings_json"] = body.settings_json
-    if body.is_active is not None:
-        update_fields["is_active"] = body.is_active
+    if body.defaultBranch is not None:
+        update_fields["default_branch"] = body.defaultBranch
+    if body.settingsJson is not None:
+        update_fields["settings_json"] = body.settingsJson
+    if body.isActive is not None:
+        update_fields["is_active"] = body.isActive
 
     if update_fields:
         await repo_repo.update_fields(parsed_id, **update_fields)
@@ -1238,16 +1238,16 @@ async def get_usage(
     budget = await tracker.check_budget(str(team.id))
 
     return UsageResponse(
-        team_id=str(team.id),
+        teamId=str(team.id),
         date=usage.date,
-        input_tokens=usage.input_tokens,
-        output_tokens=usage.output_tokens,
-        total_cost_usd=usage.total_cost_usd,
+        inputTokens=usage.input_tokens,
+        outputTokens=usage.output_tokens,
+        totalCostUsd=usage.total_cost_usd,
         budget=BudgetInfo(
-            within_budget=budget.within_budget,
-            usage_percent=budget.usage_percent,
-            daily_budget_usd=budget.daily_budget_usd,
-            spent_usd=budget.spent_usd,
+            withinBudget=budget.within_budget,
+            usagePercent=budget.usage_percent,
+            dailyBudgetUsd=budget.daily_budget_usd,
+            spentUsd=budget.spent_usd,
             warning=budget.warning,
         ),
     )
@@ -1306,19 +1306,19 @@ _STATUS_TO_STAGE_STATUS: dict[str, str] = {
 
 class PipelineRunResponse(CamelModel):
     id: str
-    jira_key: str
+    jiraKey: str
     title: str
     repo: str
     branch: str
     agent: str
     stage: str
-    stage_status: str
-    pr_url: str | None = None
-    pr_number: int | None = None
-    started_at: str
-    duration_ms: int
+    stageStatus: str
+    prUrl: str | None = None
+    prNumber: int | None = None
+    startedAt: str
+    durationMs: int
     assignee: str | None = None
-    files_changed: int | None = None
+    filesChanged: int | None = None
     additions: int | None = None
     deletions: int | None = None
 
@@ -1364,19 +1364,19 @@ async def list_pipeline_runs(
 
         runs.append(PipelineRunResponse(
             id=str(t.id),
-            jira_key=t.jira_key or "",
+            jiraKey=t.jira_key or "",
             title=t.title,
             repo=t.input_data.get("repo_full_name", ""),
             branch=t.input_data.get("branch", f"agent/{t.jira_key or t.id}"),
             agent=t.agent_type,
             stage=stage,
-            stage_status=_STATUS_TO_STAGE_STATUS.get(t.status, "running"),
-            pr_url=output.get("pr_url"),
-            pr_number=output.get("pr_number"),
-            started_at=started.isoformat() if started else now_utc.isoformat(),
-            duration_ms=duration_ms,
+            stageStatus=_STATUS_TO_STAGE_STATUS.get(t.status, "running"),
+            prUrl=output.get("pr_url"),
+            prNumber=output.get("pr_number"),
+            startedAt=started.isoformat() if started else now_utc.isoformat(),
+            durationMs=duration_ms,
             assignee=t.input_data.get("assignee"),
-            files_changed=files_changed,
+            filesChanged=files_changed,
             additions=additions,
             deletions=deletions,
         ))
@@ -1388,11 +1388,11 @@ async def list_pipeline_runs(
 
 
 class IncidentRcaResponse(CamelModel):
-    root_cause: str
+    rootCause: str
     confidence: str
     evidence: list[str]
-    suggested_fix: str
-    related_pr: dict[str, Any] | None = None
+    suggestedFix: str
+    relatedPr: dict[str, Any] | None = None
 
 
 class IncidentResponse(CamelModel):
@@ -1401,9 +1401,9 @@ class IncidentResponse(CamelModel):
     severity: IncidentSeverity
     status: str
     service: str
-    started_at: str
+    startedAt: str
     metric: str
-    current_value: str
+    currentValue: str
     threshold: str
     rca: IncidentRcaResponse | None = None
 
@@ -1413,7 +1413,7 @@ class IncidentCreate(CamelModel):
     severity: IncidentSeverity = IncidentSeverity.P2
     service: str
     metric: str = ""
-    current_value: str = ""
+    currentValue: str = ""
     threshold: str = ""
 
     @field_validator("severity", mode="before")
@@ -1433,11 +1433,11 @@ def _incident_to_response(inc: Any) -> IncidentResponse:
     rca = None
     if inc.rca_json:
         rca = IncidentRcaResponse(
-            root_cause=inc.rca_json.get("root_cause", ""),
+            rootCause=inc.rca_json.get("root_cause", ""),
             confidence=inc.rca_json.get("confidence", "medium"),
             evidence=inc.rca_json.get("evidence", []),
-            suggested_fix=inc.rca_json.get("suggested_fix", ""),
-            related_pr=inc.rca_json.get("related_pr"),
+            suggestedFix=inc.rca_json.get("suggested_fix", ""),
+            relatedPr=inc.rca_json.get("related_pr"),
         )
     return IncidentResponse(
         id=str(inc.id),
@@ -1445,9 +1445,9 @@ def _incident_to_response(inc: Any) -> IncidentResponse:
         severity=IncidentSeverity.normalize(inc.severity) or IncidentSeverity.P2,
         status=inc.status,
         service=inc.service,
-        started_at=inc.started_at.isoformat() if inc.started_at else "",
+        startedAt=inc.started_at.isoformat() if inc.started_at else "",
         metric=inc.metric,
-        current_value=inc.current_value,
+        currentValue=inc.current_value,
         threshold=inc.threshold,
         rca=rca,
     )
@@ -1480,7 +1480,7 @@ async def create_incident(
         severity=body.severity.value,
         service=body.service,
         metric=body.metric,
-        current_value=body.current_value,
+        current_value=body.currentValue,
         threshold=body.threshold,
     )
     await session.commit()
@@ -1492,14 +1492,14 @@ async def create_incident(
 
 class ReviewCommentResponse(CamelModel):
     id: str
-    file_path: str
-    line_number: int | None = None
+    filePath: str
+    lineNumber: int | None = None
     severity: str
     category: str
     confidence: float = 0.8
     title: str = ""
     body: str = ""
-    suggested_code: str | None = None
+    suggestedCode: str | None = None
     resolved: bool = False
 
 
@@ -1512,16 +1512,16 @@ class ReviewFileResponse(CamelModel):
 
 class ReviewDetailResponse(CamelModel):
     id: str
-    pr_number: int
+    prNumber: int
     repo: str
     title: str
     branch: str
     author: str
-    jira_key: str | None = None
-    pr_url: str
+    jiraKey: str | None = None
+    prUrl: str
     summary: str
     status: str
-    duration_ms: int | None = None
+    durationMs: int | None = None
     files: list[ReviewFileResponse]
 
 
@@ -1573,14 +1573,14 @@ def _review_to_response(r: Any) -> ReviewDetailResponse:
         comment_responses = [
             ReviewCommentResponse(
                 id=c["id"],
-                file_path=c["filePath"],
-                line_number=c["lineNumber"],
+                filePath=c["filePath"],
+                lineNumber=c["lineNumber"],
                 severity=c["severity"],
                 category=c["category"],
                 confidence=c["confidence"],
                 title=c["title"],
                 body=c["body"],
-                suggested_code=c["suggestedCode"],
+                suggestedCode=c["suggestedCode"],
                 resolved=c["resolved"],
             )
             for c in file_comments
@@ -1605,16 +1605,16 @@ def _review_to_response(r: Any) -> ReviewDetailResponse:
 
     return ReviewDetailResponse(
         id=str(r.id),
-        pr_number=r.pr_number,
+        prNumber=r.pr_number,
         repo=r.repo_full_name,
         title=title,
         branch=f"agent/{jira_key or r.id}",
         author=task.agent_type if task else "review",
-        jira_key=jira_key,
-        pr_url=r.pr_url,
+        jiraKey=jira_key,
+        prUrl=r.pr_url,
         summary=r.summary or "",
         status=r.status,
-        duration_ms=duration_ms,
+        durationMs=duration_ms,
         files=file_responses,
     )
 
@@ -1832,14 +1832,14 @@ async def get_review_commits(
 
 
 class InsightsSummaryResponse(CamelModel):
-    hours_saved: float
-    hours_saved_delta: float
-    prs_merged: int
-    prs_merged_delta: float
-    avg_cycle_time_hours: float
-    avg_cycle_time_delta: float
-    success_rate: float
-    success_rate_delta: float
+    hoursSaved: float
+    hoursSavedDelta: float
+    prsMerged: int
+    prsMergedDelta: float
+    avgCycleTimeHours: float
+    avgCycleTimeDelta: float
+    successRate: float
+    successRateDelta: float
 
 
 class WeeklyHoursResponse(CamelModel):
@@ -1862,9 +1862,9 @@ class TopRepoResponse(CamelModel):
 
 class InsightsResponse(CamelModel):
     summary: InsightsSummaryResponse
-    hours_by_week: list[WeeklyHoursResponse]
-    pr_split: list[PRSplitResponse]
-    top_repos: list[TopRepoResponse]
+    hoursByWeek: list[WeeklyHoursResponse]
+    prSplit: list[PRSplitResponse]
+    topRepos: list[TopRepoResponse]
     heatmap: list[list[float]]
 
 
@@ -2017,17 +2017,17 @@ async def get_insights(
 
     return InsightsResponse(
         summary=InsightsSummaryResponse(
-            hours_saved=round(hours_saved, 1),
-            hours_saved_delta=round(hours_delta, 1),
-            prs_merged=prs_merged,
-            prs_merged_delta=round(prs_delta, 1),
-            avg_cycle_time_hours=round(avg_cycle, 1),
-            avg_cycle_time_delta=round(cycle_delta, 1),
-            success_rate=round(success_rate, 1),
-            success_rate_delta=round(success_delta, 1),
+            hoursSaved=round(hours_saved, 1),
+            hoursSavedDelta=round(hours_delta, 1),
+            prsMerged=prs_merged,
+            prsMergedDelta=round(prs_delta, 1),
+            avgCycleTimeHours=round(avg_cycle, 1),
+            avgCycleTimeDelta=round(cycle_delta, 1),
+            successRate=round(success_rate, 1),
+            successRateDelta=round(success_delta, 1),
         ),
-        hours_by_week=hours_by_week,
-        pr_split=pr_split,
-        top_repos=top_repos_response,
+        hoursByWeek=hours_by_week,
+        prSplit=pr_split,
+        topRepos=top_repos_response,
         heatmap=heatmap,
     )

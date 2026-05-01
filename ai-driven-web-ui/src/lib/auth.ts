@@ -85,7 +85,7 @@ export async function login(apiKey: string, email?: string): Promise<LoginResult
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ api_key: apiKey, email: email || undefined }),
+    body: JSON.stringify({ apiKey, email: email || undefined }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

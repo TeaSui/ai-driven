@@ -59,7 +59,7 @@ def _run_login(env: Environment) -> MagicMock:
     ), patch(
         "ai_driven.config.get_settings", return_value=fake_settings
     ):
-        asyncio.run(login(body=LoginRequest(api_key="k"), response=response, session=db))
+        asyncio.run(login(body=LoginRequest(apiKey="k"), response=response, session=db))
     return response
 
 

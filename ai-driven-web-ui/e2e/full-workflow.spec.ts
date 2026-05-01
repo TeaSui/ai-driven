@@ -44,7 +44,7 @@ test.describe('Full workflow (real backend)', () => {
       body: JSON.stringify({
         message:
           'Implement AID-1 README. The scope is ambiguous (short vs. comprehensive). BEFORE writing, call human.ask_clarification offering those two options.',
-        agent_type: 'coding',
+        agentType: 'coding',
         context: { jira_key: 'AID-1', repo_full_name: 'MinnMinn/skills-introduction-to-github' },
       }),
     })
@@ -103,7 +103,7 @@ test.describe('Full workflow (real backend)', () => {
       body: JSON.stringify({
         message:
           'Implement AID-1 README directly. Do not ask clarifying questions. Write a comprehensive README (>100 lines) to README.md and open a PR.',
-        agent_type: 'coding',
+        agentType: 'coding',
         context: { jira_key: 'AID-1', repo_full_name: 'MinnMinn/skills-introduction-to-github' },
       }),
     })
