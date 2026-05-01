@@ -31,6 +31,9 @@ import {
   getTaskDiff,
 } from '@/lib/api'
 import type { AgentEvent, TaskEvaluation, PendingQuestion } from '@/lib/api'
+import { SpecialistsTab } from '@/components/specialists/specialists-tab'
+
+type TaskDetailTab = 'overview' | 'specialists'
 
 const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 const ACTIVE_STATUSES = new Set(['queued', 'running', 'coding', 'planning', 'testing', 'awaiting_input'])
@@ -1537,6 +1540,10 @@ export default function CodingAgentPage({
     () => getTaskEvaluations(id),
   )
 
+  // T25: Specialists tab toggle. Hand-rolled (no headless-ui) per the
+  // existing modal pattern in components/new-run-modal.tsx.
+  const [activeTab, setActiveTab] = useState<TaskDetailTab>('overview')
+
   // WebSocket for live streaming
   const [wsEvents, setWsEvents] = useState<AgentEvent[]>([])
   const [controlPending, setControlPending] = useState<'pause' | 'resume' | 'stop' | null>(null)
@@ -1900,26 +1907,77 @@ export default function CodingAgentPage({
       {/* Clarification dialog — renders only when agent invoked human.ask_clarification */}
       <ClarificationCard taskId={id} events={allEvents} taskStatus={task?.status} />
 
-      {/* Split pane */}
+      {/* T25: tab bar — Overview (existing split pane) / Specialists (new). */}
       <div
+        role="tablist"
+        aria-label="Task detail tabs"
         style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 360px',
-          flex: 1,
-          minHeight: 0,
+          display: 'flex',
+          gap: 0,
+          borderBottom: '1px solid var(--panel-border)',
+          background: 'var(--panel)',
+          paddingLeft: 20,
         }}
       >
-        <MainCodePane events={allEvents} taskId={id} />
-        <ThinkingPanel
-          steps={visible}
-          liveChar={isRealMode ? Infinity : liveChar}
-          feedRef={feedRef}
-          running={!isRealMode && running && !isComplete}
-          events={allEvents}
-          evaluations={evaluations ?? []}
-          isStreaming={streamingStatus?.isStreaming ?? false}
-        />
+        {([
+          { id: 'overview', label: 'Overview' },
+          { id: 'specialists', label: 'Specialists' },
+        ] as { id: TaskDetailTab; label: string }[]).map(t => {
+          const active = activeTab === t.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              data-testid={`tab-${t.id}`}
+              onClick={() => setActiveTab(t.id)}
+              style={{
+                padding: '10px 14px',
+                fontSize: 12,
+                fontWeight: 500,
+                background: 'transparent',
+                border: 'none',
+                borderBottom: active
+                  ? '2px solid var(--accent-500)'
+                  : '2px solid transparent',
+                color: active ? 'var(--text)' : 'var(--text-muted)',
+                cursor: 'pointer',
+                marginBottom: -1,
+              }}
+            >
+              {t.label}
+            </button>
+          )
+        })}
       </div>
+
+      {activeTab === 'specialists' ? (
+        <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <SpecialistsTab taskId={id} />
+        </div>
+      ) : (
+        /* Split pane (Overview) */
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 360px',
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          <MainCodePane events={allEvents} taskId={id} />
+          <ThinkingPanel
+            steps={visible}
+            liveChar={isRealMode ? Infinity : liveChar}
+            feedRef={feedRef}
+            running={!isRealMode && running && !isComplete}
+            events={allEvents}
+            evaluations={evaluations ?? []}
+            isStreaming={streamingStatus?.isStreaming ?? false}
+          />
+        </div>
+      )}
     </main>
   )
 }
