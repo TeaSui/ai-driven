@@ -99,10 +99,21 @@ class SpecialistBase(BaseAgent):
     # Retained so future QA / cost tooling can reason about specialist
     # intent without rediscovering it.
     max_input_tokens: int = 8192
-    max_output_tokens: int = 4096  # bumped from 2048 — Security threat models
-    # + BA acceptance_criteria lists can exceed 2k tokens on complex tickets,
-    # causing stop_reason=max_tokens and refused-to-parse errors. 4k has plenty
-    # of headroom without materially raising cost (Sonnet output is $15/M).
+    max_output_tokens: int = 16384  # bumped 4096 → 16384 (T-A1, 2026-05-01).
+    # The T-A1 error audit (docs/phase2-error-audit.md) found that
+    # ``stop_reason=max_tokens`` still accounted for 18.5% of specialist errors
+    # after the 2048→4096 bump, concentrated on the Security role (3 of 5
+    # truncation cases). Security threat-model JSON + QA full acceptance-
+    # criteria lists can blow past 4k on multi-concern tickets. 16K sits well
+    # under Sonnet 4.6's 64K output ceiling, so there is no risk of hitting
+    # a server-side cap. The wall-clock cost is bounded by the specialist's
+    # request timeout, not the token cap; the billing delta is negligible
+    # because only the *actually emitted* output tokens are charged — the
+    # ceiling only matters when the model was previously being truncated
+    # mid-JSON (in which case we paid for garbage anyway).
+    # Explicitly NOT using JSON chunking or streaming reassembly here
+    # (forbidden by T-A1 scope). If 16K ever turns out to be insufficient,
+    # escalate to T-A1b before inventing new parsing machinery.
 
     # --- BaseAgent abstract hooks ---------------------------------------
 

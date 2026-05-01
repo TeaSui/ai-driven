@@ -34,8 +34,8 @@ Not overridden (inherits base behaviour by design):
     prior artifacts is not a short classification). Per the T8
     convention, we do NOT restate a class attr when it matches the base
     default.
-  * ``max_output_tokens`` — base default 2048 is plenty for
-    ``QaPayload`` even on a long ticket with many ACs. Not restated.
+  * ``max_output_tokens`` — base default 16384 (post-T-A1) is plenty
+    for ``QaPayload`` even on a long ticket with many ACs. Not restated.
   * ``_build_initial_message`` — base-class-only method; concrete
     specialists MUST NOT override it per revision §6.
 """

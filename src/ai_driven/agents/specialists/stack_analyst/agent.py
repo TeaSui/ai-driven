@@ -72,7 +72,8 @@ class StackAnalystSpecialist(SpecialistBase):
     # reasoning task, so don't burn the default-model slot on it.
     model_setting_attr = "claude_fast_model"
     # StackAnalystPayload is small; cap generations tighter than the
-    # base default 2048.
+    # base default (16384 post-T-A1). Stack classification ran 0 max_tokens
+    # truncation errors in the T-A1 audit, so the tight cap stays.
     max_output_tokens = 1024
 
     def __init__(

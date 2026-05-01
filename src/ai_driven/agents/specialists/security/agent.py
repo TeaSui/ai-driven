@@ -31,8 +31,9 @@ Not overridden (inherits base behaviour by design):
     correct for Security (Sonnet base default; real reasoning, not a
     short classification). Per the T8 convention, we do NOT restate a
     class attr when it matches the base default.
-  * ``max_output_tokens`` — base default 2048 is plenty for
-    ``SecurityPayload`` (typical output ~1-1.5k tokens). Not restated.
+  * ``max_output_tokens`` — base default 16384 is plenty for
+    ``SecurityPayload`` (threat-model JSON can reach 4-6k tokens on
+    multi-concern tickets). Not restated.
   * ``_register_tools`` / ``_get_tool_names`` — Security takes no tools
     in Phase 1. The base class already returns ``[]`` / no-op.
   * ``_build_initial_message`` — base-class-only method; concrete
@@ -64,7 +65,7 @@ class SecuritySpecialist(SpecialistBase):
     defaults (``model_setting_attr = "claude_default_model"`` — a
     Settings-resolved reference, not a literal, so a team-level model
     flip propagates without touching specialists; ``max_output_tokens
-    = 2048``), so neither is restated here. The only overrides are
+    = 16384`` post-T-A1), so neither is restated here. The only overrides are
     ``agent_type`` and ``role`` which are required for every specialist.
     """
 

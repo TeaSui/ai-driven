@@ -38,7 +38,7 @@ class BusinessAnalystSpecialist(SpecialistBase):
     defaults (``model_setting_attr = "claude_default_model"`` — a
     Settings-resolved reference, not a literal, so a team-level model
     flip propagates without touching specialists; ``max_output_tokens
-    = 2048``), so neither is restated here. Subclasses that need a
+    = 16384`` post-T-A1), so neither is restated here. Subclasses that need a
     different model (e.g. ``stack_analyst`` on ``claude_fast_model``)
     set ``model_setting_attr`` explicitly — the diff against this
     template then clearly shows the override.
