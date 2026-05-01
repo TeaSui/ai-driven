@@ -126,7 +126,27 @@ class TaskConsumer:
             # returns — no Redis pub/sub events ever fire and the UI's
             # "Thinking stream" WebSocket stays empty.
             agent = await self._create_agent(agent_type, payload)
-            result = await agent.run(payload, task_id=str(task_id))
+
+            # Roll specialist cost into the CodingAgent per-task ceiling.
+            # T-A2 cost-ceiling-compounding fix: specialist runs happen in
+            # the orchestrator process and their USD cost is persisted on
+            # task_artifacts.cost_usd. If we don't seed CodingAgent with
+            # that sum, a task could spend (e.g.) $0.10 in specialists +
+            # $2.80 in coding = $2.90 and only the $2.80 would count
+            # against the $3.00 claude_max_cost_per_task_usd ceiling.
+            # Applying the seed to every non-orchestrator agent covers
+            # coding, review, and devops so the ceiling stays a hard
+            # per-task cap regardless of which pipeline follows the
+            # orchestrator. Skipped when agent_type == "orchestrator" so
+            # the orchestrator itself (which doesn't accept initial_cost)
+            # keeps working unchanged.
+            run_kwargs: dict[str, Any] = {"task_id": str(task_id)}
+            if agent_type != "orchestrator":
+                initial_cost = await self._sum_specialist_cost_usd(task_id)
+                if initial_cost > 0.0:
+                    run_kwargs["initial_cost"] = initial_cost
+
+            result = await agent.run(payload, **run_kwargs)
 
             # Update task status.
             # BaseAgent.run now accumulates a cache-aware cost on the result
@@ -238,6 +258,43 @@ class TaskConsumer:
                 )
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
+
+    @staticmethod
+    async def _sum_specialist_cost_usd(task_id: Any) -> float:
+        """Return the sum of task_artifacts.cost_usd for this task.
+
+        Used by ``_process_message`` to pre-seed ``BaseAgent.run``'s
+        ``initial_cost`` so the ``claude_max_cost_per_task_usd`` ceiling
+        applies to the COMBINED orchestration run (specialists + coding +
+        review), not per-pipeline-stage. Returns 0.0 for tasks with no
+        artifacts yet (fast-path, non-orchestrated pipelines) and on any
+        DB error — we'd rather under-count than crash the worker.
+        """
+        import uuid as _uuid
+        from sqlalchemy import select
+        from ai_driven.db.postgres.models import TaskArtifact
+
+        try:
+            tid = task_id if isinstance(task_id, _uuid.UUID) else _uuid.UUID(str(task_id))
+        except (ValueError, TypeError):
+            return 0.0
+
+        try:
+            async with async_session_factory() as session:
+                res = await session.execute(
+                    select(TaskArtifact.cost_usd).where(
+                        TaskArtifact.task_id == tid
+                    )
+                )
+                rows = res.scalars().all()
+                return float(sum((c or 0 for c in rows), start=0))
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "specialist_cost_sum_failed for task %s; seeding initial_cost=0",
+                task_id,
+                exc_info=True,
+            )
+            return 0.0
 
     @staticmethod
     async def _lookup_repo_scm_type(repo_full_name: str) -> str:

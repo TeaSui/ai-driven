@@ -176,6 +176,51 @@ def test_artifact_dataclass_carries_all_fields() -> None:
     assert a.role == "business_analyst" and a.input_tokens == 100
 
 
+def test_artifact_dataclass_cost_usd_defaults_to_decimal_zero() -> None:
+    """Legacy callers that don't pass ``cost_usd`` (stubs, error paths,
+    existing tests) must still produce a well-formed Artifact with
+    ``cost_usd == Decimal('0')``. The type MUST be ``Decimal`` (not float)
+    because the DB column is ``NUMERIC(10,6)`` and summing many small
+    float costs drifts at the micro-dollar level.
+    """
+    a = Artifact(
+        role="security",
+        verdict="pass",
+        reasoning="no issues",
+        payload={"threat_model": [], "implementation_rules": [],
+                 "compliance_notes": [], "blocking_concerns": []},
+        model_used="claude-sonnet-4-6",
+        input_tokens=0,
+        output_tokens=0,
+    )
+    assert a.cost_usd == Decimal("0")
+    assert isinstance(a.cost_usd, Decimal)
+
+
+def test_artifact_dataclass_cost_usd_round_trips_through_asdict() -> None:
+    """``dataclasses.asdict`` is used by ``_artifact_to_dict`` to inline
+    prior artifacts into the XML envelope. The ``cost_usd`` field must
+    survive that serialization so downstream specialists see the billed
+    cost of their precursors (informational only today; dashboards +
+    per-role cost attribution rely on the same path).
+    """
+    from dataclasses import asdict as _asdict
+    a = Artifact(
+        role="qa",
+        verdict="pass",
+        reasoning="ok",
+        payload={"checks_performed": [], "test_coverage_gap": [],
+                 "regression_risk": "low"},
+        model_used="claude-sonnet-4-6",
+        input_tokens=100,
+        output_tokens=50,
+        cost_usd=Decimal("0.001050"),
+    )
+    dumped = _asdict(a)
+    assert dumped["cost_usd"] == Decimal("0.001050")
+    assert "cost_usd" in dumped
+
+
 @pytest.mark.asyncio
 async def test_artifact_repository_upsert_inserts_new_row() -> None:
     """When no row exists for (task_id, role), upsert calls session.add()

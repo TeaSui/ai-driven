@@ -42,6 +42,7 @@ import logging
 import re
 from abc import abstractmethod
 from dataclasses import asdict, dataclass, field, is_dataclass
+from decimal import Decimal
 from typing import Any
 from xml.sax.saxutils import escape as _saxutils_escape
 
@@ -52,6 +53,7 @@ from ai_driven.agents.orchestrator.artifacts import (
     Artifact,
     validate_payload,
 )
+from ai_driven.billing.tracker import get_model_pricing
 from ai_driven.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -222,6 +224,45 @@ class SpecialistBase(BaseAgent):
             f"Use prefill to start.</instruction>"
         )
 
+    # --- cost computation -----------------------------------------------
+
+    @staticmethod
+    def _compute_cost_usd(
+        model: str, input_tokens: int, output_tokens: int,
+    ) -> Decimal:
+        """Return the USD cost of a specialist Claude call as a ``Decimal``.
+
+        Dispatches through ``billing.tracker.get_model_pricing`` (same helper
+        BaseAgent's ``_iteration_cost_usd`` uses) so specialists and the
+        coding agent bill against the same price table. Applies the Bedrock
+        regional uplift when the active provider is Bedrock and the region
+        is NOT us-east-1 — matches ``agents.base._bedrock_region_multiplier``.
+
+        Uses ``Decimal`` throughout to avoid binary float drift; rounds to 6
+        decimal places to match the ``task_artifacts.cost_usd NUMERIC(10,6)``
+        column. Cache tiers are intentionally NOT applied — specialists
+        currently make single-shot calls without prefix caching at the
+        per-specialist scope; if that changes we'll propagate usage.cache_*
+        from the response here.
+        """
+        pricing = get_model_pricing(model)
+        settings = get_settings()
+        regional_multiplier = (
+            Decimal(str(settings.bedrock_price_multiplier))
+            if getattr(settings, "claude_provider", None) == "bedrock"
+            and getattr(settings, "aws_region", "") not in ("us-east-1", "")
+            else Decimal("1")
+        )
+        # ``pricing`` values are USD per 1K tokens (see billing.tracker).
+        input_cost = (
+            Decimal(str(pricing["input"])) * Decimal(input_tokens) / Decimal("1000")
+        )
+        output_cost = (
+            Decimal(str(pricing["output"])) * Decimal(output_tokens) / Decimal("1000")
+        )
+        cost = (input_cost + output_cost) * regional_multiplier
+        return cost.quantize(Decimal("0.000001"))
+
     # --- core entry point -----------------------------------------------
 
     async def run_specialist(self, ctx: SpecialistContext) -> Artifact:
@@ -288,11 +329,13 @@ class SpecialistBase(BaseAgent):
                 role=self.role, verdict="error",
                 reasoning=f"claude call failed: {exc}", payload={},
                 model_used=model, input_tokens=0, output_tokens=0,
+                cost_usd=Decimal("0"),
             ))
 
         usage = getattr(response, "usage", None)
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        cost_usd = self._compute_cost_usd(model, input_tokens, output_tokens)
 
         # Stop-reason guard (revision §3). Only meaningful for the
         # prefill+stop_sequence path (Anthropic Direct). For Bedrock we
@@ -309,6 +352,7 @@ class SpecialistBase(BaseAgent):
                     ),
                     payload={}, model_used=model,
                     input_tokens=input_tokens, output_tokens=output_tokens,
+                    cost_usd=cost_usd,
                 ))
         else:
             if stop_reason != "stop_sequence":
@@ -320,6 +364,7 @@ class SpecialistBase(BaseAgent):
                     ),
                     payload={}, model_used=model,
                     input_tokens=input_tokens, output_tokens=output_tokens,
+                    cost_usd=cost_usd,
                 ))
 
         # Reconstruct the raw text that downstream JSON extraction expects.
@@ -351,6 +396,7 @@ class SpecialistBase(BaseAgent):
                 reasoning="JSON invalid after 2 repair rounds",
                 payload={}, model_used=model,
                 input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
             ))
 
         try:
@@ -361,6 +407,7 @@ class SpecialistBase(BaseAgent):
                 reasoning=f"JSON parse failed post-repair: {exc}",
                 payload={}, model_used=model,
                 input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
             ))
 
         try:
@@ -378,6 +425,7 @@ class SpecialistBase(BaseAgent):
                 reasoning=f"payload schema mismatch: {err_detail}",
                 payload={}, model_used=model,
                 input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
             ))
 
         return await self._complete(ctx, Artifact(
@@ -388,6 +436,7 @@ class SpecialistBase(BaseAgent):
             model_used=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cost_usd=cost_usd,
         ))
 
     # --- completion helper ----------------------------------------------
@@ -487,14 +536,25 @@ def _xml_escape(text: str) -> str:
 
 
 def _artifact_to_dict(art: Any) -> dict[str, Any]:
-    """Best-effort Artifact -> dict for inlining in the XML envelope.
+    """Best-effort Artifact -> JSON-safe dict for inlining in the XML envelope.
 
     :class:`Artifact` is a dataclass today, so ``asdict`` handles it.
     Guard for duck-typed alternatives (e.g. test doubles) by falling
     back to ``__dict__``.
+
+    ``Artifact.cost_usd`` is a ``Decimal`` (NUMERIC(10,6) on disk) and
+    ``json.dumps`` cannot serialize ``Decimal``. Stringify here so the
+    downstream ``json.dumps`` call in ``_build_initial_message`` succeeds
+    — the envelope is informational context for the model; a string is
+    indistinguishable from a number at the prompt level.
     """
     if is_dataclass(art) and not isinstance(art, type):
-        return asdict(art)
-    if hasattr(art, "__dict__"):
-        return dict(art.__dict__)
-    return {"repr": repr(art)}
+        data = asdict(art)
+    elif hasattr(art, "__dict__"):
+        data = dict(art.__dict__)
+    else:
+        return {"repr": repr(art)}
+    for k, v in list(data.items()):
+        if isinstance(v, Decimal):
+            data[k] = str(v)
+    return data

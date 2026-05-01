@@ -52,6 +52,7 @@ class ArtifactRepository:
                     model_used=artifact.model_used,
                     input_tokens=artifact.input_tokens,
                     output_tokens=artifact.output_tokens,
+                    cost_usd=artifact.cost_usd,
                 )
             )
         else:
@@ -61,6 +62,7 @@ class ArtifactRepository:
             row.model_used = artifact.model_used
             row.input_tokens = artifact.input_tokens
             row.output_tokens = artifact.output_tokens
+            row.cost_usd = artifact.cost_usd
         await self._session.flush()
 
     async def list_for_task(self, task_id: uuid.UUID) -> dict[str, Artifact]:
@@ -78,5 +80,6 @@ class ArtifactRepository:
                 model_used=row.model_used,
                 input_tokens=row.input_tokens,
                 output_tokens=row.output_tokens,
+                cost_usd=row.cost_usd,
             )
         return out

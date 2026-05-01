@@ -21,8 +21,9 @@ invariants before any concrete specialist (Tasks 8-11) relies on them:
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -32,6 +33,7 @@ from ai_driven.agents.specialists.base import (
     SpecialistContext,
     StubSpecialist,
 )
+from ai_driven.billing.tracker import get_model_pricing
 from ai_driven.config import get_settings
 
 
@@ -291,3 +293,144 @@ async def test_run_specialist_returns_error_on_unexpected_stop_reason() -> None:
     event_names = [call.args[0] for call in agent._publish_event.await_args_list]
     assert "specialist.started" in event_names
     assert "specialist.completed" in event_names
+
+
+# --- T-A2: cost_usd computation ---------------------------------------------
+
+
+def test_compute_cost_usd_sonnet_anthropic_parity() -> None:
+    """Sonnet direct: 100 input + 50 output tokens.
+
+    Rates from billing.tracker._MODEL_PRICING are USD per 1K tokens:
+      input=$0.003/K, output=$0.015/K
+      → 100 * 0.003/1000 + 50 * 0.015/1000
+      = 0.0003 + 0.00075 = 0.00105 USD
+    Asserted to the exact 6-decimal representation the NUMERIC(10,6)
+    column will persist, so drift in either the pricing table or the
+    helper surfaces immediately.
+    """
+    with patch("ai_driven.agents.specialists.base.get_settings") as ms:
+        ms.return_value.claude_provider = "anthropic"
+        ms.return_value.aws_region = "us-east-1"
+        ms.return_value.bedrock_price_multiplier = 1.10
+        cost = SpecialistBase._compute_cost_usd(
+            "claude-sonnet-4-6", input_tokens=100, output_tokens=50,
+        )
+    assert cost == Decimal("0.001050")
+
+
+def test_compute_cost_usd_bedrock_non_us_east_applies_uplift() -> None:
+    """Bedrock ap-southeast-1: uplift multiplies the total cost.
+
+    Sonnet on 1000 input + 500 output tokens =
+      1000*0.003/1000 + 500*0.015/1000 = 0.003 + 0.0075 = 0.0105
+    With a 1.10 multiplier → 0.01155 USD, quantized to 6 dp.
+    """
+    with patch("ai_driven.agents.specialists.base.get_settings") as ms:
+        ms.return_value.claude_provider = "bedrock"
+        ms.return_value.aws_region = "ap-southeast-1"
+        ms.return_value.bedrock_price_multiplier = 1.10
+        cost = SpecialistBase._compute_cost_usd(
+            "claude-sonnet-4-6", input_tokens=1000, output_tokens=500,
+        )
+    assert cost == Decimal("0.011550")
+
+
+def test_compute_cost_usd_uses_sonnet_fallback_for_unknown_model() -> None:
+    """Unknown model IDs fall back to Sonnet-tier pricing via billing.tracker.
+
+    Guards against silent $0 cost when a new model ID reaches production
+    before the pricing table is updated.
+    """
+    with patch("ai_driven.agents.specialists.base.get_settings") as ms:
+        ms.return_value.claude_provider = "anthropic"
+        ms.return_value.aws_region = "us-east-1"
+        ms.return_value.bedrock_price_multiplier = 1.10
+        cost = SpecialistBase._compute_cost_usd(
+            "claude-future-model", input_tokens=1000, output_tokens=500,
+        )
+    # Sonnet rates: input 0.003/K, output 0.015/K
+    assert cost == Decimal("0.010500")
+    # Guard: pricing lookup itself falls back to Sonnet rates.
+    assert get_model_pricing("claude-future-model")["input"] == 0.003
+
+
+@pytest.mark.asyncio
+async def test_run_specialist_success_path_populates_cost_usd() -> None:
+    """Happy path: Artifact.cost_usd reflects the per-call token math.
+
+    Uses the ``_validate_text`` override trick: patching with an async
+    ``_repair_or_escalate_json`` that leaves escalated=False means the
+    repair loop is a no-op and the flow reaches the final Artifact
+    construction with validated payload + our computed cost.
+    """
+    agent = _mock_io(_MinimalSpecialist())  # role=business_analyst
+    ctx = _make_ctx()
+
+    # Anthropic-direct path: prefill adds "```json\n{" so response text
+    # must be the BODY that, when appended to "```json\n{", parses as a
+    # valid BA payload envelope.
+    payload_obj = {
+        "verdict": "pass",
+        "reasoning": "ok",
+        "payload": {
+            "ambiguities_resolved": [],
+            "acceptance_criteria": [],
+            "out_of_scope": [],
+            "blocking_questions": [],
+        },
+    }
+    import json as _json
+    body = _json.dumps(payload_obj)
+    # Strip the leading "{" because the prefill already provides it.
+    assert body.startswith("{")
+    fake_response = SimpleNamespace(
+        text=body[1:] + "\n```",
+        stop_reason="stop_sequence",
+        usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+    )
+    agent._claude.chat = AsyncMock(return_value=fake_response)  # type: ignore[method-assign]
+    agent._repair_or_escalate_json = AsyncMock()  # type: ignore[method-assign]
+
+    with patch("ai_driven.agents.specialists.base.get_settings") as ms, \
+         patch("ai_driven.config.get_settings") as ms2:
+        for ms_ in (ms, ms2):
+            ms_.return_value.claude_provider = "anthropic"
+            ms_.return_value.aws_region = "us-east-1"
+            ms_.return_value.bedrock_price_multiplier = 1.10
+            ms_.return_value.claude_default_model = "claude-sonnet-4-6"
+        art = await agent.run_specialist(ctx)
+
+    assert art.verdict == "pass"
+    assert art.input_tokens == 100 and art.output_tokens == 50
+    # Sonnet: 100*0.003/1000 + 50*0.015/1000 = 0.00105
+    assert art.cost_usd == Decimal("0.001050")
+
+
+@pytest.mark.asyncio
+async def test_run_specialist_error_path_still_reports_cost() -> None:
+    """Stop-reason guard: cost_usd MUST reflect the tokens actually burned
+    even when we refuse to parse the output. Without this, the
+    cost-attribution dashboard would under-count truncated-output spend.
+    """
+    agent = _mock_io(_MinimalSpecialist())
+    ctx = _make_ctx()
+    fake_response = SimpleNamespace(
+        text='"verdict":"pass","reasoning":"truncated","payload":{}',
+        stop_reason="max_tokens",
+        usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+    )
+    agent._claude.chat = AsyncMock(return_value=fake_response)  # type: ignore[method-assign]
+
+    with patch("ai_driven.agents.specialists.base.get_settings") as ms, \
+         patch("ai_driven.config.get_settings") as ms2:
+        for ms_ in (ms, ms2):
+            ms_.return_value.claude_provider = "bedrock"
+            ms_.return_value.aws_region = "us-east-1"  # no uplift
+            ms_.return_value.bedrock_price_multiplier = 1.10
+            ms_.return_value.claude_default_model = "claude-sonnet-4-6"
+        art = await agent.run_specialist(ctx)
+
+    assert art.verdict == "error"
+    # Cost reflects real tokens even on the refusal path.
+    assert art.cost_usd == Decimal("0.001050")

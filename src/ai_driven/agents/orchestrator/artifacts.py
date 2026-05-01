@@ -20,7 +20,8 @@ alembic/versions/a1b2c3d4e5fa_orchestration_artifacts.py.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -179,3 +180,10 @@ class Artifact:
     model_used: str | None
     input_tokens: int
     output_tokens: int
+    # Per-artifact USD cost of the specialist call. ``Decimal`` (not float)
+    # because the DB column is ``NUMERIC(10,6)`` and summing many small
+    # specialist costs under binary float drifts within a few micro-dollars
+    # per task — large enough to break strict-gating ROI analysis at scale.
+    # Default is ``Decimal("0")`` so stubs, error paths, and legacy callers
+    # that construct ``Artifact`` without cost_usd continue to work.
+    cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))

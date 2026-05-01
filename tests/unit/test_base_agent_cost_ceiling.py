@@ -267,6 +267,71 @@ async def test_run_short_circuits_when_initial_cost_over_ceiling() -> None:
 
 
 @pytest.mark.asyncio
+async def test_initial_cost_rolls_into_running_ceiling() -> None:
+    """T-A2: specialists run in the orchestrator process; their USD cost
+    is surfaced via ``initial_cost`` when CodingAgent subsequently runs.
+    The running-cost accumulator must SEED from ``initial_cost`` so the
+    ``claude_max_cost_per_task_usd`` ceiling applies to the COMBINED
+    orchestration run (specialists + coding), not per-stage. This locks
+    the fix: without the seed, a task could spend (e.g.) $1.00 in
+    specialists + $2.80 in coding = $3.80 and the ceiling only saw $2.80.
+    """
+    agent = _StubAgent()
+    agent._publish_event = AsyncMock()
+    agent._update_task_status = AsyncMock()
+    agent._check_control_flag = AsyncMock(return_value=None)
+
+    # One cheap coding call ($1.50 at 500k input tokens on Sonnet). With
+    # initial_cost=$2.00 the combined total = $3.50, which breaches the
+    # $3.00 ceiling AFTER the first call — second iteration must be gated.
+    one_fifty_response = SimpleNamespace(
+        usage=_usage(input_tokens=500_000, output_tokens=0),
+        text="",
+        stop_reason="end_turn",
+        has_tool_use=False,
+    )
+
+    loop_iterations: list[int] = []
+
+    async def fake_run_agent_loop(messages, **kwargs):
+        on_response = kwargs["on_response"]
+        should_continue = kwargs["should_continue"]
+        # Iteration 1: gate sees $2.00 (seed), below ceiling -> proceeds,
+        # records $1.50 -> running total $3.50.
+        if await should_continue() is False:
+            return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
+        loop_iterations.append(1)
+        on_response(one_fifty_response)
+        # Iteration 2: gate sees $3.50 >= ceiling -> HALT.
+        if await should_continue() is False:
+            return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
+        loop_iterations.append(2)  # must not reach
+        on_response(one_fifty_response)
+        return SimpleNamespace(usage=_usage(), text="", stop_reason="end_turn")
+
+    agent._claude.run_agent_loop = fake_run_agent_loop
+    with patch("ai_driven.config.get_settings") as mock_settings:
+        mock_settings.return_value.claude_max_cost_per_task_usd = 3.0
+        mock_settings.return_value.claude_default_model = "claude-sonnet-4-6"
+        mock_settings.return_value.claude_max_tool_iterations = 10
+        mock_settings.return_value.claude_provider = "anthropic"
+        mock_settings.return_value.aws_region = "us-east-1"
+        mock_settings.return_value.bedrock_price_multiplier = 1.10
+        result = await agent.run(
+            {"message": "follow-on coding after specialists"},
+            task_id=None,
+            initial_cost=2.00,
+        )
+
+    # Only ONE iteration ran — the second was gated by the seeded ceiling.
+    assert loop_iterations == [1]
+    assert result.success is False
+    # Combined cost = seed $2.00 + iter1 $1.50 = $3.50.
+    assert result.cost_usd == pytest.approx(3.50, abs=0.01)
+    assert "cost ceiling" in (result.error or "")
+
+
+@pytest.mark.asyncio
 async def test_under_budget_run_succeeds_and_reports_cost() -> None:
     agent = _StubAgent()
     agent._publish_event = AsyncMock()
