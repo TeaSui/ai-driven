@@ -350,7 +350,8 @@ async def send_message(
                 from sqlalchemy import select as _select
                 _res = await session.execute(
                     _select(_RepoRow.id).where(
-                        _RepoRow.full_name == repo_full_name_ctx
+                        _RepoRow.full_name == repo_full_name_ctx,
+                        _RepoRow.team_id == uuid.UUID(team_id),
                     )
                 )
                 resolved_repo_id = _res.scalar_one_or_none()
@@ -554,20 +555,45 @@ async def _auth_from_ws(websocket: WebSocket, task_id: str) -> str | None:
         return None
 
     if msg.get("type") != "auth" or not msg.get("token"):
-        if settings.debug:
+        # Browsers using the session-token flow may send an empty token
+        # because session_token is HttpOnly and unreadable from JS.
+        # Fall back to the session_token cookie on the WS request itself.
+        cookie_token = websocket.cookies.get("session_token")
+        if cookie_token:
+            msg = {"type": "auth", "token": cookie_token}
+        elif settings.debug:
             return debug_team
-        await websocket.close(code=4401, reason="Missing auth")
-        return None
+        else:
+            await websocket.close(code=4401, reason="Missing auth")
+            return None
 
-    # Resolve team from API key
-    from ai_driven.auth.middleware import hash_api_key, _get_cached_team, _resolve_team_from_db, _set_cached_team
+    # Resolve team from the token. Browsers hold an HttpOnly session_token
+    # (from /login) and cannot read the raw API key from JS, so the UI sends
+    # whichever token it can reach. Try session_token FIRST (Redis lookup is
+    # cheap) — then fall back to API-key hash for agents/scripts that still
+    # send the raw key.
+    from ai_driven.auth.middleware import (
+        _get_cached_team,
+        _resolve_session,
+        _resolve_team_from_db,
+        _set_cached_team,
+        hash_api_key,
+    )
 
-    api_key_hash = hash_api_key(msg["token"])
-    team_data = await _get_cached_team(api_key_hash)
+    token = msg["token"]
+    team_data: dict | None = None
+
+    session_data = await _resolve_session(token)
+    if session_data is not None:
+        team_data = {"id": session_data["team_id"]}
+
     if team_data is None:
-        team_data = await _resolve_team_from_db(api_key_hash)
-        if team_data is not None:
-            await _set_cached_team(api_key_hash, team_data)
+        api_key_hash = hash_api_key(token)
+        team_data = await _get_cached_team(api_key_hash)
+        if team_data is None:
+            team_data = await _resolve_team_from_db(api_key_hash)
+            if team_data is not None:
+                await _set_cached_team(api_key_hash, team_data)
 
     if team_data is None:
         await websocket.close(code=4401, reason="Invalid token")
