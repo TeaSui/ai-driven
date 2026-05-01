@@ -193,6 +193,28 @@ class TaskConsumer:
                 logger.error("task_status_update_failed")
         finally:
             heartbeat_task.cancel()
+            # CRITICAL: decrement the per-team concurrent-task counter so
+            # subsequent submissions aren't silently 429'd by a stale count.
+            # send_message() in chat/router.py increments at dispatch; the
+            # counterpart decrement MUST run for every terminal path
+            # (success, handled failure, raised exception, task cancel).
+            # Running in `finally` covers all four.
+            team_id_for_decrement = (trace_ctx or {}).get("team_id") or ""
+            if team_id_for_decrement:
+                try:
+                    from ai_driven.auth.rate_limiter import RateLimiter
+                    await RateLimiter().decrement_concurrent(
+                        team_id_for_decrement
+                    )
+                except Exception:
+                    # Never let the counter decrement crash the worker —
+                    # a leaked slot is recoverable (sweeper will reconcile);
+                    # a crashed worker leaks EVERY slot in flight.
+                    logger.warning(
+                        "decrement_concurrent_failed",
+                        extra={"team_id": team_id_for_decrement},
+                        exc_info=True,
+                    )
             clear_trace()
 
     async def _heartbeat(

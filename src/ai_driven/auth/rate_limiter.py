@@ -173,7 +173,15 @@ class RateLimiter:
     async def _check_concurrent(
         self, redis: Any, team_id: str
     ) -> RateLimitResult:
-        """Check concurrent task limit for a team."""
+        """Check concurrent task limit for a team.
+
+        If the Redis counter is at-or-above the limit we FIRST reconcile
+        against the authoritative DB count before rejecting. This auto-
+        heals drift from crashed workers / missed decrements so legitimate
+        submissions aren't indefinitely 429'd by a stale counter. The
+        reconcile is only triggered at the boundary (not every check),
+        so the hot path stays O(1).
+        """
         key = f"{_CONCURRENT_PREFIX}{team_id}"
         limit = self.max_concurrent_tasks
 
@@ -182,12 +190,18 @@ class RateLimiter:
             current_count = int(current) if current else 0
 
             if current_count >= limit:
-                return RateLimitResult(
-                    allowed=False,
-                    remaining=0,
-                    limit=limit,
-                    retry_after=60,  # suggest retry in 60 seconds
-                )
+                # Drift guard: recompute from DB before rejecting. If the
+                # true count is still at/over limit the rejection stands;
+                # otherwise the counter is overwritten and we re-read.
+                true_count = await self.reconcile_concurrent(team_id)
+                if true_count >= limit:
+                    return RateLimitResult(
+                        allowed=False,
+                        remaining=0,
+                        limit=limit,
+                        retry_after=60,
+                    )
+                current_count = true_count
 
             return RateLimitResult(
                 allowed=True,
@@ -228,6 +242,66 @@ class RateLimiter:
                 await redis.set(key, 0)
         except Exception:
             logger.warning("Failed to decrement concurrent count", exc_info=True)
+
+    async def reconcile_concurrent(self, team_id: str) -> int:
+        """Reset the Redis concurrent-task counter to the true count of
+        in-flight tasks for a team.
+
+        Redis counters drift when a worker crashes, is SIGKILL'd, or when
+        cancel paths don't fire the decrement. Without reconciliation, the
+        counter climbs until every submission gets 429'd. This method
+        queries Postgres for the authoritative set of active tasks
+        (statuses: queued, running, planning, coding, testing,
+        awaiting_input) and overwrites the Redis counter with that count.
+
+        Safe to call any time — it uses a SET not a subtraction, so
+        concurrent increments from new submissions are tolerated (they
+        just race to land just-after the reconcile and are correct either
+        way). Returns the reconciled count.
+        """
+        from ai_driven.db.postgres.models import Task
+        from ai_driven.db.postgres.session import async_session_factory
+        from sqlalchemy import func, select
+        import uuid as _uuid
+
+        redis = await self._get_redis()
+        if redis is None:
+            return 0
+
+        ACTIVE_STATUSES = (
+            "queued", "running", "planning", "coding", "testing",
+            "awaiting_input",
+        )
+        try:
+            team_uuid = _uuid.UUID(team_id)
+        except (ValueError, TypeError):
+            return 0
+
+        try:
+            async with async_session_factory() as session:
+                res = await session.execute(
+                    select(func.count(Task.id)).where(
+                        Task.team_id == team_uuid,
+                        Task.status.in_(ACTIVE_STATUSES),
+                    )
+                )
+                true_count = int(res.scalar_one() or 0)
+        except Exception:
+            logger.warning("reconcile_concurrent_db_lookup_failed", exc_info=True)
+            return 0
+
+        try:
+            key = f"{_CONCURRENT_PREFIX}{team_id}"
+            await redis.set(key, true_count, ex=86400)
+            logger.info(
+                "reconciled_concurrent_counter",
+                extra={"team_id": team_id, "count": true_count},
+            )
+        except Exception:
+            logger.warning("reconcile_concurrent_redis_set_failed", exc_info=True)
+            return 0
+
+        return true_count
 
     async def record_token_usage(
         self, team_id: str, input_tokens: int, output_tokens: int
