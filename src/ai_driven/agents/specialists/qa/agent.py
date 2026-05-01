@@ -53,11 +53,20 @@ from ai_driven.claude.prompts.specialists.qa import QA_SYSTEM_PROMPT
 
 _SCHEMA_REMINDER = (
     "Re-emit ONLY the QA artifact JSON inside one ```json fence, with "
-    "verdict in {pass, pass_with_notes, block}, reasoning, and a payload "
-    "containing checks_performed (list of {check, passed, detail}), "
-    "test_coverage_gap (list[str]), and regression_risk (one of "
-    "low/medium/high). Block ONLY when a concrete AC or security rule is "
-    "unmet, or regression_risk is high without mitigation."
+    "verdict in {pass, pass_with_notes, block, error}, reasoning, and a "
+    "payload containing schema_version, checks_performed (list of "
+    "{check, passed, detail}), test_coverage_gap (list[str]), and "
+    "regression_risk (one of low/medium/high).\n\n"
+    "In POST-CODING mode (context has pr_ref.pr_number): schema_version "
+    "MUST be \"v2\" and the payload MUST also include "
+    "acceptance_criteria_verification (list of {criterion, satisfied, "
+    "evidence, reason}) and security_rules_verification (list of {rule, "
+    "followed, evidence, severity}) where severity is one of "
+    "low/medium/high/critical. Block ONLY when a concrete AC is "
+    "unsatisfied, a high/critical security rule is unmet, or "
+    "regression_risk is high without mitigation.\n\n"
+    "Legacy (pre-T22) mode: schema_version=\"v1\" with just "
+    "checks_performed + test_coverage_gap + regression_risk."
 )
 
 

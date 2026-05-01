@@ -22,17 +22,22 @@ TIER_RULES: dict[str, TierRule] = {
     "fast_path": TierRule(
         mandatory=[], candidates=[], skip_to_pipeline=True, final_gate=None,
     ),
+    # T22: final_gate="qa" removed from full_workflow and multi_domain.
+    # QA is now a POST-coding specialist — dispatched from the Coding
+    # worker against the real PR diff after create_pr succeeds. The
+    # pre-coding path had no diff to validate so it block-everything
+    # on full_workflow/multi_domain tickets. See the T22 brief.
     "full_workflow": TierRule(
         mandatory=["business_analyst", "stack_analyst", "security"],
         candidates=["tech_lead", "ux_designer"],
         skip_to_pipeline=False,
-        final_gate="qa",
+        final_gate=None,
     ),
     "multi_domain": TierRule(
         mandatory=["business_analyst", "stack_analyst", "tech_lead", "security"],
         candidates=["ux_designer", "api_test"],
         skip_to_pipeline=False,
-        final_gate="qa",
+        final_gate=None,
     ),
 }
 

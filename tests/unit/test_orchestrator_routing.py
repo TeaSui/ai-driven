@@ -25,7 +25,8 @@ def test_fast_path_skips_to_pipeline_with_no_specialists() -> None:
 def test_full_workflow_runs_ba_then_stack_analyst_then_security() -> None:
     plan = plan_specialist_sequence("full_workflow", task_context={})
     assert plan.mandatory == ["business_analyst", "stack_analyst", "security"]
-    assert plan.final_gate == "qa"
+    # T22: QA moved post-coding — no pre-coding final_gate.
+    assert plan.final_gate is None
     assert plan.skip_to_pipeline is False
 
 
@@ -36,6 +37,8 @@ def test_multi_domain_includes_tech_lead_in_mandatory() -> None:
     ]
     assert "ux_designer" in plan.candidates
     assert "api_test" in plan.candidates
+    # T22: QA moved post-coding — no pre-coding final_gate.
+    assert plan.final_gate is None
 
 
 def test_unknown_tier_raises() -> None:
@@ -43,8 +46,11 @@ def test_unknown_tier_raises() -> None:
         plan_specialist_sequence("nonsense", task_context={})
 
 
-def test_specialist_plan_full_sequence_orders_qa_last() -> None:
-    plan = plan_specialist_sequence("full_workflow", task_context={})
-    full = plan.full_sequence()
-    assert full[0] == "business_analyst"
-    assert full[-1] == "qa"
+def test_specialist_plan_full_sequence_no_qa_in_pre_coding() -> None:
+    """T22: QA is post-coding. No tier's pre-coding sequence may include it."""
+    for tier in ("fast_path", "full_workflow", "multi_domain"):
+        plan = plan_specialist_sequence(tier, task_context={})
+        assert "qa" not in plan.full_sequence(), (
+            f"tier={tier}: QA must not appear in pre-coding full_sequence "
+            "(T22 moved QA to the post-coding worker)."
+        )
