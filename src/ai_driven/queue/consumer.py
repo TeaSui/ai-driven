@@ -120,9 +120,13 @@ class TaskConsumer:
                 await task_repo.update_status(task_id, "running")
                 await session.commit()
 
-            # Create and run agent
+            # Create and run agent.
+            # CRITICAL: pass task_id as a kwarg. Without it the agent's
+            # self._task_id stays None and _publish_event() silently
+            # returns — no Redis pub/sub events ever fire and the UI's
+            # "Thinking stream" WebSocket stays empty.
             agent = await self._create_agent(agent_type, payload)
-            result = await agent.run(payload)
+            result = await agent.run(payload, task_id=str(task_id))
 
             # Update task status.
             # BaseAgent.run now accumulates a cache-aware cost on the result

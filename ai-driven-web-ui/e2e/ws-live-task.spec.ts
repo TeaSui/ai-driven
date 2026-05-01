@@ -59,32 +59,47 @@ test('WS streams events for a newly created task', async ({ page, context }) => 
   // Navigate to the task page — WS should open
   await page.goto(`http://localhost:3000/dashboard/tasks/${taskId}`, { waitUntil: 'domcontentloaded' })
 
-  // Wait up to 30s for thinking-stream events
-  const deadline = Date.now() + 30_000
+  // Wait up to 90s for REAL agent events (not just the `connected` handshake).
+  // Real events have type in: phase_change, agent_iteration, tool_call_start,
+  // tool_call_end, planning_*, coding_*, orchestrator_*, specialist_*, etc.
+  const isRealAgentEvent = (p: string) => {
+    if (p.includes('"action":"sync"')) return false // webpack HMR
+    if (p.includes('"type":"connected"')) return false // handshake only
+    if (p.length <= 5) return false
+    return true
+  }
+
+  const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
-    const businessFrames = wsIn.filter(
-      (p) => !p.includes('"action":"sync"') && p.length > 5,
-    )
-    if (businessFrames.length >= 2) break
-    await page.waitForTimeout(500)
+    const real = wsIn.filter(isRealAgentEvent)
+    if (real.length >= 2) break
+    await page.waitForTimeout(1000)
   }
 
   console.log('WS connections (non-HMR):', wsUrls)
   console.log('WS outgoing frames:', wsOut.slice(0, 3))
   console.log('WS incoming frames count:', wsIn.length)
-  console.log('First 3 incoming frames:')
-  wsIn.slice(0, 3).forEach((f, i) => console.log(`  [${i}]`, f))
-  console.log('Closes:', wsCloses)
+  console.log('All incoming frame types:')
+  const types = new Set<string>()
+  for (const f of wsIn) {
+    try {
+      const m = f.match(/"type"\s*:\s*"([^"]+)"/)
+      if (m) types.add(m[1])
+    } catch {}
+  }
+  console.log('  ', [...types])
+  console.log('First 5 frames:')
+  wsIn.slice(0, 5).forEach((f, i) => console.log(`  [${i}]`, f))
 
   expect(wsUrls.some((u) => u.includes('/api/chat/stream/'))).toBeTruthy()
   const authFrame = wsOut.find((p) => p.includes('"type":"auth"'))
   expect(authFrame, `auth frame required; got: ${JSON.stringify(wsOut)}`).toBeTruthy()
 
-  const businessFrames = wsIn.filter(
-    (p) => !p.includes('"action":"sync"') && p.length > 5,
-  )
+  const realEvents = wsIn.filter(isRealAgentEvent)
   expect(
-    businessFrames.length,
-    `WS must stream events from the running agent. Received: ${wsIn.length} total, ${businessFrames.length} business. Closes: ${JSON.stringify(wsCloses)}`,
+    realEvents.length,
+    `Thinking stream must emit REAL agent events (not just "connected"). ` +
+      `Received ${wsIn.length} frames total, ${realEvents.length} real. ` +
+      `Event types: ${[...types].join(', ')}. Closes: ${JSON.stringify(wsCloses)}`,
   ).toBeGreaterThan(0)
 })
