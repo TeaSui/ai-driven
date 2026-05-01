@@ -115,3 +115,36 @@ async def test_list_for_task_reads_cost_usd_back_into_artifact() -> None:
     assert "qa" in out
     assert out["qa"].cost_usd == Decimal("0.002100")
     assert isinstance(out["qa"].cost_usd, Decimal)
+
+
+@pytest.mark.asyncio
+async def test_list_rows_for_task_returns_orm_rows_with_id_and_created_at() -> None:
+    """T25 added ``list_rows_for_task`` so the admin Specialists UI can
+    render per-artifact ``id`` + ``created_at`` without re-wrapping into
+    the ``Artifact`` dataclass (which intentionally omits those)."""
+    import datetime as _dt
+
+    row_a = MagicMock()
+    row_a.id = uuid.uuid4()
+    row_a.role = "business_analyst"
+    row_a.created_at = _dt.datetime(2026, 5, 1, 10, 0, 0, tzinfo=_dt.timezone.utc)
+
+    row_b = MagicMock()
+    row_b.id = uuid.uuid4()
+    row_b.role = "security"
+    row_b.created_at = _dt.datetime(2026, 5, 1, 10, 5, 0, tzinfo=_dt.timezone.utc)
+
+    scalars_all = MagicMock()
+    scalars_all.all = MagicMock(return_value=[row_a, row_b])
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        return_value=MagicMock(scalars=MagicMock(return_value=scalars_all))
+    )
+    repo = ArtifactRepository(session)
+
+    rows = await repo.list_rows_for_task(uuid.uuid4())
+
+    assert rows == [row_a, row_b]
+    # Sanity: caller gets real ORM rows, not dataclasses.
+    assert rows[0] is row_a
+    assert rows[1] is row_b

@@ -66,7 +66,12 @@ class ArtifactRepository:
         await self._session.flush()
 
     async def list_for_task(self, task_id: uuid.UUID) -> dict[str, Artifact]:
-        """Return all artifacts for a task, keyed by role."""
+        """Return all artifacts for a task, keyed by role.
+
+        Returns ``Artifact`` dataclasses — NO ``id`` or ``created_at``
+        (those are not modeled on the dataclass). Used by orchestrator
+        short-circuit logic that only cares about role → verdict.
+        """
         result = await self._session.execute(
             select(TaskArtifact).where(TaskArtifact.task_id == task_id)
         )
@@ -83,3 +88,21 @@ class ArtifactRepository:
                 cost_usd=row.cost_usd,
             )
         return out
+
+    async def list_rows_for_task(
+        self, task_id: uuid.UUID
+    ) -> list[TaskArtifact]:
+        """Return ORM rows for a task, ordered deterministically.
+
+        Used by the T25 admin Specialists UI — that endpoint needs the
+        persisted ``id`` and ``created_at`` columns, which the
+        ``Artifact`` dataclass does not carry. Order is
+        ``(created_at ASC, role ASC)`` so the UI renders specialists in
+        the order they ran, with a stable secondary key for ties.
+        """
+        result = await self._session.execute(
+            select(TaskArtifact)
+            .where(TaskArtifact.task_id == task_id)
+            .order_by(TaskArtifact.created_at.asc(), TaskArtifact.role.asc())
+        )
+        return list(result.scalars().all())
