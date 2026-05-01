@@ -27,6 +27,34 @@ router = APIRouter()
 _FULL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 _VALID_SCM_TYPES = {"github", "bitbucket"}
 
+# ---- Task-status buckets (T23) ----
+# Shared membership sets for admin success-rate math and bucket
+# filters. Post-T23 live-mode, orchestrated tasks flow through
+# ``awaiting_qa`` before settling on either ``completed`` (success)
+# or ``qa_failed`` (failure). The pre-T23 code filtered on
+# ``status == "completed"`` / ``status == "failed"`` only, which
+# silently under-counted the failure bucket and put any task in
+# flight for QA into neither bucket.
+#
+# TERMINAL_STATUSES — every status that means the pipeline stopped.
+#   "completed"  — success (pass / pass_with_notes / lenient error)
+#   "failed"     — infra / agent-level failure
+#   "blocked"    — strict-mode pre-coding block
+#   "qa_failed"  — live-mode post-coding block (T23)
+#
+# IN_FLIGHT_STATUSES — not yet terminal; excluded from success-rate
+# math and included in dashboards' "active" buckets.
+#   "queued"       — on SQS, not yet picked up
+#   "running"      — coding agent executing
+#   "awaiting_qa"  — post-coding QA in flight (T22)
+#
+# SUCCESS_STATUSES is deliberately a one-element set (not a union)
+# so success-rate math is obvious: success / (success + failures).
+SUCCESS_STATUSES = frozenset({"completed"})
+FAILURE_STATUSES = frozenset({"failed", "blocked", "qa_failed"})
+TERMINAL_STATUSES = SUCCESS_STATUSES | FAILURE_STATUSES
+IN_FLIGHT_STATUSES = frozenset({"queued", "running", "awaiting_qa"})
+
 
 from ai_driven.api._shared import CamelModel, to_camel as _to_camel  # noqa: F401
 
@@ -392,10 +420,14 @@ async def get_dashboard_summary(
     tasks_yesterday = yesterday_total_result.scalar() or 0
 
     # --- Success rate for today ---
+    # T23: bucket on SUCCESS_STATUSES vs FAILURE_STATUSES. Pre-T23 code
+    # compared only to "completed" / "failed"; post-T23 live-mode adds
+    # qa_failed (block verdict) and blocked (strict pre-coding) to the
+    # failure bucket. awaiting_qa is in-flight — deliberately excluded.
     completed_result = await session.execute(
         select(func.count(TaskModel.id)).where(
             TaskModel.created_at >= today_start,
-            TaskModel.status == "completed",
+            TaskModel.status.in_(SUCCESS_STATUSES),
         )
     )
     completed_count = completed_result.scalar() or 0
@@ -403,7 +435,7 @@ async def get_dashboard_summary(
     failed_result = await session.execute(
         select(func.count(TaskModel.id)).where(
             TaskModel.created_at >= today_start,
-            TaskModel.status == "failed",
+            TaskModel.status.in_(FAILURE_STATUSES),
         )
     )
     failed_count = failed_result.scalar() or 0
@@ -412,7 +444,13 @@ async def get_dashboard_summary(
     success_rate = round((completed_count / total_terminal) * 100, 1) if total_terminal > 0 else 0.0
 
     # --- Active agents (tasks in active statuses, grouped by agent_type) ---
-    active_statuses = ("queued", "planning", "coding", "testing", "running")
+    # T23: include "awaiting_qa" via IN_FLIGHT_STATUSES so tasks in the
+    # post-coding QA gate appear in the "active" dashboard rather than
+    # silently dropping off. Legacy names ("planning", "coding",
+    # "testing") are kept as a no-op safety net — they were never
+    # emitted by the current orchestrator but appeared in pre-T22
+    # fixtures; dropping them would be an unrelated cleanup.
+    active_statuses = tuple(IN_FLIGHT_STATUSES) + ("planning", "coding", "testing")
     active_result = await session.execute(
         select(TaskModel.agent_type, func.count(TaskModel.id))
         .where(TaskModel.status.in_(active_statuses))
@@ -1355,9 +1393,13 @@ async def list_pipeline_runs(
         additions: int | None = output.get("additions")
         deletions: int | None = output.get("deletions")
 
-        # Determine pipeline stage — completed tasks use per-agent mapping
+        # Determine pipeline stage — terminal tasks use per-agent mapping
         # so a coding agent stops at "review" while a workflow agent reaches "monitor".
-        if t.status in ("completed", "failed", "cancelled"):
+        # T23: TERMINAL_STATUSES now includes qa_failed + blocked so a
+        # live-mode QA block or strict pre-coding block displays in the
+        # same "done" bucket as completed/failed rather than falling
+        # through to the default in-flight stage.
+        if t.status in TERMINAL_STATUSES or t.status == "cancelled":
             stage = _AGENT_COMPLETED_STAGE.get(t.agent_type, _STATUS_TO_STAGE.get(t.status, "code"))
         else:
             stage = _STATUS_TO_STAGE.get(t.status, "code")
@@ -1911,10 +1953,13 @@ async def get_insights(
     prev_prs = prev_review_result.scalar() or 0
 
     # Compute metrics
-    completed_cur = [t for t in cur_tasks if t.status == "completed"]
-    completed_prev = [t for t in prev_tasks if t.status == "completed"]
-    failed_cur = [t for t in cur_tasks if t.status == "failed"]
-    failed_prev = [t for t in prev_tasks if t.status == "failed"]
+    # T23: SUCCESS vs FAILURE bucket membership. Post-T23 live-mode,
+    # failures include qa_failed (post-coding block) and blocked
+    # (strict pre-coding block) in addition to the legacy "failed".
+    completed_cur = [t for t in cur_tasks if t.status in SUCCESS_STATUSES]
+    completed_prev = [t for t in prev_tasks if t.status in SUCCESS_STATUSES]
+    failed_cur = [t for t in cur_tasks if t.status in FAILURE_STATUSES]
+    failed_prev = [t for t in prev_tasks if t.status in FAILURE_STATUSES]
 
     # Hours saved: estimate 2 hours per completed coding task, 0.5 per review
     hours_saved = sum(
@@ -1987,7 +2032,7 @@ async def get_insights(
         if not repo:
             continue
         repo_stats[repo]["total"] += 1
-        if t.status == "completed":
+        if t.status in SUCCESS_STATUSES:
             repo_stats[repo]["completed"] += 1
             repo_stats[repo]["prs"] += 1
             repo_stats[repo]["hours"] += 2.0 if t.agent_type == "coding" else 0.5
