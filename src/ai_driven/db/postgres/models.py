@@ -87,6 +87,12 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # T24: written every 5 min by consumer.py::_heartbeat while a task is
+    # in flight. Reapers key on this to distinguish a truly stuck task
+    # from one the worker is actively processing.
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     team: Mapped[Team] = relationship(back_populates="tasks")
     repository: Mapped[Repository | None] = relationship(back_populates="tasks")
@@ -218,4 +224,42 @@ class TaskArtifact(Base):
     __table_args__ = (
         sa.Index("idx_task_artifacts_task", "task_id"),
         sa.Index("idx_task_artifacts_task_role", "task_id", "role", unique=True),
+    )
+
+
+class TaskOverrideAudit(Base):
+    """Audit row for admin overrides and reaper auto-fails (T24).
+
+    One row per override/reap. Written in the same transaction as the
+    ``tasks.status`` update so the audit trail is never out of sync with
+    the authoritative status. Reaper rows use the seeded system member
+    UUID ('00000000-0000-0000-0000-000000000001').
+    """
+
+    __tablename__ = "task_override_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    overridden_by_member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("team_members.id"),
+        nullable=False,
+    )
+    from_status: Mapped[str] = mapped_column(Text, nullable=False)
+    to_status: Mapped[str] = mapped_column(Text, nullable=False)
+    # 'rerun_coding' | 'rerun_qa' | 'force_pass' | 'reap'
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+    __table_args__ = (
+        sa.Index("ix_task_override_audit_task_id", "task_id"),
     )
