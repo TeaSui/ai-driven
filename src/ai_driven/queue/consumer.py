@@ -98,6 +98,12 @@ class TaskConsumer:
         task_id = body["task_id"]
         agent_type = body["agent_type"]
         payload = body["payload"]
+        # T21: orchestrator_mode is stamped onto the SQS message by the
+        # producer so a mid-deploy config flip ('shadow'↔'live') can't change
+        # halt semantics of a task that's already in flight. Default to
+        # 'shadow' for backward compatibility with any in-flight messages
+        # enqueued before T21 rolled out.
+        stamped_orchestrator_mode: str = body.get("orchestrator_mode", "shadow")
 
         # Restore trace context propagated from the API request
         trace_ctx = body.get("trace_context", {})
@@ -145,6 +151,10 @@ class TaskConsumer:
                 initial_cost = await self._sum_specialist_cost_usd(task_id)
                 if initial_cost > 0.0:
                     run_kwargs["initial_cost"] = initial_cost
+            else:
+                # T21: the orchestrator wrapper's halt predicate reads the
+                # stamped mode from the SQS message body, not live settings.
+                run_kwargs["orchestrator_mode"] = stamped_orchestrator_mode
 
             result = await agent.run(payload, **run_kwargs)
 
@@ -404,6 +414,78 @@ def _build_orchestrate_payload(payload: dict[str, Any], task_id: Any) -> dict[st
     return {"task_id": task_id, "ticket": ticket, "repo": repo}
 
 
+def _should_halt_pipeline(
+    result: dict[str, Any], stamped_mode: str
+) -> bool:
+    """T21 strict-gating halt predicate.
+
+    Halt the pipeline (set status=blocked, skip coding-task enqueue) ONLY
+    when ALL of:
+
+    - the message was enqueued under ``orchestrator_mode='live'`` (shadow
+      mode runs specialists for telemetry but never blocks),
+    - orchestrate() reported a ``halted_on`` role, AND
+    - that role's verdict is specifically ``'block'`` (NOT ``'error'`` —
+      strict-error mode sets ``halted_on`` on Bedrock flakes and we do
+      not want silent flake-to-blocked conversion), AND
+    - the halting role is NOT ``'qa'`` — routing.py currently runs QA
+      BEFORE CodingAgent as ``final_gate``. Pre-coding QA has no PR to
+      validate so it would block every full_workflow/multi_domain task.
+      T22 will split pre/post QA; until then we exclude it here.
+
+    See pre-baked red-team findings #1 (QA pre-coding false-halt) and
+    #2 (block-vs-error disambiguation) in the T21 task brief.
+    """
+    if stamped_mode != "live":
+        return False
+    halted_on = result.get("halted_on")
+    if not halted_on:
+        return False
+    if halted_on == "qa":
+        return False
+    artifacts = result.get("artifacts") or {}
+    return artifacts.get(halted_on) == "block"
+
+
+def _extract_blocking_reasons(role: str, artifact: Any) -> list[str]:
+    """Return a non-empty list of human-readable reasons a specialist blocked.
+
+    Dispatch on role because each specialist puts its blocker-list under a
+    different payload key:
+
+    - business_analyst: ``payload.blocking_questions`` (list[str])
+    - security:         ``payload.blocking_concerns`` (list[str])
+    - stack_analyst, tech_lead, ux_designer, api_test: no blocker field;
+      fall back to ``[artifact.reasoning]``.
+
+    When the role-specific key is present but empty, we still fall back to
+    reasoning — an empty list tells an operator nothing. When both the key
+    and reasoning are empty we emit a generic sentinel so UI consumers can
+    rely on a non-empty list.
+
+    See pre-baked red-team finding #4 (per-role blocking_reasons extractor)
+    in the T21 task brief.
+    """
+    payload: dict[str, Any] = {}
+    reasoning: str | None = None
+    if artifact is not None:
+        payload = getattr(artifact, "payload", None) or {}
+        reasoning = getattr(artifact, "reasoning", None)
+
+    candidates: list[str] = []
+    if role == "business_analyst":
+        candidates = [str(q) for q in (payload.get("blocking_questions") or []) if q]
+    elif role == "security":
+        candidates = [str(c) for c in (payload.get("blocking_concerns") or []) if c]
+    # Other roles have no dedicated blocker field — fall through to reasoning.
+
+    if candidates:
+        return candidates
+    if reasoning:
+        return [str(reasoning)]
+    return [f"{role} specialist returned verdict=block without a reason"]
+
+
 class _OrchestratorWrapper:
     """Adapter exposing OrchestratorAgent.orchestrate() through `.run()`.
 
@@ -422,13 +504,54 @@ class _OrchestratorWrapper:
          ``TaskProducer().enqueue_task`` with the ORIGINAL payload, so
          downstream CodingAgent sees the same shape the user sent.
 
-    T20 is SHADOW-MODE ONLY — `halted_on` is logged but never halts the
-    pipeline. T21 adds strict gating + `blocked` status.
+    T21 adds strict gating: in live mode, a specialist returning
+    verdict=block transitions the task to status='blocked' and skips
+    the coding-task enqueue. In shadow mode, halts are still logged but
+    coding-task is enqueued anyway — so existing flows are unchanged
+    until an operator flips ORCHESTRATOR_MODE=live.
     """
 
     def __init__(self) -> None:
         from ai_driven.agents.orchestrator.agent import OrchestratorAgent
         self._inner = OrchestratorAgent()
+
+    @staticmethod
+    async def _load_blocker_artifact(
+        task_uuid: Any, role: str,
+    ) -> tuple[Any, str | None]:
+        """Return (Artifact-like, artifact_row_id_str) for (task_id, role).
+
+        Used by the T21 strict-gating halt path to capture the row id that
+        caused the block (for downstream UI deep-linking) and to pull the
+        payload out for _extract_blocking_reasons. Returns (None, None) on
+        any DB error — the caller still writes status=blocked with a
+        generic reason, which is better than crashing the worker.
+        """
+        from sqlalchemy import select
+        from ai_driven.db.postgres.models import TaskArtifact
+
+        try:
+            async with async_session_factory() as session:
+                res = await session.execute(
+                    select(TaskArtifact).where(
+                        TaskArtifact.task_id == task_uuid,
+                        TaskArtifact.role == role,
+                    )
+                )
+                row = res.scalar_one_or_none()
+                if row is None:
+                    return None, None
+                # Duck-type: _extract_blocking_reasons reads .payload and
+                # .reasoning — the ORM row exposes both so we pass it
+                # through without constructing a full Artifact dataclass.
+                return row, str(row.id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "blocker_artifact_lookup_failed",
+                extra={"task_id": str(task_uuid), "role": role},
+                exc_info=True,
+            )
+            return None, None
 
     async def run(self, payload: dict[str, Any], **run_kwargs: Any) -> Any:
         from datetime import datetime, timezone
@@ -442,6 +565,11 @@ class _OrchestratorWrapper:
         # when present (nested orchestrator shape) but fall back to the
         # TaskConsumer-provided kwarg.
         task_id_str = str(payload.get("task_id") or run_kwargs.get("task_id") or "")
+        # T21: the TaskConsumer passes orchestrator_mode through from the
+        # SQS message stamp (see producer). We default to 'shadow' so a
+        # direct caller (e.g. the debug inline path) that doesn't stamp
+        # gets the pre-T21 behaviour.
+        stamped_mode: str = str(run_kwargs.get("orchestrator_mode") or "shadow")
         task_uuid: _uuid.UUID | None = None
         try:
             task_uuid = _uuid.UUID(task_id_str) if task_id_str else None
@@ -528,11 +656,10 @@ class _OrchestratorWrapper:
                 }
                 halted_on = result.get("halted_on")
                 if halted_on:
-                    # T20: log specialist blocks but do NOT halt. T21 adds
-                    # strict gating + 'blocked' status migration.
                     logger.info(
                         "orchestrator_halted_on_specialist",
-                        extra={"task_id": task_id_str, "halted_on": halted_on},
+                        extra={"task_id": task_id_str, "halted_on": halted_on,
+                               "stamped_mode": stamped_mode},
                     )
                     marker_patch["orchestrator_halted_on"] = halted_on
                 try:
@@ -546,6 +673,63 @@ class _OrchestratorWrapper:
                         extra={"task_id": task_id_str},
                         exc_info=True,
                     )
+
+        # T21: strict-gating halt check. Only evaluated in live mode; shadow
+        # mode pre-T21 behaviour (always enqueue coding) is preserved.
+        # Pre-coding QA is excluded — see _should_halt_pipeline docstring.
+        if _should_halt_pipeline(result, stamped_mode) and task_uuid is not None:
+            halted_on = str(result.get("halted_on"))
+            blocker_artifact, blocker_id = await self._load_blocker_artifact(
+                task_uuid, halted_on,
+            )
+            reasons = _extract_blocking_reasons(halted_on, blocker_artifact)
+            logger.warning(
+                "orchestrator_strict_halt",
+                extra={
+                    "task_id": task_id_str,
+                    "halted_on": halted_on,
+                    "blocker_artifact_id": blocker_id,
+                    "reason_count": len(reasons),
+                },
+            )
+            try:
+                async with async_session_factory() as session:
+                    repo = TaskRepository(session)
+                    await repo.update_output_data(
+                        task_uuid,
+                        {
+                            "blocked_by": halted_on,
+                            "blocking_reasons": reasons,
+                            "blocker_artifact_id": blocker_id,
+                        },
+                    )
+                    await repo.update_status(task_uuid, "blocked")
+                    await session.commit()
+            except Exception:  # noqa: BLE001
+                logger.error(
+                    "orchestrator_block_persist_failed",
+                    extra={"task_id": task_id_str},
+                    exc_info=True,
+                )
+                # Fall through to raise so SQS redelivers; on a DB-only
+                # failure a redelivery will hit the idempotent-replay branch
+                # and re-attempt the block persistence.
+                raise
+            # Return early — do NOT enqueue coding-task. The
+            # orchestrator_completed_at marker was already persisted above
+            # so redelivery won't re-run orchestrate().
+            conv = Conversation()
+            totals = result.get("total_tokens") or {}
+            conv.total_input_tokens = int(totals.get("input", 0) or 0)
+            conv.total_output_tokens = int(totals.get("output", 0) or 0)
+            return AgentResult(
+                success=True,
+                output=json.dumps(result),
+                conversation=conv,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+            )
 
         # 4. Enqueue the coding-task with the ORIGINAL payload. We import
         #    locally to avoid a circular import between queue.producer and

@@ -285,3 +285,203 @@ async def test_orchestrator_worker_marks_task_failed_on_exception() -> None:
     assert fake_task.output_data.get("failure_reason") == "orchestrator_error"
     # NO downstream coding-task enqueued
     assert sent == []
+
+
+# ── T21 strict-gating integration tests ─────────────────────────────────────
+
+
+def _block_result(role: str) -> dict:
+    """orchestrate() return value simulating a specialist block."""
+    return {
+        "tier": "full_workflow",
+        "halted_on": role,
+        "specialists_run": [role],
+        "total_tokens": {"input": 200, "output": 80},
+        "artifacts": {role: "block"},
+    }
+
+
+class _FakeArtifactRow:
+    """Minimal TaskArtifact row stand-in for the blocker_artifact lookup."""
+
+    def __init__(self, role: str, *, payload=None, reasoning=None,
+                 artifact_id: str = "art-123"):
+        self.id = artifact_id
+        self.role = role
+        self.payload = payload or {}
+        self.reasoning = reasoning
+
+
+@pytest.mark.asyncio
+async def test_t21_shadow_mode_block_still_enqueues_coding() -> None:
+    """Shadow mode: BA block → coding-task STILL enqueued (pre-T21 behaviour)."""
+    task_uuid = uuid.uuid4()
+    task_id_str = str(task_uuid)
+
+    fake_task = _FakeTask()
+    fake_repo = _FakeTaskRepo(fake_task)
+    fake_session_factory = lambda: _FakeSession(fake_repo)  # noqa: E731
+
+    fake_orch = MagicMock()
+    fake_orch.orchestrate = AsyncMock(return_value=_block_result("business_analyst"))
+
+    sent: list[dict] = []
+    settings_mock = _settings_mock(orchestrator_mode="shadow")
+
+    from ai_driven.queue import consumer as consumer_module
+    from ai_driven.queue import producer as producer_module
+
+    with patch.object(consumer_module, "async_session_factory", fake_session_factory), \
+         patch.object(consumer_module, "TaskRepository",
+                      side_effect=lambda _s: fake_repo), \
+         patch.object(producer_module, "get_settings",
+                      return_value=settings_mock), \
+         patch.object(producer_module, "boto3") as mock_boto3, \
+         patch("ai_driven.agents.orchestrator.agent.OrchestratorAgent",
+               return_value=fake_orch):
+        downstream_client = MagicMock()
+        downstream_client.send_message.side_effect = lambda **kw: (
+            sent.append(kw) or {"MessageId": f"msg-{len(sent)}"}
+        )
+        mock_boto3.client.return_value = downstream_client
+
+        wrapper = consumer_module._OrchestratorWrapper()
+        # TaskConsumer would pass orchestrator_mode='shadow' through from the
+        # SQS message stamp.
+        await wrapper.run(
+            {"task_id": task_id_str, "message": "x"},
+            task_id=task_id_str,
+            orchestrator_mode="shadow",
+        )
+
+    # Coding task STILL enqueued — shadow mode never halts.
+    assert len(sent) == 1
+    assert sent[0]["QueueUrl"] == "https://sqs.local/coding"
+    # Task not marked blocked.
+    assert fake_task.status != "blocked"
+    # halted_on still written to output_data for telemetry.
+    assert fake_task.output_data.get("orchestrator_halted_on") == "business_analyst"
+
+
+@pytest.mark.asyncio
+async def test_t21_live_mode_block_halts_and_persists_blocked_status() -> None:
+    """Live mode: BA block → Task.status='blocked', no coding-task enqueued."""
+    task_uuid = uuid.uuid4()
+    task_id_str = str(task_uuid)
+
+    fake_task = _FakeTask()
+    fake_repo = _FakeTaskRepo(fake_task)
+    fake_session_factory = lambda: _FakeSession(fake_repo)  # noqa: E731
+
+    fake_orch = MagicMock()
+    fake_orch.orchestrate = AsyncMock(return_value=_block_result("business_analyst"))
+
+    sent: list[dict] = []
+    settings_mock = _settings_mock(orchestrator_mode="live")
+
+    from ai_driven.queue import consumer as consumer_module
+    from ai_driven.queue import producer as producer_module
+
+    # Stub the blocker-artifact lookup to return a BA payload with
+    # blocking_questions so _extract_blocking_reasons has real data.
+    blocker_row = _FakeArtifactRow(
+        "business_analyst",
+        payload={"blocking_questions": ["Is customer_id a uuid?"]},
+        reasoning="ambiguous spec",
+        artifact_id="ba-row-1",
+    )
+
+    async def _load_blocker(task_uuid_arg, role):
+        assert role == "business_analyst"
+        return blocker_row, blocker_row.id
+
+    with patch.object(consumer_module, "async_session_factory", fake_session_factory), \
+         patch.object(consumer_module, "TaskRepository",
+                      side_effect=lambda _s: fake_repo), \
+         patch.object(consumer_module._OrchestratorWrapper,
+                      "_load_blocker_artifact",
+                      staticmethod(_load_blocker)), \
+         patch.object(producer_module, "get_settings",
+                      return_value=settings_mock), \
+         patch.object(producer_module, "boto3") as mock_boto3, \
+         patch("ai_driven.agents.orchestrator.agent.OrchestratorAgent",
+               return_value=fake_orch):
+        downstream_client = MagicMock()
+        downstream_client.send_message.side_effect = lambda **kw: (
+            sent.append(kw) or {"MessageId": f"msg-{len(sent)}"}
+        )
+        mock_boto3.client.return_value = downstream_client
+
+        wrapper = consumer_module._OrchestratorWrapper()
+        await wrapper.run(
+            {"task_id": task_id_str, "message": "add customer lookup"},
+            task_id=task_id_str,
+            orchestrator_mode="live",
+        )
+
+    # Task transitioned to 'blocked' (T21 migration added this to ck_tasks_status).
+    assert fake_task.status == "blocked"
+    # Blocker details captured on output_data.
+    assert fake_task.output_data["blocked_by"] == "business_analyst"
+    assert fake_task.output_data["blocking_reasons"] == ["Is customer_id a uuid?"]
+    assert fake_task.output_data["blocker_artifact_id"] == "ba-row-1"
+    # Idempotency marker still written so SQS redelivery won't re-run specialists.
+    assert "orchestrator_completed_at" in fake_task.output_data
+    # NO coding-task enqueued.
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_t21_live_mode_qa_block_still_enqueues_coding() -> None:
+    """Live mode + QA block (pre-coding final_gate) → coding-task STILL enqueued.
+
+    routing.py currently runs QA BEFORE CodingAgent as ``final_gate``.
+    Pre-coding QA has no PR to validate so it would false-halt every
+    full_workflow / multi_domain task. T22 will split pre/post QA; until
+    then _should_halt_pipeline hard-codes the qa exclusion.
+
+    See pre-baked red-team finding #1 in the T21 task brief.
+    """
+    task_uuid = uuid.uuid4()
+    task_id_str = str(task_uuid)
+
+    fake_task = _FakeTask()
+    fake_repo = _FakeTaskRepo(fake_task)
+    fake_session_factory = lambda: _FakeSession(fake_repo)  # noqa: E731
+
+    fake_orch = MagicMock()
+    fake_orch.orchestrate = AsyncMock(return_value=_block_result("qa"))
+
+    sent: list[dict] = []
+    settings_mock = _settings_mock(orchestrator_mode="live")
+
+    from ai_driven.queue import consumer as consumer_module
+    from ai_driven.queue import producer as producer_module
+
+    with patch.object(consumer_module, "async_session_factory", fake_session_factory), \
+         patch.object(consumer_module, "TaskRepository",
+                      side_effect=lambda _s: fake_repo), \
+         patch.object(producer_module, "get_settings",
+                      return_value=settings_mock), \
+         patch.object(producer_module, "boto3") as mock_boto3, \
+         patch("ai_driven.agents.orchestrator.agent.OrchestratorAgent",
+               return_value=fake_orch):
+        downstream_client = MagicMock()
+        downstream_client.send_message.side_effect = lambda **kw: (
+            sent.append(kw) or {"MessageId": f"msg-{len(sent)}"}
+        )
+        mock_boto3.client.return_value = downstream_client
+
+        wrapper = consumer_module._OrchestratorWrapper()
+        await wrapper.run(
+            {"task_id": task_id_str, "message": "x"},
+            task_id=task_id_str,
+            orchestrator_mode="live",
+        )
+
+    # QA halt is IGNORED — coding-task still enqueued.
+    assert len(sent) == 1
+    assert sent[0]["QueueUrl"] == "https://sqs.local/coding"
+    # Task NOT blocked.
+    assert fake_task.status != "blocked"
+    assert "blocked_by" not in fake_task.output_data
