@@ -153,7 +153,11 @@ async def test_orchestrator_worker_happy_path() -> None:
     assert len(sent) == 1
     assert sent[0]["QueueUrl"] == "https://sqs.local/orch"
     body_1 = json.loads(sent[0]["MessageBody"])
-    assert body_1["agent_type"] == "coding"   # original preserved on wire
+    # Body agent_type is 'orchestrator' so the consumer dispatches the
+    # wrapper (not CodingAgent) when this message is received. The original
+    # agent_type is preserved under `downstream_agent_type`.
+    assert body_1["agent_type"] == "orchestrator"
+    assert body_1["downstream_agent_type"] == "coding"
     assert body_1["task_id"] == task_id_str
     original_payload = body_1["payload"]
 

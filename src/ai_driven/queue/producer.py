@@ -62,9 +62,11 @@ class TaskProducer:
         # orchestrator queue; the orchestrator worker re-enqueues coding
         # downstream via TaskProducer with the SAME payload shape.
         #
-        # We override the effective_agent_type locally so the ORIGINAL message
-        # body still carries agent_type='coding' — the orchestrator worker
-        # needs that to know which downstream queue to enqueue to after
+        # `effective_queue_type` selects the destination queue. When we route
+        # through the orchestrator queue, the message body's `agent_type` is
+        # set to 'orchestrator' (so the consumer dispatches _OrchestratorWrapper,
+        # not CodingAgent) and the ORIGINAL agent_type is preserved under
+        # `downstream_agent_type` for the wrapper to re-enqueue after
         # orchestrate() completes.
         effective_queue_type = agent_type
         if (
@@ -104,10 +106,20 @@ class TaskProducer:
         # orchestrator worker MUST read this stamp rather than re-consulting
         # settings.orchestrator_mode at execute time. See T21 red-team finding
         # #3 (SQS message stamping).
+        #
+        # When routing a coding-task through the orchestrator queue, the
+        # message body's agent_type MUST be 'orchestrator' — the consumer
+        # dispatches on this field to pick _OrchestratorWrapper vs CodingAgent.
+        # We preserve the original agent_type under `downstream_agent_type`
+        # for the wrapper to re-enqueue after orchestrate() completes.
         ctx = get_trace_context()
+        body_agent_type = (
+            "orchestrator" if effective_queue_type == "orchestrator" else agent_type
+        )
         message = {
             "task_id": task_id,
-            "agent_type": agent_type,
+            "agent_type": body_agent_type,
+            "downstream_agent_type": agent_type,
             "payload": payload,
             "orchestrator_mode": settings.orchestrator_mode,
             "trace_context": {

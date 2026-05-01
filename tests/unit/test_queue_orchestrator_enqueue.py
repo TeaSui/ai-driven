@@ -79,11 +79,14 @@ async def test_coding_task_routes_to_orchestrator_queue() -> None:
     assert call.kwargs["QueueUrl"] == "https://sqs.local/orch"
     # MessageGroupId reflects the effective queue, not the original agent_type
     assert call.kwargs["MessageGroupId"] == "orchestrator"
-    # The ORIGINAL agent_type stays on the wire so the orchestrator worker
-    # knows which downstream queue to enqueue to after orchestrate() runs.
+    # The message body's agent_type MUST be 'orchestrator' so the consumer
+    # dispatches _OrchestratorWrapper (not CodingAgent). The ORIGINAL
+    # agent_type is preserved under `downstream_agent_type` so the wrapper
+    # knows which downstream queue to re-enqueue to after orchestrate() runs.
     import json as _json
     body = _json.loads(call.kwargs["MessageBody"])
-    assert body["agent_type"] == "coding"
+    assert body["agent_type"] == "orchestrator"
+    assert body["downstream_agent_type"] == "coding"
     assert body["task_id"] == "t-1"
     assert body["payload"] == {"message": "do the thing"}
     # T21: orchestrator_mode stamped on the message body so a mid-deploy
