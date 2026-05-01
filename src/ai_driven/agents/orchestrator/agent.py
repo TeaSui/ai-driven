@@ -52,6 +52,7 @@ from ai_driven.agents.specialists.tech_lead.agent import TechLeadSpecialist
 from ai_driven.agents.specialists.ux_designer.agent import UxDesignerSpecialist
 from ai_driven.config import get_settings
 from ai_driven.db.postgres.session import async_session_factory
+from ai_driven.observability.metrics import emit_specialist_fallback_activated
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,24 @@ class OrchestratorAgent(BaseAgent):
             plan.picked = picked
 
         # 4. Run sequence, fanning out prior artifacts, halting on block
+        #
+        # Fallback-on-error semantics (T-A1, 2026-05-01). When
+        # ``settings.orchestrator_treat_errors_as_pass`` is True:
+        #   * verdict='error' artifacts are persisted as-is (DB preserves the
+        #     audit trail),
+        #   * downstream specialists receive an empty prior_artifact for the
+        #     errored role (we drop it from the fan-out source dict so
+        #     ``relevant_artifacts_for`` can't return it), and
+        #   * the pipeline does NOT halt.
+        # When the flag is False we restore strict semantics: verdict='error'
+        # is treated the same as verdict='block' (halts the pipeline). The
+        # flag is defaulted True for lenient shipping; flip False under
+        # controlled smoke tests / T0 reruns to re-measure the raw error
+        # rate without fallback masking. See docs/phase2-error-audit.md.
         artifacts: dict[str, Artifact] = {}
         halted_on: str | None = None
+        treat_errors_as_pass = get_settings().orchestrator_treat_errors_as_pass
+        fallback_activated_roles: list[str] = []
 
         for role in plan.full_sequence():
             # UX is conditional on stacks
@@ -140,12 +157,21 @@ class OrchestratorAgent(BaseAgent):
                 if sa is None or not should_run_ux_designer(sa.payload):
                     continue
 
+            # Build the source dict for fan-out. When fallback is active we
+            # silently drop errored upstream artifacts so downstream
+            # specialists don't try to reason over an empty payload — they
+            # get "no prior artifact for that role" instead.
+            fan_out_source = (
+                {r: a for r, a in artifacts.items() if a.verdict != "error"}
+                if treat_errors_as_pass
+                else dict(artifacts)
+            )
             ctx = SpecialistContext(
                 task_id=task_id,
                 ticket=ticket,
                 repo=repo,
                 tier=tier,
-                prior_artifacts=relevant_artifacts_for(role, artifacts),
+                prior_artifacts=relevant_artifacts_for(role, fan_out_source),
                 team_settings={},
             )
             artifact = await self._dispatch_specialist(role, ctx)
@@ -158,7 +184,18 @@ class OrchestratorAgent(BaseAgent):
                 "verdict": artifact.verdict,
             })
             await self._persist_artifact(task_id, artifact)
+
             if artifact.verdict == "block":
+                halted_on = role
+                break
+            if artifact.verdict == "error":
+                if treat_errors_as_pass:
+                    # Observability choke point — without this counter the
+                    # lenient default silently masks a rising error rate.
+                    emit_specialist_fallback_activated(role)
+                    fallback_activated_roles.append(role)
+                    continue
+                # Strict mode: error halts the pipeline exactly like block.
                 halted_on = role
                 break
 
@@ -167,6 +204,7 @@ class OrchestratorAgent(BaseAgent):
             "specialists_run": list(artifacts.keys()),
             "halted_on": halted_on,
             "shadow": self._is_shadow_mode(),
+            "fallback_activated": fallback_activated_roles,
         })
         return {
             "tier": tier,
@@ -175,6 +213,7 @@ class OrchestratorAgent(BaseAgent):
             "shadow": self._is_shadow_mode(),
             "artifacts": {r: a.verdict for r, a in artifacts.items()},
             "total_tokens": dict(self._total_tokens),
+            "fallback_activated": fallback_activated_roles,
         }
 
     # --- helpers ------------------------------------------------------

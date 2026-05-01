@@ -154,6 +154,27 @@ class Settings(BaseSettings):
     #   off:    skip orchestrator entirely; tasks route as before.
     orchestrator_mode: str = "shadow"
 
+    # When True, specialist verdict='error' rows are persisted for audit but
+    # treated as verdict='pass' for downstream fan-out — i.e. the pipeline
+    # does NOT halt on infrastructure failures. Default True per T-A1: even
+    # after the max_output_tokens + prefill fixes drove the error rate below
+    # 15%, a non-zero infra-flake baseline still exists (AWS credit
+    # exhaustion, transient Bedrock/Anthropic 5xx) and we'd rather ship a
+    # lenient default than halt a full_workflow because the Security
+    # specialist hit a throttle. Downstream specialists that consumed the
+    # errored role's artifact receive an empty prior_artifact for that role
+    # (fan_out.py silently skips errored roles when this flag is True) and
+    # continue. Every fallback activation emits
+    # ``orchestrator.specialist.fallback_activated{role}`` as a DataDog
+    # counter so the bypass is observable — without it this flag would
+    # silently mask a creeping error-rate regression.
+    #
+    # Flip to False to restore strict semantics: error == block, pipeline
+    # halts, task.status='blocked'. Useful for smoke tests + T0 reruns
+    # where you want to measure the real specialist error rate without the
+    # fallback masking it.
+    orchestrator_treat_errors_as_pass: bool = True
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 

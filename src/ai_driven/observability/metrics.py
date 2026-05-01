@@ -104,6 +104,25 @@ def emit_review_metrics(
         statsd.increment("ai.review.model_used", 1, tags=tags)
 
 
+def emit_specialist_fallback_activated(role: str) -> None:
+    """Emit a counter every time the orchestrator bypasses a specialist error.
+
+    Fires when ``orchestrator_treat_errors_as_pass=True`` and a specialist
+    returns ``verdict='error'`` — the orchestrator preserves the error in
+    the DB but fan-outs as if it were a pass. Without this counter the
+    lenient mode would silently absorb infrastructure regressions; pair
+    with ``ai.specialist.verdict{role, verdict:error}`` (if present) on a
+    DataDog monitor to alert when fallback_activated / total_specialist_calls
+    exceeds ~15% for any role. See docs/phase2-error-audit.md.
+    """
+    statsd = _get_statsd()
+    statsd.increment(
+        "orchestrator.specialist.fallback_activated",
+        1,
+        tags=[f"role:{role}"],
+    )
+
+
 @contextmanager
 def track_duration(metric_name: str, tags: list[str] | None = None) -> Generator[None]:
     """Context manager to track operation duration."""
