@@ -29,6 +29,11 @@ router = APIRouter()
 from ai_driven.api.admin.override import router as _override_router  # noqa: E402
 router.include_router(_override_router)
 
+# T25: admin GET artifacts endpoint. Same pattern — separate module,
+# mounted here so the whole admin surface is one router.
+from ai_driven.api.admin.artifacts import router as _artifacts_router  # noqa: E402
+router.include_router(_artifacts_router)
+
 # ---- Validation constants ----
 _FULL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 _VALID_SCM_TYPES = {"github", "bitbucket"}
