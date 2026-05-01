@@ -182,7 +182,21 @@ class TaskConsumer:
 
             async with async_session_factory() as session:
                 task_repo = TaskRepository(session)
-                status = "completed" if result.success else "failed"
+                # T26 live-mode fix: the _OrchestratorWrapper (blocked) and
+                # _QaPostCodingWrapper (qa_failed) both commit a terminal
+                # status BEFORE returning a successful AgentResult. An
+                # unconditional overwrite to 'completed' here silently
+                # re-opens a gated task. Respect wrapper-committed terminal
+                # states by re-reading the current status and skipping the
+                # transition if the wrapper already moved us to a terminal
+                # gate state.
+                GATE_COMMITTED_STATUSES = frozenset({"blocked", "qa_failed"})
+                current = await task_repo.get_by_id(task_id)
+                current_status = getattr(current, "status", None) if current else None
+                if current_status in GATE_COMMITTED_STATUSES:
+                    status = current_status
+                else:
+                    status = "completed" if result.success else "failed"
 
                 # Merge the run-result into output_data instead of overwriting
                 # it. CodingAgent writes `pr_number` + `pr_url` mid-run (via
