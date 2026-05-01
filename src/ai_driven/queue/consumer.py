@@ -116,9 +116,10 @@ class TaskConsumer:
 
         logger.info("task_processing_start", extra={"queue_url": queue_url})
 
-        # Start heartbeat
+        # Start heartbeat — pass task_id so the loop can tick
+        # tasks.last_heartbeat_at for T24 reapers.
         heartbeat_task = asyncio.create_task(
-            self._heartbeat(queue_url, receipt_handle)
+            self._heartbeat(queue_url, receipt_handle, task_id=task_id)
         )
 
         try:
@@ -284,9 +285,21 @@ class TaskConsumer:
             clear_trace()
 
     async def _heartbeat(
-        self, queue_url: str, receipt_handle: str, interval: int = 300
+        self,
+        queue_url: str,
+        receipt_handle: str,
+        task_id: str | None = None,
+        interval: int = 300,
     ) -> None:
-        """Extend SQS visibility timeout periodically for long-running tasks."""
+        """Extend SQS visibility timeout + write ``tasks.last_heartbeat_at``.
+
+        T24 adds the DB write: the reapers read ``last_heartbeat_at`` to
+        tell a stuck task from one an active worker is processing. A
+        failure to update the DB MUST NOT kill the SQS visibility extension
+        (or vice versa) — these are independent survival signals and an
+        outage in one shouldn't cascade. Each step is guarded in its own
+        try/except.
+        """
         while True:
             await asyncio.sleep(interval)
             try:
@@ -304,6 +317,19 @@ class TaskConsumer:
                 )
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
+
+            # Write last_heartbeat_at in a fresh session so the reaper
+            # can tell this worker is alive. Fresh session (not the one
+            # the agent is using) — the agent session may be mid-txn
+            # with a long-held row lock and we don't want the heartbeat
+            # blocked behind it.
+            if task_id:
+                try:
+                    async with async_session_factory() as s:
+                        await TaskRepository(s).touch_heartbeat(task_id)
+                        await s.commit()
+                except Exception as e:
+                    logger.warning("Heartbeat DB write failed: %s", e)
 
     @staticmethod
     async def _sum_specialist_cost_usd(task_id: Any) -> float:

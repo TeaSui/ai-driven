@@ -166,6 +166,26 @@ class TaskRepository:
         )
         return list(result.scalars().all())
 
+    async def touch_heartbeat(self, task_id: uuid.UUID | str) -> None:
+        """Set ``last_heartbeat_at = now()`` for this task.
+
+        Called every 5 min by the SQS consumer heartbeat loop while a
+        task is in flight. The T24 reapers (background/reapers.py) read
+        this column to tell a truly stuck task from one a worker is
+        actively processing. One-line helper — keep it tight because
+        this runs on every tick of every in-flight task.
+
+        Accepts either a UUID or a string (the consumer has the id as a
+        string) and normalizes.
+        """
+        if isinstance(task_id, str):
+            task_id = uuid.UUID(task_id)
+        await self._session.execute(
+            update(Task)
+            .where(Task.id == task_id)
+            .values(last_heartbeat_at=datetime.now(timezone.utc))
+        )
+
 
 class ReviewRepository:
     def __init__(self, session: AsyncSession) -> None:
