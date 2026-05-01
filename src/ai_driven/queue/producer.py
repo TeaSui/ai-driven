@@ -97,12 +97,19 @@ class TaskProducer:
             )
             return f"inline-{task_id}"
 
-        # Propagate trace context so the worker can continue the same trace
+        # Propagate trace context so the worker can continue the same trace.
+        # We ALSO stamp the current orchestrator_mode onto the message body so
+        # a mid-deploy config flip ('shadow' → 'live' or vice versa) can't
+        # change the halt semantics of a task that's already in flight. The
+        # orchestrator worker MUST read this stamp rather than re-consulting
+        # settings.orchestrator_mode at execute time. See T21 red-team finding
+        # #3 (SQS message stamping).
         ctx = get_trace_context()
         message = {
             "task_id": task_id,
             "agent_type": agent_type,
             "payload": payload,
+            "orchestrator_mode": settings.orchestrator_mode,
             "trace_context": {
                 "trace_id": ctx["trace_id"],
                 "team_id": ctx["team_id"],

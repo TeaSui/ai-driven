@@ -86,6 +86,45 @@ async def test_coding_task_routes_to_orchestrator_queue() -> None:
     assert body["agent_type"] == "coding"
     assert body["task_id"] == "t-1"
     assert body["payload"] == {"message": "do the thing"}
+    # T21: orchestrator_mode stamped on the message body so a mid-deploy
+    # flip can't confuse a task that's already in flight.
+    assert body["orchestrator_mode"] == "shadow"
+
+
+@pytest.mark.asyncio
+async def test_message_body_stamps_orchestrator_mode_live() -> None:
+    """T21: producer stamps orchestrator_mode='live' when settings say live."""
+    prod, sqs, settings_mock = _make_producer(orchestrator_mode="live")
+
+    with patch("ai_driven.queue.producer.get_settings",
+               return_value=settings_mock):
+        await prod.enqueue_task(
+            task_id="t-live", agent_type="coding",
+            payload={"message": "do the thing"},
+        )
+
+    sqs.send_message.assert_called_once()
+    import json as _json
+    body = _json.loads(sqs.send_message.call_args.kwargs["MessageBody"])
+    assert body["orchestrator_mode"] == "live"
+
+
+@pytest.mark.asyncio
+async def test_message_body_stamps_orchestrator_mode_for_non_coding() -> None:
+    """Stamp is present for every agent_type — review/devops/etc — for uniform worker parsing."""
+    prod, sqs, settings_mock = _make_producer(orchestrator_mode="shadow")
+
+    with patch("ai_driven.queue.producer.get_settings",
+               return_value=settings_mock):
+        await prod.enqueue_task(
+            task_id="r-stamp", agent_type="review",
+            payload={"message": "x"},
+        )
+
+    sqs.send_message.assert_called_once()
+    import json as _json
+    body = _json.loads(sqs.send_message.call_args.kwargs["MessageBody"])
+    assert body["orchestrator_mode"] == "shadow"
 
 
 @pytest.mark.asyncio
