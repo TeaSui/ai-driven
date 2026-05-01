@@ -3,7 +3,7 @@
 **Date:** 2026-05-01
 **Branch:** `feature/orchestrator-phase1`
 **Source:** `task_artifacts` + `tasks` on the local Postgres dev DB.
-**Generator:** `scripts/phase2_shadow_baseline.py` (read-only).
+**Generator:** `scripts/phase2_shadow_baseline_archive.py` (read-only; archived in T28 — see module docstring).
 
 ## TL;DR
 
@@ -171,7 +171,7 @@ one of the following instead:
 ## Appendix A: reproduction
 
 ```
-.venv/bin/python scripts/phase2_shadow_baseline.py
+.venv/bin/python scripts/phase2_shadow_baseline_archive.py
 ```
 
 Reads `task_artifacts` + `tasks` via `async_session_factory`. Read-only,

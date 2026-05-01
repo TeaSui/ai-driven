@@ -1,8 +1,22 @@
-"""T0: Shadow baseline analysis.
+"""ARCHIVED — superseded by phase2_dogfood_report.py (T27).
 
-Queries task_artifacts + tasks to compute per-role verdict distribution,
-block false-positive rate, and emits a JSON summary consumed by the
-phase2-shadow-baseline report generator.
+Kept for historical runs of the T0 shadow baseline (Phase 2 pre-flight
+measurement). The current Phase 2 metric pipeline is the dogfood harness
+(``scripts/phase2_dogfood_harness.py``) + report generator
+(``scripts/phase2_dogfood_report.py``), which measure real block/override
+decisions under live gating rather than dry-run verdict distributions.
+
+Do NOT modify. If you need new baseline metrics, extend
+``phase2_dogfood_report.py`` instead — this file is preserved only so the
+T0 and T0-rerun numbers in ``docs/phase2-shadow-baseline.md`` remain
+reproducible from source.
+
+Original docstring:
+    T0: Shadow baseline analysis.
+
+    Queries task_artifacts + tasks to compute per-role verdict distribution,
+    block false-positive rate, and emits a JSON summary consumed by the
+    phase2-shadow-baseline report generator.
 """
 
 from __future__ import annotations
