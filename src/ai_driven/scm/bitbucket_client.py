@@ -68,11 +68,15 @@ def _raise_for_status(response: httpx.Response) -> None:
         raise SCMNotFoundError(f"Resource not found: {response.url}")
 
     if status == 422:
+        structured: dict | None = None
         try:
-            detail = response.json()
+            parsed = response.json()
+            if isinstance(parsed, dict):
+                structured = parsed
+            detail: Any = parsed
         except Exception:
             detail = response.text
-        raise SCMValidationError(f"Validation error: {detail}")
+        raise SCMValidationError(f"Validation error: {detail}", detail=structured)
 
     if status == 429:
         retry_after = int(response.headers.get("Retry-After", "60"))
@@ -332,6 +336,33 @@ class BitbucketClient:
             params={"state": state, "page": str(page), "pagelen": str(pagelen)},
         )
         return [self._parse_pr(pr) for pr in resp.json().get("values", [])]
+
+    async def find_pr_by_branch(
+        self, repo_full_name: str, branch_ref: str
+    ) -> tuple[int, str] | None:
+        """Look up an open PR by its source branch.
+
+        Used to recover a PR id/URL after a 422 "pull request already exists"
+        response. Bitbucket supports a ``q`` BBQL filter on the pullrequests
+        endpoint — we query ``source.branch.name`` rather than paginating the
+        full open list.
+
+        Returns ``(pr_id, url)`` or ``None`` if no open PR matches.
+        """
+        if not branch_ref:
+            return None
+        q = f'state="OPEN" AND source.branch.name="{branch_ref}"'
+        resp = await self._request(
+            "GET",
+            f"/repositories/{repo_full_name}/pullrequests",
+            params={"q": q, "pagelen": "1"},
+        )
+        values = (resp.json() or {}).get("values") or []
+        if not values:
+            return None
+        pr = values[0]
+        url = ((pr.get("links") or {}).get("html") or {}).get("href") or ""
+        return (int(pr["id"]), url)
 
     async def get_pr_diff(
         self, repo_full_name: str, pr_number: int

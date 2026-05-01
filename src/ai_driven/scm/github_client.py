@@ -89,11 +89,15 @@ def _raise_for_status(response: httpx.Response) -> None:
         raise SCMNotFoundError(f"Resource not found: {response.url}")
 
     if status == 422:
+        structured: dict | None = None
         try:
-            detail = response.json()
+            parsed = response.json()
+            if isinstance(parsed, dict):
+                structured = parsed
+            detail: Any = parsed
         except Exception:
             detail = response.text
-        raise SCMValidationError(f"Validation error: {detail}")
+        raise SCMValidationError(f"Validation error: {detail}", detail=structured)
 
     if status == 429 or (
         status == 403
@@ -390,6 +394,37 @@ class GitHubClient:
             params={"state": state, "page": page, "per_page": per_page},
         )
         return [self._parse_pr(pr) for pr in resp.json()]
+
+    async def find_pr_by_branch(
+        self, repo_full_name: str, branch_ref: str
+    ) -> tuple[int, str] | None:
+        """Look up an open PR by its source branch.
+
+        Used to recover a PR number/URL after a 422 "pull request already
+        exists" response — GitHub's 422 body only echoes the branch ref, not
+        the PR number, so we have to follow up with a GET filtered by
+        ``head``.
+
+        ``branch_ref`` may be passed as a bare branch name (e.g. ``feat/x``)
+        or already qualified with the owner prefix (``owner:feat/x``) — both
+        forms are accepted by GitHub's ``head`` filter so we forward as-is.
+
+        Returns ``(pr_number, url)`` or ``None`` if no open PR matches.
+        """
+        if "/" not in repo_full_name or not branch_ref:
+            return None
+        owner = repo_full_name.split("/", 1)[0]
+        head = branch_ref if ":" in branch_ref else f"{owner}:{branch_ref}"
+        resp = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/pulls",
+            params={"state": "open", "head": head, "per_page": 1},
+        )
+        items = resp.json() or []
+        if not items:
+            return None
+        pr = items[0]
+        return (int(pr["number"]), pr.get("html_url") or "")
 
     async def get_pr_diff(
         self, repo_full_name: str, pr_number: int

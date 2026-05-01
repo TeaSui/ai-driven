@@ -24,9 +24,23 @@ class SCMRateLimitError(SCMError):
 
 
 class SCMValidationError(SCMError):
-    """Validation error from the SCM API (HTTP 422)."""
+    """Validation error from the SCM API (HTTP 422).
 
-    pass
+    Carries an optional structured ``detail`` dict populated from the API's
+    JSON error body when available. Callers recovering from the "pull request
+    already exists" case should inspect ``.detail`` rather than string-matching
+    ``str(exc)`` — provider error messages shift over time and can be
+    localized, but the structured body is stable.
+
+    ``detail`` is ``None`` when the response body was not parseable JSON (e.g.
+    a text error from a proxy in front of the provider), in which case the
+    stringified body is preserved in the exception ``args``/``message`` as
+    before.
+    """
+
+    def __init__(self, message: str, detail: dict | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail
 
 
 class SCMAuthError(SCMError):
