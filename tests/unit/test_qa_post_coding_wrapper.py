@@ -25,9 +25,13 @@ from ai_driven.queue import consumer as consumer_mod
 from ai_driven.queue.consumer import _QaPostCodingWrapper
 
 
-def _mk_task_row(output_data: dict | None = None) -> MagicMock:
+def _mk_task_row(
+    output_data: dict | None = None,
+    status: str = "awaiting_qa",
+) -> MagicMock:
     row = MagicMock()
     row.output_data = output_data or {}
+    row.status = status
     return row
 
 

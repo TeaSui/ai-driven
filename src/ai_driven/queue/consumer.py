@@ -1002,6 +1002,115 @@ class _QaPostCodingWrapper:
     def __init__(self, scm_client: Any = None) -> None:
         self._scm = scm_client
 
+    async def _replay_recover_from_stored_verdict(
+        self,
+        *,
+        task_uuid: Any,
+        task_id_str: str,
+        existing_output: dict[str, Any],
+        stamped_mode: str,
+    ) -> None:
+        """T23 B1: finish the gate for a task stranded in awaiting_qa.
+
+        Runs when a prior SQS delivery crashed between the artifact
+        commit and the status transition. Reconstructs the gate from
+        the stored verdict + stored artifact payload -- NO Claude call,
+        NO specialist retry, no double-billing.
+
+        Uses ``ArtifactRepository.list_for_task`` (already exists, not
+        a new method) to load the previously-persisted QA artifact.
+        If the prior artifact is somehow missing (should be impossible
+        given the commit ordering in ``_persist_qa_artifact_and_marker``)
+        we leave the row alone and emit a counter so ops can inspect.
+        """
+        from ai_driven.agents.orchestrator.qa_gate import decide_qa_gate
+        from ai_driven.agents.orchestrator.repository import ArtifactRepository
+        from ai_driven.observability.metrics import emit_counter
+
+        stored_verdict = existing_output.get("qa_verdict", "error")
+
+        prior_artifact = None
+        try:
+            async with async_session_factory() as session:
+                prior_map = await ArtifactRepository(session).list_for_task(
+                    task_uuid,
+                )
+            prior_artifact = prior_map.get("qa")
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "qa_post_coding_replay_artifact_load_failed",
+                extra={"task_id": task_id_str},
+                exc_info=True,
+            )
+
+        if prior_artifact is None:
+            emit_counter("qa.gate.replay_missing_artifact")
+            logger.error(
+                "qa_post_coding_replay_missing_artifact",
+                extra={"task_id": task_id_str,
+                       "qa_verdict": stored_verdict},
+            )
+            return
+
+        decision = decide_qa_gate(
+            stored_verdict,
+            dict(prior_artifact.payload or {}),
+            stamped_mode,
+        )
+
+        if decision.new_status is None:
+            # Shadow mode or unknown verdict -- nothing to apply.
+            emit_counter("qa.gate.replay_no_transition")
+            return
+
+        # Compare-and-set. We know current status == "awaiting_qa" by
+        # the caller's guard, but re-check inside the transaction to
+        # guard against a concurrent admin override / reaper that
+        # just transitioned the row. Mirrors the guard in
+        # _persist_qa_artifact_and_marker so replay + first-delivery
+        # behave identically under race.
+        try:
+            async with async_session_factory() as session:
+                task_repo = TaskRepository(session)
+                task_row = await task_repo.get_by_id(task_uuid)
+                current = task_row.status if task_row is not None else None
+                if current != "awaiting_qa":
+                    emit_counter(
+                        "qa.gate.status_mismatch",
+                        tags=[f"current:{current or 'unknown'}"],
+                    )
+                    logger.warning(
+                        "qa_gate_replay_status_mismatch",
+                        extra={"task_id": task_id_str,
+                               "current_status": current,
+                               "desired_status": decision.new_status},
+                    )
+                    return
+                await task_repo.update_status(task_uuid, decision.new_status)
+                if decision.qa_failures and not existing_output.get("qa_failures"):
+                    # Backfill qa_failures if the prior delivery somehow
+                    # skipped it (pre-T23 partially-landed state).
+                    await task_repo.update_output_data(
+                        task_uuid, {"qa_failures": decision.qa_failures},
+                    )
+                await session.commit()
+        except Exception:  # noqa: BLE001
+            logger.error(
+                "qa_post_coding_replay_persist_failed",
+                extra={"task_id": task_id_str},
+                exc_info=True,
+            )
+            return
+
+        emit_counter("qa.gate.replay_recovered")
+        logger.info(
+            "qa_post_coding_replay_recovered",
+            extra={"task_id": task_id_str,
+                   "new_status": decision.new_status,
+                   "stored_verdict": stored_verdict,
+                   "stamped_mode": stamped_mode},
+        )
+
     async def run(
         self, payload: dict[str, Any], **run_kwargs: Any
     ) -> Any:
@@ -1041,13 +1150,15 @@ class _QaPostCodingWrapper:
             emit_counter("qa.post_coding.missing_task_id")
             return _synthesize_noop_result()
 
-        # 1. Idempotency + load existing output_data.
+        # 1. Idempotency + load existing output_data + current status.
         existing_output: dict[str, Any] = {}
+        current_status: str | None = None
         try:
             async with async_session_factory() as session:
                 task_row = await TaskRepository(session).get_by_id(task_uuid)
                 if task_row is not None:
                     existing_output = dict(task_row.output_data or {})
+                    current_status = task_row.status
         except Exception:  # noqa: BLE001
             logger.warning(
                 "qa_post_coding_task_load_failed",
@@ -1056,10 +1167,30 @@ class _QaPostCodingWrapper:
             )
 
         if existing_output.get("qa_completed_at"):
+            # T23 B1 red-team fix: the idempotency guard used to be
+            # "if qa_completed_at present -> return". That leaves any
+            # task whose prior delivery crashed AFTER artifact-commit
+            # but BEFORE the status transition stuck in awaiting_qa.
+            # SQS redelivery used to repeat the same short-circuit so
+            # the task was stranded forever.
+            #
+            # New behaviour: if the status is STILL awaiting_qa, reload
+            # the stored artifact + verdict and re-apply the gate. Pure
+            # DB work -- no Claude retry, no double-billing.
+            if current_status == "awaiting_qa":
+                await self._replay_recover_from_stored_verdict(
+                    task_uuid=task_uuid,
+                    task_id_str=task_id_str,
+                    existing_output=existing_output,
+                    stamped_mode=stamped_mode,
+                )
+                return _synthesize_noop_result()
+
             logger.info(
                 "qa_post_coding_skip_idempotent",
                 extra={"task_id": task_id_str,
-                       "qa_completed_at": existing_output.get("qa_completed_at")},
+                       "qa_completed_at": existing_output.get("qa_completed_at"),
+                       "current_status": current_status},
             )
             return _synthesize_noop_result()
 
