@@ -114,6 +114,37 @@ class TaskRepository:
             update(Task).where(Task.id == task_id).values(**values)
         )
 
+    async def update_output_data(
+        self, task_id: uuid.UUID, patch: dict[str, Any]
+    ) -> None:
+        """Merge ``patch`` into ``Task.output_data`` without erasing existing keys.
+
+        ``update_status(..., output_data=...)`` OVERWRITES the whole column,
+        which silently drops any keys a prior write had set (e.g. pr_number
+        vs branch_name vs pr_url written by different code paths). This
+        helper does a read-modify-write inside a single session so two
+        callers persisting different keys cannot stomp on each other.
+
+        Keys present in ``patch`` win over pre-existing values (standard
+        dict.update semantics). Passing an empty patch is a no-op — we
+        still avoid issuing an UPDATE.
+
+        Note: we intentionally use Python-side merge rather than Postgres
+        JSONB ``||`` concat because the column is declared as ``JSON`` (not
+        JSONB) in ``models.py`` and the test suite uses SQLite in-memory
+        for unit tests, neither of which supports the ``||`` operator.
+        """
+        if not patch:
+            return
+        existing_task = await self._session.get(Task, task_id)
+        if existing_task is None:
+            return
+        current = dict(existing_task.output_data or {})
+        current.update(patch)
+        await self._session.execute(
+            update(Task).where(Task.id == task_id).values(output_data=current)
+        )
+
     async def get_active_count_for_team(self, team_id: uuid.UUID) -> int:
         result = await self._session.execute(
             select(Task).where(
