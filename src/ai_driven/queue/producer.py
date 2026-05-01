@@ -126,6 +126,16 @@ class TaskProducer:
     ) -> None:
         """Fire-and-forget direct invocation of OrchestratorAgent.
 
+        The caller (chat/router.py send_message) passes a FLAT payload:
+            {message, jira_key, repo_full_name, scm_type, labels, ...}
+        OrchestratorAgent.orchestrate() wants a NESTED shape:
+            {task_id, ticket: {key, summary, description, labels,
+             acceptance_criteria}, repo: {full_name, scm_type, default_branch}}
+
+        Without this transform the classifier sees empty dicts and always
+        returns the default tier. Translate here so both this direct path
+        and any future dispatch path get identical behavior.
+
         We do NOT re-enter enqueue_task with agent_type='orchestrator' —
         that would either hit an empty queue URL or the inline-fallback
         dispatch in consumer.py, neither of which knows about the
@@ -136,7 +146,21 @@ class TaskProducer:
 
         from ai_driven.agents.orchestrator.agent import OrchestratorAgent
 
-        shadow_payload = {**payload, "task_id": task_id}
+        shadow_payload = {
+            "task_id": task_id,
+            "ticket": {
+                "key": payload.get("jira_key", ""),
+                "summary": payload.get("title") or payload.get("message", ""),
+                "description": payload.get("message", ""),
+                "labels": payload.get("labels", []),
+                "acceptance_criteria": payload.get("acceptance_criteria", []),
+            },
+            "repo": {
+                "full_name": payload.get("repo_full_name", ""),
+                "scm_type": payload.get("scm_type", "github"),
+                "default_branch": payload.get("default_branch", "main"),
+            },
+        }
         orch = OrchestratorAgent()
         asyncio.create_task(_run_shadow(orch, shadow_payload))
 

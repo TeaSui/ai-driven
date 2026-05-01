@@ -239,14 +239,36 @@ class SpecialistBase(BaseAgent):
 
         user_prompt = self._build_user_prompt(ctx)
 
-        # Call Claude with prefill + stop_sequence. NOTE: no char/4 pre-flight
-        # guard — see module docstring §1.
+        # Provider-aware request shape.
+        #
+        # Anthropic Direct supports the assistant-prefill pattern
+        # ({"role":"assistant","content":"```json\n{"} + stop_sequences=["```"])
+        # which strongly biases the model toward valid JSON on round 1.
+        #
+        # Bedrock-hosted Claude REJECTS prefill with ValidationException:
+        # "This model does not support assistant message prefill. The
+        # conversation must end with a user message."
+        #
+        # Drop the prefill when the active provider is Bedrock and rely on the
+        # <output_schema> instruction + JSON repair loop instead. Slightly
+        # higher chance of round-1 failure (repair loop picks up the slack),
+        # but works on both providers.
+        from ai_driven.config import get_settings as _get_settings
+        provider_is_bedrock = _get_settings().claude_provider == "bedrock"
+
+        if provider_is_bedrock:
+            messages = [{"role": "user", "content": user_prompt}]
+            stop_sequences = None
+        else:
+            messages = [
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": "```json\n{"},
+            ]
+            stop_sequences = ["```"]
+
         try:
             response = await self._claude.chat(
-                messages=[
-                    {"role": "user", "content": user_prompt},
-                    {"role": "assistant", "content": "```json\n{"},
-                ],
+                messages=messages,
                 system=[{
                     "type": "text",
                     "text": self._system_prompt(),
@@ -255,7 +277,7 @@ class SpecialistBase(BaseAgent):
                 model=model,
                 max_tokens=self.max_output_tokens,
                 temperature=0.0,
-                stop_sequences=["```"],
+                stop_sequences=stop_sequences,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("Specialist %s call failed", self.role)
@@ -269,23 +291,43 @@ class SpecialistBase(BaseAgent):
         input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
 
-        # Stop-reason guard (revision §3). The prefill + stop_sequence pattern
-        # can silently produce valid-looking but truncated JSON when the model
-        # hits max_tokens mid-object; refuse to trust anything that didn't
-        # cleanly terminate on the explicit stop sequence.
+        # Stop-reason guard (revision §3). Only meaningful for the
+        # prefill+stop_sequence path (Anthropic Direct). For Bedrock we
+        # accept end_turn as the natural terminator; max_tokens is the only
+        # failure mode that indicates truncation.
         stop_reason = getattr(response, "stop_reason", None)
-        if stop_reason != "stop_sequence":
-            return await self._complete(ctx, Artifact(
-                role=self.role, verdict="error",
-                reasoning=(
-                    f"unexpected stop_reason={stop_reason!r} — output "
-                    "likely truncated; refusing to parse JSON"
-                ),
-                payload={}, model_used=model,
-                input_tokens=input_tokens, output_tokens=output_tokens,
-            ))
+        if provider_is_bedrock:
+            if stop_reason == "max_tokens":
+                return await self._complete(ctx, Artifact(
+                    role=self.role, verdict="error",
+                    reasoning=(
+                        f"output truncated (stop_reason=max_tokens); "
+                        "refusing to parse partial JSON"
+                    ),
+                    payload={}, model_used=model,
+                    input_tokens=input_tokens, output_tokens=output_tokens,
+                ))
+        else:
+            if stop_reason != "stop_sequence":
+                return await self._complete(ctx, Artifact(
+                    role=self.role, verdict="error",
+                    reasoning=(
+                        f"unexpected stop_reason={stop_reason!r} — output "
+                        "likely truncated; refusing to parse JSON"
+                    ),
+                    payload={}, model_used=model,
+                    input_tokens=input_tokens, output_tokens=output_tokens,
+                ))
 
-        raw_text = "```json\n{" + (response.text or "")
+        # Reconstruct the raw text that downstream JSON extraction expects.
+        # Anthropic-Direct path had the "```json\n{" prefill stripped by the
+        # API; prepend it back so _extract_json (which regex-matches
+        # anywhere in the blob) still works. Bedrock-path output contains
+        # the full ```json ... ``` fence inline — pass through unchanged.
+        if provider_is_bedrock:
+            raw_text = response.text or ""
+        else:
+            raw_text = "```json\n{" + (response.text or "")
         from types import SimpleNamespace
         result = SimpleNamespace(output=raw_text, metadata={})
 

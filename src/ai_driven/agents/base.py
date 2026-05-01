@@ -797,34 +797,58 @@ class BaseAgent(ABC):
                 f"{event_prefix}_output_repair",
                 {"attempt": attempt, "max_attempts": self.MAX_JSON_REPAIR_ROUNDS},
             )
+            # Provider-aware: Bedrock rejects assistant-message prefill. See
+            # the same branch in specialists/base.py::run_specialist.
+            provider_is_bedrock = settings.claude_provider == "bedrock"
+            if provider_is_bedrock:
+                repair_messages = [
+                    {"role": "user", "content": schema_reminder},
+                    {"role": "user", "content": (
+                        "Here is your previous reply for reference; "
+                        "transform it into the required JSON without losing "
+                        "any details. Respond with ONLY a single ```json "
+                        "fenced code block:\n\n"
+                        + (output_text[:6000] or "<previous output empty>")
+                    )},
+                ]
+                repair_stops = None
+            else:
+                repair_messages = [
+                    {"role": "user", "content": schema_reminder},
+                    {"role": "user", "content": (
+                        "Here is your previous reply for reference; "
+                        "transform it into the required JSON without losing "
+                        "any details:\n\n"
+                        # 6000-char cap keeps the repair prompt bounded.
+                        # If legitimate outputs routinely exceed this,
+                        # escalation is the correct response — raising the
+                        # cap here would just burn tokens papering over
+                        # output sizes that won't fit the schema anyway.
+                        + (output_text[:6000] or "<previous output empty>")
+                    )},
+                    {"role": "assistant", "content": "```json\n{"},
+                ]
+                repair_stops = ["```"]
+
             try:
                 repair = await self._claude.chat(
-                    messages=[
-                        {"role": "user", "content": schema_reminder},
-                        {"role": "user", "content": (
-                            "Here is your previous reply for reference; "
-                            "transform it into the required JSON without losing "
-                            "any details:\n\n"
-                            # 6000-char cap keeps the repair prompt bounded.
-                            # If legitimate outputs routinely exceed this,
-                            # escalation is the correct response — raising the
-                            # cap here would just burn tokens papering over
-                            # output sizes that won't fit the schema anyway.
-                            + (output_text[:6000] or "<previous output empty>")
-                        )},
-                        {"role": "assistant", "content": "```json\n{"},
-                    ],
+                    messages=repair_messages,
                     system=system_prompt,
                     model=model,
                     max_tokens=settings.claude_max_tokens,
                     temperature=0.0,
-                    stop_sequences=["```"],
+                    stop_sequences=repair_stops,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("%s: repair call failed: %s", self.agent_type, exc)
                 continue
 
-            repaired_text = "```json\n{" + (repair.text or "")
+            # Anthropic-Direct path stripped the prefill fence prefix; Bedrock
+            # returns the full response inline. Reconstruct accordingly.
+            if provider_is_bedrock:
+                repaired_text = repair.text or ""
+            else:
+                repaired_text = "```json\n{" + (repair.text or "")
             if validator(repaired_text):
                 result.output = repaired_text
                 return
