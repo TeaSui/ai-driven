@@ -104,6 +104,26 @@ def emit_review_metrics(
         statsd.increment("ai.review.model_used", 1, tags=tags)
 
 
+def emit_counter(name: str, tags: list[str] | None = None) -> None:
+    """Increment a statsd counter by 1. No-op when DataDog is disabled.
+
+    Generic companion to the role-/feature-specific helpers in this
+    module (``emit_agent_metrics``, ``emit_specialist_fallback_activated``
+    etc.). Use this for ad-hoc counters where a dedicated helper would be
+    overkill — e.g. the T22 post-coding QA call sites
+    (``qa.post_coding.verdict.{...}``, ``qa.post_coding.missing_pr_number``,
+    ``qa.post_coding.enqueue_failed``, ``qa.post_coding.schema_drift``).
+
+    Exceptions are swallowed and logged at debug level. Emitting a metric
+    must NEVER be able to crash the caller — observability plumbing is
+    best-effort.
+    """
+    try:
+        _get_statsd().increment(name, 1, tags=tags or [])
+    except Exception:  # noqa: BLE001
+        logger.debug("emit_counter_failed name=%s", name, exc_info=True)
+
+
 def emit_specialist_fallback_activated(role: str) -> None:
     """Emit a counter every time the orchestrator bypasses a specialist error.
 
