@@ -67,7 +67,7 @@ async def test_happy_path_persists_artifact_and_markers():
 
     persisted: dict = {}
 
-    async def fake_persist(task_uuid, artifact):
+    async def fake_persist(task_uuid, artifact, stamped_mode="shadow"):
         persisted["task_uuid"] = task_uuid
         persisted["artifact"] = artifact
 
@@ -115,7 +115,7 @@ async def test_missing_pr_number_emits_sev1_and_persists_error_artifact():
 
     persisted: dict = {}
 
-    async def fake_persist(task_uuid, artifact):
+    async def fake_persist(task_uuid, artifact, stamped_mode="shadow"):
         persisted["artifact"] = artifact
 
     with patch.object(consumer_mod, "_persist_qa_artifact_and_marker",
@@ -191,7 +191,7 @@ async def test_schema_drift_forces_error_and_emits_counter():
 
     captured: dict = {}
 
-    async def fake_persist(task_uuid, artifact):
+    async def fake_persist(task_uuid, artifact, stamped_mode="shadow"):
         captured["artifact"] = artifact
 
     with patch.object(consumer_mod, "_persist_qa_artifact_and_marker",
@@ -230,7 +230,7 @@ async def test_specialist_raises_returns_error_artifact_not_crash():
 
     captured: dict = {}
 
-    async def fake_persist(task_uuid, artifact):
+    async def fake_persist(task_uuid, artifact, stamped_mode="shadow"):
         captured["artifact"] = artifact
 
     with patch.object(consumer_mod, "_persist_qa_artifact_and_marker",

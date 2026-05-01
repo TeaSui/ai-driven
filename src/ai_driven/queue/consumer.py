@@ -157,6 +157,13 @@ class TaskConsumer:
                 # T21: the orchestrator wrapper's halt predicate reads the
                 # stamped mode from the SQS message body, not live settings.
                 run_kwargs["orchestrator_mode"] = stamped_orchestrator_mode
+            if agent_type == "qa":
+                # T23: the QA wrapper's gate decision is mode-scoped -- live
+                # mode transitions status, shadow mode only writes
+                # observability markers. Same stamp source as the
+                # orchestrator (SQS body) to preserve cross-deploy
+                # flip-safety.
+                run_kwargs["orchestrator_mode"] = stamped_orchestrator_mode
 
             result = await agent.run(payload, **run_kwargs)
 
@@ -1018,6 +1025,11 @@ class _QaPostCodingWrapper:
         except (ValueError, TypeError):
             task_uuid = None
 
+        # T23: the stamped orchestrator mode drives the gate decision.
+        # Default 'shadow' so a direct caller (tests, debug inline path)
+        # that doesn't stamp gets pre-T23 behaviour.
+        stamped_mode: str = str(run_kwargs.get("orchestrator_mode") or "shadow")
+
         if task_uuid is None:
             # Without a task_id we cannot load prior artifacts or persist
             # a marker. Emit a counter and return a no-op success so the
@@ -1081,6 +1093,7 @@ class _QaPostCodingWrapper:
                     input_tokens=0,
                     output_tokens=0,
                 ),
+                stamped_mode,
             )
             return _synthesize_noop_result()
 
@@ -1179,8 +1192,9 @@ class _QaPostCodingWrapper:
                 ),
             )
 
-        # 4. Shared-session persistence (artifact + markers in ONE commit).
-        await _persist_qa_artifact_and_marker(task_uuid, artifact)
+        # 4. Shared-session persistence (artifact + markers + gate
+        # decision in ONE commit -- T23 M2).
+        await _persist_qa_artifact_and_marker(task_uuid, artifact, stamped_mode)
         emit_counter(f"qa.post_coding.verdict.{artifact.verdict}")
 
         # Return an AgentResult so TaskConsumer.run_result_patch doesn't
@@ -1221,25 +1235,56 @@ def _synthesize_noop_result() -> Any:
 
 
 async def _persist_qa_artifact_and_marker(
-    task_uuid: Any, artifact: Any
-) -> None:
-    """Upsert the QA artifact AND the ``qa_*`` output_data markers in
-    one shared session / one commit.
+    task_uuid: Any,
+    artifact: Any,
+    stamped_mode: str = "shadow",
+) -> "Any":
+    """Upsert the QA artifact, output_data markers, AND status transition
+    in ONE shared session / ONE commit.
 
-    M1 red-team fix: the artifact row and the ``qa_completed_at`` /
-    ``qa_verdict`` / ``qa_artifact_id`` markers must be written
-    atomically. A two-commit implementation leaves a small window where
-    the artifact exists but the task row still looks un-QA'd, which
-    would cause an idempotent replay to re-run QA and double-charge.
+    T22 introduced this helper to atomically persist the artifact + the
+    ``qa_*`` markers (``qa_completed_at`` / ``qa_verdict`` /
+    ``qa_artifact_id``). T23 extends it to ALSO apply the gate decision
+    inside the same commit (red-team M2) so there is no race window
+    between "artifact exists" and "status reflects verdict".
 
-    Both :class:`ArtifactRepository` and :class:`TaskRepository` accept
-    an externally-managed AsyncSession in their constructors, so we
-    instantiate a single ``async_session_factory()`` context and commit
-    once at the end.
+    T23 additions:
+      * Computes :func:`decide_qa_gate` from ``artifact.verdict`` +
+        ``stamped_mode`` + ``artifact.payload``.
+      * Writes ``output_data.qa_failures`` when non-empty (live+block,
+        shadow+block for observability).
+      * Applies ``decision.new_status`` under a compare-and-set guard:
+        the ``qa_failed`` transition is only allowed when the current
+        status is ``awaiting_qa``. Any other current status (already
+        ``completed`` via shadow path, manually ``blocked`` by an
+        operator, etc.) emits ``qa.gate.status_mismatch`` and leaves
+        the row alone for T24 reaper / admin override.
+      * Counter emission happens AFTER the DB commit so a rolled-back
+        transaction never leaks a counter.
+
+    Returns the :class:`QaGateDecision` so callers (e.g. the replay
+    branch) can log / assert against it. Callers that don't need it
+    may ignore the return value.
     """
     from datetime import datetime, timezone
 
+    from ai_driven.agents.orchestrator.qa_gate import (
+        QaGateDecision,
+        decide_qa_gate,
+    )
     from ai_driven.agents.orchestrator.repository import ArtifactRepository
+    from ai_driven.observability.metrics import emit_counter
+
+    payload = dict(artifact.payload or {})
+    decision: QaGateDecision = decide_qa_gate(
+        artifact.verdict, payload, stamped_mode,
+    )
+
+    # Flags set DURING the DB block, read AFTER commit to decide which
+    # counters to emit. Keeping them out of the session context avoids
+    # a partial-emit window if the commit raises.
+    status_applied: bool = False
+    status_mismatch_current: str | None = None
 
     try:
         async with async_session_factory() as session:
@@ -1261,14 +1306,42 @@ async def _persist_qa_artifact_and_marker(
             )
             qa_artifact_id = res.scalar_one_or_none()
 
-            await task_repo.update_output_data(task_uuid, {
+            # Load current status for M3 compare-and-set on qa_failed.
+            task_row = await task_repo.get_by_id(task_uuid)
+            current_status = task_row.status if task_row is not None else None
+
+            out_patch: dict[str, Any] = {
                 "qa_completed_at": datetime.now(timezone.utc).isoformat(),
                 "qa_verdict": artifact.verdict,
                 "qa_artifact_id": (
                     str(qa_artifact_id) if qa_artifact_id is not None else None
                 ),
                 "qa_reasoning": (artifact.reasoning or "")[:500],
-            })
+            }
+            if decision.qa_failures:
+                # Populated on block in both live + shadow modes. UI
+                # (T25) renders this list.
+                out_patch["qa_failures"] = decision.qa_failures
+            await task_repo.update_output_data(task_uuid, out_patch)
+
+            # Status transition (live mode only; shadow yields new_status=None).
+            if decision.new_status is not None:
+                # M3 compare-and-set: qa_failed is a downgrade, only
+                # allowed from awaiting_qa. Other currents (completed
+                # via shadow, blocked by operator, ...) keep the row
+                # untouched and emit a mismatch counter for T24 to
+                # inspect.
+                if (
+                    decision.new_status == "qa_failed"
+                    and current_status != "awaiting_qa"
+                ):
+                    status_mismatch_current = current_status or "unknown"
+                else:
+                    await task_repo.update_status(
+                        task_uuid, decision.new_status,
+                    )
+                    status_applied = True
+
             await session.commit()
     except Exception:  # noqa: BLE001
         logger.error(
@@ -1280,3 +1353,34 @@ async def _persist_qa_artifact_and_marker(
         # QA (expensive but correct) rather than silently dropping the
         # verdict.
         raise
+
+    # Post-commit counter emission. Ordering matters: we want the
+    # transition counter to only fire when the DB actually changed.
+    if decision.counter_name:
+        emit_counter(decision.counter_name)
+    if status_mismatch_current is not None:
+        emit_counter(
+            "qa.gate.status_mismatch",
+            tags=[f"current:{status_mismatch_current}"],
+        )
+        logger.warning(
+            "qa_gate_status_mismatch",
+            extra={
+                "task_id": str(task_uuid),
+                "current_status": status_mismatch_current,
+                "desired_status": decision.new_status,
+                "verdict": artifact.verdict,
+            },
+        )
+    if status_applied:
+        logger.info(
+            "qa_gate_status_applied",
+            extra={
+                "task_id": str(task_uuid),
+                "new_status": decision.new_status,
+                "verdict": artifact.verdict,
+                "stamped_mode": stamped_mode,
+            },
+        )
+
+    return decision

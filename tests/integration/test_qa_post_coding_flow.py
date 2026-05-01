@@ -196,8 +196,8 @@ async def test_post_coding_qa_end_to_end(stamped_mode, expected_status):
 
     persisted_artifacts: list = []
 
-    async def fake_persist(task_uuid, artifact):
-        persisted_artifacts.append((task_uuid, artifact))
+    async def fake_persist(task_uuid, artifact, stamped_mode="shadow"):
+        persisted_artifacts.append((task_uuid, artifact, stamped_mode))
         # Mirror the real persist: set markers on the fake task.
         await fake_repo.update_output_data(task_uuid, {
             "qa_completed_at": "2026-05-01T12:00:00+00:00",
@@ -219,7 +219,7 @@ async def test_post_coding_qa_end_to_end(stamped_mode, expected_status):
 
     assert result.success is True
     assert len(persisted_artifacts) == 1
-    _, artifact = persisted_artifacts[0]
+    _, artifact, _ = persisted_artifacts[0]
     assert artifact.verdict == "pass"
     assert artifact.payload["schema_version"] == "v2"
     # qa_completed_at marker is set (T23's status transition will read this).
