@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from ai_driven.agents._shared.repo_tools import (
@@ -11,9 +12,13 @@ from ai_driven.agents._shared.repo_tools import (
     read_files_batched,
 )
 from ai_driven.agents.base import BaseAgent
+from ai_driven.agents.coding.prompt_composer import compose_coding_prompt
 from ai_driven.agents.coding.sandbox import BaseSandboxExecutor, create_sandbox
+from ai_driven.agents.orchestrator.artifacts import Artifact
+from ai_driven.agents.orchestrator.repository import ArtifactRepository
 from ai_driven.claude.prompts.coding_agent import CODING_AGENT_SYSTEM_PROMPT
 from ai_driven.config import get_settings
+from ai_driven.db.postgres.session import async_session_factory
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,11 @@ class CodingAgent(BaseAgent):
         self._jira = jira_client
         self._scm = scm_client
         self._sandbox = sandbox or create_sandbox()
+        # Phase 2 prompt-composition state. Populated at the top of run()
+        # from the task_artifacts table (when orchestrator_mode != "off")
+        # and consumed synchronously inside _get_system_prompt. Default
+        # empty-dict means the base prompt is used unchanged.
+        self._prior_artifacts: dict[str, Artifact] = {}
         super().__init__(**kwargs)
 
     def _register_tools(self) -> None:
@@ -568,6 +578,39 @@ class CodingAgent(BaseAgent):
         # Register MCP tools (async, must be done here)
         await self._register_mcp_tools()
 
+        # --- Phase 2 prompt composition: load specialist artifacts ----------
+        # Sync/async bridge: _get_system_prompt(context) is a SYNC method
+        # invoked from BaseAgent.run (base.py:375). We cannot await inside it.
+        # So we load artifacts asynchronously HERE, once per run, and stash
+        # them on self._prior_artifacts for _get_system_prompt to read.
+        #
+        # Shadow-mode gate: in Phase 1, shadow meant "orchestrator runs with
+        # zero pipeline effect". Phase 2 redefines shadow as "non-blocking +
+        # consumes artifacts for context" — only `orchestrator_mode="off"`
+        # bypasses artifact loading. `live` is the mode that will start
+        # halting/gating on specialist verdicts (not done here).
+        #
+        # Race tolerance: the orchestrator runs in a separate process. There
+        # is no happens-before guarantee that its artifact writes are visible
+        # when CodingAgent starts reading. When artifacts are absent we fall
+        # back to {} — compose_coding_prompt({}) returns the base prompt
+        # unchanged, which is the safe-by-default behavior. T20 will fix
+        # the race properly with dispatch-when-done SQS semantics.
+        self._prior_artifacts = {}
+        if task_id and get_settings().orchestrator_mode != "off":
+            try:
+                async with async_session_factory() as session:
+                    repo = ArtifactRepository(session)
+                    self._prior_artifacts = await repo.list_for_task(
+                        uuid.UUID(task_id)
+                    )
+            except Exception:
+                logger.warning(
+                    "coding_agent.load_prior_artifacts_failed — using base prompt",
+                    exc_info=True,
+                )
+                self._prior_artifacts = {}
+
         # Store clone path in Redis so ReviewAgent can reuse it
         repo_full_name = task_input.get("repo_full_name", "")
         if repo_full_name and self._scm:
@@ -606,7 +649,14 @@ class CodingAgent(BaseAgent):
         )
 
     def _get_system_prompt(self, context: dict[str, Any]) -> str:
-        prompt = CODING_AGENT_SYSTEM_PROMPT
+        # Start from the static coding-agent system prompt, then layer on
+        # specialist artifact blocks loaded by run() (Phase 2 orchestrator
+        # composition). compose_coding_prompt with an empty dict is a
+        # no-op, so the base prompt path stays byte-identical when no
+        # artifacts exist.
+        prompt = compose_coding_prompt(
+            CODING_AGENT_SYSTEM_PROMPT, self._prior_artifacts
+        )
         mcp_section = self._build_mcp_tools_section()
         if mcp_section:
             prompt += f"\n\n{mcp_section}"
