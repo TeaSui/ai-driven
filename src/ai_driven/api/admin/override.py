@@ -31,6 +31,11 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_driven.api._shared import CamelModel
+from ai_driven.api.admin._overrides_helpers import (
+    STUCK_THRESHOLD_MINUTES,
+    is_stuck as _is_stuck,
+    parse_iso_ts as _parse_iso_ts,
+)
 from ai_driven.auth.middleware import TeamMemberInfo, require_admin
 from ai_driven.db.postgres.models import Task, TaskOverrideAudit
 from ai_driven.db.postgres.repository import TaskRepository
@@ -44,13 +49,10 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
-# Stuck thresholds
+# Stuck thresholds are defined in ``_overrides_helpers`` so both T24 (POST
+# override) and T25 (GET artifacts) share one constant + one parser.
+# Re-exported above for back-compat with existing test imports.
 # ---------------------------------------------------------------------------
-# The override endpoint refuses to 'reap' a task that hasn't been stuck
-# long enough. Same 30-min threshold the background reapers use, kept
-# as a single constant so dashboard / runbook / reaper / endpoint can
-# never drift apart.
-STUCK_THRESHOLD_MINUTES = 30
 
 # Keys cleared from output_data when action == 'rerun_coding'. Matches
 # the orchestrator's idempotency short-circuits: if any of these survive
@@ -113,39 +115,6 @@ class OverrideResponse(CamelModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _parse_iso_ts(value: Any) -> datetime | None:
-    """Parse a stringified ISO-8601 timestamp from output_data. Returns
-    None for absent/invalid values so callers can treat "never set" and
-    "malformed" the same way."""
-    if not value or not isinstance(value, str):
-        return None
-    try:
-        # datetime.fromisoformat accepts '2026-05-01T12:00:00+00:00' but
-        # not the trailing 'Z' some producers emit. Normalize first.
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-
-
-def _is_stuck(
-    ts: datetime | None, fallback: datetime | None, now: datetime
-) -> bool:
-    """True if either ``ts`` is older than the threshold, or (ts is None
-    and ``fallback`` is older than the threshold). Mirrors the stuck
-    definition in brief §reapers."""
-    threshold = now - _stuck_delta()
-    if ts is not None:
-        return ts < threshold
-    if fallback is not None:
-        return fallback < threshold
-    return False
-
-
-def _stuck_delta():
-    from datetime import timedelta
-    return timedelta(minutes=STUCK_THRESHOLD_MINUTES)
 
 
 def _clear_output_keys(
