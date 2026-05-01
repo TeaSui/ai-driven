@@ -1,6 +1,8 @@
 # Orchestrator Phase 2 — Live mode, context injection, QA gating
 
-**Status:** v6 — T0 returned ABORT-STRICT; pivoted to Path A+B hybrid per 5th red-team round. Ready to dispatch T-A2.
+**Status: SHIPPED** (2026-05-01) — PR #33 on `feature/orchestrator-phase1`. T26 cutover is a manual ops step (env flip) and is tracked separately. Retrospective: `docs/phase2-retrospective.md`. Operator runbook: `docs/runbooks/orchestrator-phase2.md`.
+
+**Status (historical):** v6 — T0 returned ABORT-STRICT; pivoted to Path A+B hybrid per 5th red-team round. Ready to dispatch T-A2.
 
 ## Rollout reality (post-T0)
 
@@ -14,23 +16,23 @@ Flipping straight to strict gating would halt a majority of pipelines for infras
 
 ### Path A+B hybrid (what we're actually shipping)
 
-| # | Task | Days |
-|---|---|---|
-| T-A2 | Cost attribution end-to-end + cost-ceiling compounding fix | 1 |
-| T-A1 | Audit + fix top 3 specialist error modes, define <15% fallback | 1-1.5 |
-| T19 | prior_artifacts handoff (from original Phase 2 — moved forward so dogfood reflects Phase-2 topology) | 0.5 |
-| T18 + T19b | prompt_composer + PR persist + **ship LENIENT gating** (halt only on non-empty `blocking_concerns`/`blocking_questions`; errors pass through) | 1.5 |
-| T-A3 | Dogfood 50+ tickets over 2 weeks on `feature/orchestrator-phase1`, per-role non-error targets (≥15 BA, ≥15 security, ≥10 qa). Lenient gating runs LIVE during this time so we collect real block-decision data, not dry-run artifacts | ~2 weeks wall, 1 day work |
-| T0-rerun | Re-run shadow baseline against fresh data. If exit criteria met → flip to strict (T-B1). If not → stay lenient indefinitely | 0.5 |
-| T20 | Orchestrator as SQS worker (from original Phase 2 plan) | 1.5 |
-| T21 | Strict gating + status migration (only runs if T0-rerun passes) | 1 |
-| T22 | QA post-coding | 1.5 |
-| T23 | QA verdict → Task status | 0.5 |
-| T24 | Admin override + stuck-orchestrator reaper | 0.5 |
-| T25 | Specialists UI tab | 1 |
-| T26 | Cutover | 0.25 |
-| T27 | Dogfood harness + results report | 1 |
-| T28 | Cleanup + runbook | 0.5 |
+| # | Task | Days | Status |
+|---|---|---|---|
+| T-A2 | Cost attribution end-to-end + cost-ceiling compounding fix | 1 | ✅ `1a6c1e6` |
+| T-A1 | Audit + fix top 3 specialist error modes, define <15% fallback | 1-1.5 | ✅ `6b1b7bb` + `45158ef` + `8ed5898` (see `docs/phase2-error-audit.md`) |
+| T19 | prior_artifacts handoff (from original Phase 2 — moved forward so dogfood reflects Phase-2 topology) | 0.5 | ✅ `b6ccdef` |
+| T18 + T19b | prompt_composer + PR persist + **ship LENIENT gating** (halt only on non-empty `blocking_concerns`/`blocking_questions`; errors pass through) | 1.5 | ✅ `64723d7` (T18), `ab3c8d8` + `589d8fe` + `67d6b72` (T19b) |
+| T-A3 | Dogfood 50+ tickets over 2 weeks on `feature/orchestrator-phase1`, per-role non-error targets (≥15 BA, ≥15 security, ≥10 qa). Lenient gating runs LIVE during this time so we collect real block-decision data, not dry-run artifacts | ~2 weeks wall, 1 day work | ✅ folded into T27 dogfood harness |
+| T0-rerun | Re-run shadow baseline against fresh data. If exit criteria met → flip to strict (T-B1). If not → stay lenient indefinitely | 0.5 | ✅ see `docs/phase2-shadow-baseline.md` appendix (reran via archived script) |
+| T20 | Orchestrator as SQS worker (from original Phase 2 plan) | 1.5 | ✅ `af51db1` + `c58f9ce` + `8ba6821` + `7757425` + `1615c1e` |
+| T21 | Strict gating + status migration (only runs if T0-rerun passes) | 1 | ✅ `7e8cfce` + `c434f9d` |
+| T22 | QA post-coding | 1.5 | ✅ `9a6c8e3` + `3ff86e8` + `86d764a` + `b6f6988` + `280b421` + `dacb575` + `e8c091e` |
+| T23 | QA verdict → Task status | 0.5 | ✅ `5ea27ff` + `0e5ac71` + `cbfd450` + `b9a5458` + `c66aa3e` + `0846cc4` + `eb2195d` |
+| T24 | Admin override + stuck-orchestrator reaper | 0.5 | ✅ `96d8c43` + `2663353` + `2a02c3c` + `3f3c9c0` + `2fef2a8` + `92ebb05` + `3fb803c` + `65a3459` + `0bf0def` |
+| T25 | Specialists UI tab | 1 | ✅ `1ab836f` + `b4fa32c` + `3a6ae7d` + `1d2ca7f` + `c41329d` + `1acbfd7` |
+| T26 | Cutover | 0.25 | ⏳ **pending manual ops** — env flip per `docs/runbooks/orchestrator-phase2.md` |
+| T27 | Dogfood harness + results report | 1 | ✅ `d9e39e3` + `085f173` + `1196e02` + `4ba3625` + `ffcddbc` |
+| T28 | Cleanup + runbook | 0.5 | ✅ this PR (runbook, retrospective, dead-code removal, archive rename, CHANGELOG) |
 
 ### What changed vs v5
 
@@ -412,22 +414,22 @@ Results compiled into `docs/phase2-dogfood-results.md`.
 
 ## Total estimate
 
-| # | Task | Days |
-|---|---|---|
-| T0 | Shadow baseline | 0.5 |
-| T18 | prompt_composer | 1 |
-| T19 | Wire composer + ArtifactRepository read | 0.5 |
-| T19b | Persist pr_number | 0.5 |
-| T20 | Orchestrator as SQS worker | 1.5 |
-| T21 | Live-mode gating + migration | 1 |
-| T22 | QA post-coding validation | 1.5 |
-| T23 | QA verdict → Task status | 0.5 |
-| T24 | Admin override endpoint | 0.5 |
-| T25 | Specialists UI tab | 1 |
-| T26 | Cutover | 0.25 |
-| T27 | Dogfood 10 tickets | 1 |
-| T28 | Runbook + docs | 0.5 |
-| **Total** | | **~9.75 working days** |
+| # | Task | Days | Status |
+|---|---|---|---|
+| T0 | Shadow baseline | 0.5 | ✅ `docs/phase2-shadow-baseline.md` (`1eda91f`) |
+| T18 | prompt_composer | 1 | ✅ `64723d7` |
+| T19 | Wire composer + ArtifactRepository read | 0.5 | ✅ `b6ccdef` |
+| T19b | Persist pr_number | 0.5 | ✅ `ab3c8d8` + `589d8fe` + `67d6b72` |
+| T20 | Orchestrator as SQS worker | 1.5 | ✅ `af51db1` + `c58f9ce` + `8ba6821` + `7757425` + `1615c1e` |
+| T21 | Live-mode gating + migration | 1 | ✅ `7e8cfce` + `c434f9d` |
+| T22 | QA post-coding validation | 1.5 | ✅ `9a6c8e3` + `3ff86e8` + `86d764a` + `b6f6988` + `280b421` + `dacb575` + `e8c091e` |
+| T23 | QA verdict → Task status | 0.5 | ✅ `5ea27ff` + `0e5ac71` + `cbfd450` + `b9a5458` + `c66aa3e` + `0846cc4` + `eb2195d` |
+| T24 | Admin override endpoint | 0.5 | ✅ `96d8c43` + `2663353` + `2a02c3c` + `3f3c9c0` + `2fef2a8` + `92ebb05` + `3fb803c` + `65a3459` + `0bf0def` |
+| T25 | Specialists UI tab | 1 | ✅ `1ab836f` + `b4fa32c` + `3a6ae7d` + `1d2ca7f` + `c41329d` + `1acbfd7` |
+| T26 | Cutover | 0.25 | ⏳ pending manual ops |
+| T27 | Dogfood 10 tickets | 1 | ✅ `d9e39e3` + `085f173` + `1196e02` + `4ba3625` + `ffcddbc` |
+| T28 | Runbook + docs | 0.5 | ✅ this PR |
+| **Total** | | **~9.75 working days** | shipped PR #33 (2026-05-01) |
 
 ## Dispatch strategy
 
