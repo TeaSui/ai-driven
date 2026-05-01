@@ -92,15 +92,18 @@ export async function login(apiKey: string, email?: string): Promise<LoginResult
     throw new Error(err?.detail ?? err?.error?.message ?? `Login failed: ${res.status}`)
   }
   const data = await res.json()
+  // Backend serializes LoginResponse as camelCase via CamelModel
+  // (see src/ai_driven/api/_shared.py). Single source of truth —
+  // every API response on this platform is camelCase.
   return {
-    sessionToken: data.session_token,
-    teamId: data.team_id,
-    memberId: data.member_id ?? null,
+    sessionToken: data.sessionToken,
+    teamId: data.teamId,
+    memberId: data.memberId ?? null,
     email: data.email ?? null,
     role: data.role,
-    createdAt: data.created_at,
-    lastSeenAt: data.last_seen_at,
-    expiresAt: data.expires_at,
+    createdAt: data.createdAt,
+    lastSeenAt: data.lastSeenAt,
+    expiresAt: data.expiresAt,
   }
 }
 

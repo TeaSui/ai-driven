@@ -47,12 +47,16 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class SessionResponse(BaseModel):
+from ai_driven.api._shared import CamelModel
+
+
+class SessionResponse(CamelModel):
     """Response shape for GET /api/auth/session.
 
-    Mirrors the spec in docs/implementation/08-auth-and-ws-security.md:
-    ``{userId, teamId, role, email}``. Debug mode may return sentinel values
-    so the frontend has something to render without a real session.
+    Serialized as camelCase: ``{userId, teamId, teamName, role, email, authSource}``.
+    Mirrors the spec in docs/implementation/08-auth-and-ws-security.md.
+    Debug mode may return sentinel values so the frontend has something
+    to render without a real session.
     """
 
     user_id: str
@@ -64,9 +68,6 @@ class SessionResponse(BaseModel):
     # session was resolved via Cognito JWT, API key, or debug bypass. Remove
     # after Cognito is the only path.
     auth_source: str  # "cognito" | "api_key" | "debug"
-
-    class Config:
-        populate_by_name = True
 
 
 def verify_cognito_jwt(token: str) -> dict[str, Any]:
@@ -220,7 +221,14 @@ class LoginRequest(BaseModel):
     email: str | None = None
 
 
-class LoginResponse(BaseModel):
+class LoginResponse(CamelModel):
+    """Response shape for POST /api/auth/login.
+
+    Serialized as camelCase: ``{sessionToken, teamId, memberId, email,
+    role, createdAt, lastSeenAt, expiresAt}``. Consistent with every
+    other API response on the platform (see api/_shared.py).
+    """
+
     session_token: str
     team_id: str
     member_id: str | None = None

@@ -40,37 +40,16 @@ test('tasks list renders after session-token login', async ({ page, context }) =
     secure: sessionCookie.secure,
   })
 
-  // 2. Navigate to tasks list and capture the API call as it happens
-  const apiResponses: Array<{ url: string; status: number; body: string }> = []
-  page.on('response', async (r) => {
-    if (r.url().includes('/api/admin/tasks') && r.request().method() === 'GET') {
-      try {
-        apiResponses.push({
-          url: r.url(),
-          status: r.status(),
-          body: await r.text(),
-        })
-      } catch {
-        apiResponses.push({ url: r.url(), status: r.status(), body: '<unreadable>' })
-      }
-    }
-  })
-
+  // 2. Navigate to tasks list and make the request directly via request context
+  // (avoids the Playwright response-body-GC race where page.on('response')
+  // hands back a handle that's already invalidated by the time we await it)
   await page.goto('http://localhost:3000/dashboard/tasks', { waitUntil: 'networkidle' })
-  await page.waitForTimeout(1000)
+  await page.waitForTimeout(500)
 
-  console.log('captured API responses:', JSON.stringify(apiResponses, null, 2))
-
-  const listCall = apiResponses.find((r) => r.url.endsWith('/api/admin/tasks') || r.url.includes('/api/admin/tasks?'))
-  if (!listCall) {
-    throw new Error(`UI did not call /api/admin/tasks. All calls: ${JSON.stringify(apiResponses)}`)
-  }
-  if (listCall.status !== 200) {
-    throw new Error(`Tasks endpoint failed with ${listCall.status}: ${listCall.body}`)
-  }
-
-  const body = JSON.parse(listCall.body)
-  expect(body.total, `expected total>0 but was ${body.total}; body=${listCall.body.slice(0, 200)}`).toBeGreaterThan(0)
+  const resp = await page.request.get('http://localhost:3000/api/admin/tasks')
+  expect(resp.status(), `Tasks endpoint failed: ${await resp.text()}`).toBe(200)
+  const body = await resp.json()
+  expect(body.total, `expected total>0 but was ${body.total}; body=${JSON.stringify(body).slice(0, 200)}`).toBeGreaterThan(0)
 
   // UI should NOT show empty-state
   await expect(page.getByText(/No coding tasks yet/i)).toBeHidden({ timeout: 5_000 })
