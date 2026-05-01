@@ -297,6 +297,37 @@ def test_fresh_orchestrating_has_empty_override_actions(_patch_repos):
     assert body["data"]["overrideActions"] == []
 
 
+def test_completed_task_has_empty_override_actions(_patch_repos):
+    """Completed is terminal — UI must not render override buttons."""
+    task = _make_task(
+        status="completed",
+        output_data={"qa_verdict": "pass"},
+    )
+    _patch_repos["task"] = task
+    _patch_repos["artifacts"] = [
+        _make_artifact_row(role="qa", verdict="pass"),
+    ]
+    client = _make_app(MagicMock(), admin=True)
+    res = client.get(f"/api/admin/tasks/{task.id}/artifacts")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["data"]["canOverride"] is False
+    assert body["data"]["overrideActions"] == []
+    assert body["data"]["qaVerdict"] == "pass"
+
+
+def test_artifacts_endpoint_mounted_on_admin_router():
+    """The T25 endpoint must be reachable through the real admin router
+    (not just the isolated sub-router) so a routing change in
+    admin/__init__.py would fail this test loudly."""
+    from ai_driven.api.admin.router import router as admin_router
+
+    paths = {getattr(r, "path", "") for r in admin_router.routes}
+    assert any(
+        "/tasks/{task_id}/artifacts" in p for p in paths
+    ), f"Expected artifacts route on admin router; got {paths!r}"
+
+
 def test_blocked_offers_rerun_coding(_patch_repos):
     task = _make_task(status="blocked")
     _patch_repos["task"] = task
