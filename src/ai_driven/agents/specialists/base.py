@@ -66,6 +66,14 @@ class SpecialistContext:
     ``prior_artifacts`` is keyed by role (e.g. ``"business_analyst"`` ->
     BA Artifact). The orchestrator builds this dict by reading from
     :class:`ArtifactRepository` before dispatch.
+
+    ``pr_ref`` (optional) is populated by the T22 post-coding QA wrapper
+    with ``{"pr_number": int, "pr_url": str}`` so the QA specialist can
+    render the diff via ``github.get_pr_diff`` against a concrete PR.
+    Pre-coding specialists (BA, StackAnalyst, Security, etc.) leave it
+    ``None``; they never have a PR yet. Using a typed field keeps the
+    post-coding path from smuggling pr_number through ``team_settings``
+    (which is reserved for per-team orchestrator overrides).
     """
 
     task_id: str
@@ -77,6 +85,9 @@ class SpecialistContext:
     tier: str
     prior_artifacts: dict[str, Artifact] = field(default_factory=dict)
     team_settings: dict = field(default_factory=dict)
+    # T22: {pr_number, pr_url} for the post-coding QA path. None for
+    # every pre-coding specialist.
+    pr_ref: dict | None = None
 
 
 class SpecialistBase(BaseAgent):

@@ -253,6 +253,41 @@ class QaSpecialist(SpecialistBase):
         # them here, that would bypass the user-content escaping the
         # envelope tests lock against.
         base = self._build_initial_message(ctx)
+        # T22: when pr_ref is present, we're running in post-coding mode
+        # and MUST emit the v2 payload shape. The trailer tells the
+        # model to call github.get_pr_diff FIRST and cite file:line
+        # evidence for every AC and security rule.
+        if ctx.pr_ref and ctx.pr_ref.get("pr_number"):
+            pr_number = ctx.pr_ref.get("pr_number")
+            pr_url = ctx.pr_ref.get("pr_url") or ""
+            return (
+                base
+                + "\n\n<pr_ref>\n"
+                f"  <pr_number>{pr_number}</pr_number>\n"
+                f"  <pr_url>{pr_url}</pr_url>\n"
+                "</pr_ref>\n\n"
+                "<task>POST-CODING mode. Call github.get_pr_diff("
+                f"repo_full_name, {pr_number}) FIRST. Then, for EACH "
+                "acceptance_criteria from <prior_artifacts>."
+                "business_analyst, emit one row in "
+                "acceptance_criteria_verification with "
+                "{criterion, satisfied, evidence (file.ext:line), "
+                "reason}. For EACH implementation_rule from "
+                "<prior_artifacts>.security, emit one row in "
+                "security_rules_verification with {rule, followed, "
+                "evidence, severity (low/medium/high/critical)}. "
+                "Set schema_version=\"v2\" on the payload. If "
+                "github.get_pr_diff returns an error/404, set "
+                "verdict=\"error\" and explain in reasoning — the "
+                "wrapper handles lenient pass-through. Block ONLY "
+                "when a concrete AC is unsatisfied, a high/critical "
+                "security rule is unmet, or regression_risk is high "
+                "without mitigation.</task>"
+            )
+        # Pre-coding (legacy) mode — preserved for any caller still
+        # invoking QA without a PR ref. After T22 there is no such
+        # caller in routing.py; this branch is kept for defensive
+        # back-compat and for direct unit tests of the pre-T22 shape.
         return (
             base
             + "\n\n<task>Run GO/NO-GO gate checks. Verify every "
