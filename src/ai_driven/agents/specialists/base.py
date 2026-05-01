@@ -97,7 +97,10 @@ class SpecialistBase(BaseAgent):
     # Retained so future QA / cost tooling can reason about specialist
     # intent without rediscovering it.
     max_input_tokens: int = 8192
-    max_output_tokens: int = 2048
+    max_output_tokens: int = 4096  # bumped from 2048 — Security threat models
+    # + BA acceptance_criteria lists can exceed 2k tokens on complex tickets,
+    # causing stop_reason=max_tokens and refused-to-parse errors. 4k has plenty
+    # of headroom without materially raising cost (Sonnet output is $15/M).
 
     # --- BaseAgent abstract hooks ---------------------------------------
 
