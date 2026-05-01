@@ -137,6 +137,7 @@ class Settings(BaseSettings):
     task_timeout_seconds: int = 1200  # 20-minute hard cap for inline task processing
 
     # SQS
+    sqs_endpoint_url: str | None = None  # localstack override; None = real AWS
     sqs_task_queue_url: str = ""
     sqs_review_queue_url: str = ""
     sqs_devops_queue_url: str = ""

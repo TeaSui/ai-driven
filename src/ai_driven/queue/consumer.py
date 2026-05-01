@@ -28,7 +28,11 @@ class TaskConsumer:
 
     def __init__(self, max_concurrent: int = 3) -> None:
         settings = get_settings()
-        self._sqs = boto3.client("sqs", region_name=settings.aws_region)
+        self._sqs = boto3.client(
+            "sqs",
+            region_name=settings.aws_region,
+            endpoint_url=settings.sqs_endpoint_url or None,
+        )
         self._queue_urls = [
             url
             for url in [
