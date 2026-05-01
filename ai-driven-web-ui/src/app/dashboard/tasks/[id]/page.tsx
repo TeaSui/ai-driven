@@ -1562,15 +1562,21 @@ export default function CodingAgentPage({
       wsRef.current = ws
 
       // First-message auth: send token immediately on open.
-      // Send an empty-token auth frame even without credentials — in debug
-      // mode the backend accepts it; in prod it triggers 4401 which is handled
-      // in ws.onclose. Without this, backend waits 5s for the auth timeout,
-      // which creates a visible dead period on every task-detail page.
+      // Token priority:
+      //   1. session_token from localStorage (stashed by /login page)
+      //   2. legacy api_key cookie (pre-Sprint-14 sessions)
+      //   3. NEXT_PUBLIC_DEV_API_KEY env (local dev convenience)
+      //   4. empty string → backend closes with 4401 (handled in ws.onclose)
       ws.onopen = () => {
-        const match = document.cookie.match(/(?:^|; )api_key=([^;]*)/)
-        const envKey = process.env.NEXT_PUBLIC_DEV_API_KEY
-        const apiKey = match ? decodeURIComponent(match[1]) : envKey || ''
-        ws.send(JSON.stringify({ type: 'auth', token: apiKey }))
+        let token = ''
+        try {
+          token = localStorage.getItem('session_token') || ''
+        } catch {}
+        if (!token) {
+          const match = document.cookie.match(/(?:^|; )api_key=([^;]*)/)
+          token = match ? decodeURIComponent(match[1]) : (process.env.NEXT_PUBLIC_DEV_API_KEY || '')
+        }
+        ws.send(JSON.stringify({ type: 'auth', token }))
       }
 
       ws.onmessage = (ev) => {

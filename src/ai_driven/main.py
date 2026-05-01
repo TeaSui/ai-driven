@@ -77,9 +77,18 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
+    # CORS: debug = wildcard; non-debug = explicit localhost:3000 allow-list
+    # so the Next.js UI can hit the backend cross-origin (required for
+    # WebSocket connections that bypass Next's rewrites, which drop the
+    # WS upgrade). Tighten this list when deploying.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.debug else [],
+        allow_origins=(
+            ["*"] if settings.debug else [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ]
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -20,9 +20,19 @@ export default function LoginPage() {
 
     try {
       // Exchange the API key for a short-lived session token. The backend
-      // sets an HttpOnly session_token cookie on success; the page just
-      // needs to navigate.
-      await login(key.trim(), email.trim() || undefined)
+      // sets an HttpOnly session_token cookie on success AND returns the
+      // same token in the JSON body — we stash it in localStorage so the
+      // WebSocket can send it as a first-message auth frame (HttpOnly
+      // cookies are unreadable from JS and Next.js rewrites() drop WS
+      // upgrades, so the WS path cannot rely on the cookie).
+      const result = await login(key.trim(), email.trim() || undefined)
+      try {
+        localStorage.setItem('session_token', result.sessionToken)
+      } catch {
+        // localStorage may be blocked (private-mode Safari etc.); the WS
+        // falls back to the (empty) cookie path and the page stays usable
+        // for everything except the live stream.
+      }
       router.push('/dashboard')
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : 'Sign-in failed. Please try again.')

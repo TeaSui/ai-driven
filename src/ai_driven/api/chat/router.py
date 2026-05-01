@@ -374,14 +374,19 @@ async def send_message(
 
     settings = get_settings()
 
-    # SHADOW: kick off the orchestrator for every coding task, regardless of
-    # debug-vs-SQS path. T17 wired this into TaskProducer.enqueue_task, but
-    # debug mode short-circuits the producer and runs CodingAgent inline —
-    # so the producer hook never fires. Replicate the fan-out here so shadow
-    # behavior is identical in both modes.
+    # SHADOW: kick off the orchestrator for every coding task, but ONLY when
+    # the SQS/producer path won't also do it. Without this guard, debug mode
+    # and the inline-fallback branch (no queue URL configured) never reach
+    # TaskProducer.enqueue_task, so the producer's shadow hook never fires
+    # and we must invoke here. With real SQS configured, the producer
+    # dispatches shadow itself — doing it again here would double-fire.
+    producer_will_handle = (
+        not settings.debug and bool(settings.sqs_task_queue_url)
+    )
     if (
         body.agent_type == "coding"
         and settings.orchestrator_mode != "off"
+        and not producer_will_handle
     ):
         try:
             from ai_driven.agents.orchestrator.agent import OrchestratorAgent
