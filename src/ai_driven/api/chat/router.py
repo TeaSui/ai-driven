@@ -372,6 +372,43 @@ async def send_message(
         logger.exception("Failed to persist task %s", task_id)
 
     settings = get_settings()
+
+    # SHADOW: kick off the orchestrator for every coding task, regardless of
+    # debug-vs-SQS path. T17 wired this into TaskProducer.enqueue_task, but
+    # debug mode short-circuits the producer and runs CodingAgent inline —
+    # so the producer hook never fires. Replicate the fan-out here so shadow
+    # behavior is identical in both modes.
+    if (
+        body.agent_type == "coding"
+        and settings.orchestrator_mode != "off"
+    ):
+        try:
+            from ai_driven.agents.orchestrator.agent import OrchestratorAgent
+            from ai_driven.queue.producer import _run_shadow
+
+            shadow_payload = {
+                "task_id": task_id,
+                "ticket": {
+                    "key": body.context.get("jira_key", ""),
+                    "summary": body.context.get("title") or body.message,
+                    "description": body.message,
+                    "labels": body.context.get("labels", []),
+                    "acceptance_criteria": body.context.get(
+                        "acceptance_criteria", []
+                    ),
+                },
+                "repo": {
+                    "full_name": body.context.get("repo_full_name", ""),
+                    "scm_type": body.context.get("scm_type", "github"),
+                    "default_branch": body.context.get("default_branch", "main"),
+                },
+            }
+            asyncio.create_task(_run_shadow(OrchestratorAgent(), shadow_payload))
+        except Exception:
+            logger.exception(
+                "shadow orchestrator dispatch failed in chat path (non-fatal)"
+            )
+
     if settings.debug:
         # In debug mode, process inline — no SQS worker needed
         asyncio.create_task(_process_task_inline(task_id, body.agent_type, body.message, body.context, team_id=team_id))
