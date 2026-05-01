@@ -66,9 +66,10 @@ async def test_full_workflow_runs_mandatory_specialists_in_order() -> None:
     result = await agent.orchestrate(payload)
 
     assert result["tier"] == "full_workflow"
-    # Order matters: BA -> stack_analyst -> security -> qa
+    # T22: QA moved post-coding. Pre-coding sequence is
+    # BA -> stack_analyst -> security (no qa as final_gate).
     assert [c.args[0] for c in agent._dispatch_specialist.call_args_list] == [
-        "business_analyst", "stack_analyst", "security", "qa",
+        "business_analyst", "stack_analyst", "security",
     ]
 
 
@@ -142,7 +143,8 @@ async def test_fallback_error_treated_as_pass_when_flag_true(monkeypatch) -> Non
     result = await agent.orchestrate(payload)
 
     called = [c.args[0] for c in agent._dispatch_specialist.call_args_list]
-    assert called == ["business_analyst", "stack_analyst", "security", "qa"]
+    # T22: QA moved post-coding; pre-coding sequence no longer includes qa.
+    assert called == ["business_analyst", "stack_analyst", "security"]
     assert result["halted_on"] is None
     # StackAnalyst saw no BA prior because the errored upstream was dropped.
     assert "business_analyst" not in observed_priors["stack_analyst"]
