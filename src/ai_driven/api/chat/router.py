@@ -119,9 +119,42 @@ async def _process_task_inline(task_id: str, agent_type: str, message: str, cont
             await task_repo.update_status(uuid.UUID(task_id), "planning")
             await session.commit()
 
+        # T20: debug-mode orchestrator coverage. In production the orchestrator
+        # runs as an SQS worker before the coding-task is enqueued. Debug mode
+        # bypasses SQS entirely, so we run orchestrate() inline here — BEFORE
+        # the CodingAgent — so specialist artifacts + classifier tier are
+        # persisted just like in production.
+        settings_inner = get_settings()
+        if agent_type == "coding" and settings_inner.orchestrator_mode != "off":
+            try:
+                from datetime import datetime, timezone
+
+                from ai_driven.agents.orchestrator.agent import OrchestratorAgent
+                from ai_driven.queue.consumer import _build_orchestrate_payload
+
+                orch_payload = _build_orchestrate_payload(
+                    {"message": message, **context}, task_id
+                )
+                orch_result = await OrchestratorAgent().orchestrate(orch_payload)
+                async with async_session_factory() as session:
+                    task_repo = TaskRepository(session)
+                    marker: dict[str, Any] = {
+                        "orchestrator_completed_at": datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                        "classifier_tier": orch_result.get("tier"),
+                    }
+                    if orch_result.get("halted_on"):
+                        marker["orchestrator_halted_on"] = orch_result["halted_on"]
+                    await task_repo.update_output_data(uuid.UUID(task_id), marker)
+                    await session.commit()
+            except Exception:
+                logger.exception(
+                    "inline_orchestrator_run_failed (non-fatal; continuing with coding)"
+                )
+
         # Create Jira client if configured
         jira_client = None
-        settings_inner = get_settings()
         if settings_inner.jira_base_url and settings_inner.jira_api_token:
             from ai_driven.jira.client import JiraClient
             jira_client = JiraClient()
@@ -368,46 +401,13 @@ async def send_message(
 
     settings = get_settings()
 
-    # SHADOW: kick off the orchestrator for every coding task, but ONLY when
-    # the SQS/producer path won't also do it. Without this guard, debug mode
-    # and the inline-fallback branch (no queue URL configured) never reach
-    # TaskProducer.enqueue_task, so the producer's shadow hook never fires
-    # and we must invoke here. With real SQS configured, the producer
-    # dispatches shadow itself — doing it again here would double-fire.
-    producer_will_handle = (
-        not settings.debug and bool(settings.sqs_task_queue_url)
-    )
-    if (
-        body.agentType == "coding"
-        and settings.orchestrator_mode != "off"
-        and not producer_will_handle
-    ):
-        try:
-            from ai_driven.agents.orchestrator.agent import OrchestratorAgent
-            from ai_driven.queue.producer import _run_shadow
-
-            shadow_payload = {
-                "task_id": task_id,
-                "ticket": {
-                    "key": body.context.get("jira_key", ""),
-                    "summary": body.context.get("title") or body.message,
-                    "description": body.message,
-                    "labels": body.context.get("labels", []),
-                    "acceptance_criteria": body.context.get(
-                        "acceptance_criteria", []
-                    ),
-                },
-                "repo": {
-                    "full_name": body.context.get("repo_full_name", ""),
-                    "scm_type": body.context.get("scm_type", "github"),
-                    "default_branch": body.context.get("default_branch", "main"),
-                },
-            }
-            asyncio.create_task(_run_shadow(OrchestratorAgent(), shadow_payload))
-        except Exception:
-            logger.exception(
-                "shadow orchestrator dispatch failed in chat path (non-fatal)"
-            )
+    # T20 removed the in-process shadow orchestrator fan-out from the chat
+    # path. The orchestrator now runs as an SQS worker:
+    #   * production: TaskProducer.enqueue_task('coding', ...) routes to the
+    #     orchestrator queue when orchestrator_mode != 'off'. The orchestrator
+    #     worker enqueues the downstream coding-task.
+    #   * debug mode: _process_task_inline runs orchestrate() synchronously
+    #     before dispatching to CodingAgent (see that function).
 
     if settings.debug:
         # In debug mode, process inline — no SQS worker needed
