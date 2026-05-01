@@ -1,6 +1,56 @@
 # Orchestrator Phase 2 — Live mode, context injection, QA gating
 
-**Status:** v5 — approved after 4 red-team rounds (v1 → v2 → v3 → v4 → v5). Ready to dispatch.
+**Status:** v6 — T0 returned ABORT-STRICT; pivoted to Path A+B hybrid per 5th red-team round. Ready to dispatch T-A2.
+
+## Rollout reality (post-T0)
+
+T0 shadow-baseline (`docs/phase2-shadow-baseline.md`) found:
+- 45-73% specialist error rate from Bedrock `max_tokens` truncation and AWS credit exhaustion
+- Every `task_artifacts.cost_usd = 0.00` (attribution hook never wired)
+- Sample too small (11-13 per role) for meaningful FP math
+- QA block rate 75% on n=4 is untrustworthy
+
+Flipping straight to strict gating would halt a majority of pipelines for infrastructure reasons. Red-team of the repair plan (round 5) rejected a pure "pause + grow sample" approach and recommended a hybrid:
+
+### Path A+B hybrid (what we're actually shipping)
+
+| # | Task | Days |
+|---|---|---|
+| T-A2 | Cost attribution end-to-end + cost-ceiling compounding fix | 1 |
+| T-A1 | Audit + fix top 3 specialist error modes, define <15% fallback | 1-1.5 |
+| T19 | prior_artifacts handoff (from original Phase 2 — moved forward so dogfood reflects Phase-2 topology) | 0.5 |
+| T18 + T19b | prompt_composer + PR persist + **ship LENIENT gating** (halt only on non-empty `blocking_concerns`/`blocking_questions`; errors pass through) | 1.5 |
+| T-A3 | Dogfood 50+ tickets over 2 weeks on `feature/orchestrator-phase1`, per-role non-error targets (≥15 BA, ≥15 security, ≥10 qa). Lenient gating runs LIVE during this time so we collect real block-decision data, not dry-run artifacts | ~2 weeks wall, 1 day work |
+| T0-rerun | Re-run shadow baseline against fresh data. If exit criteria met → flip to strict (T-B1). If not → stay lenient indefinitely | 0.5 |
+| T20 | Orchestrator as SQS worker (from original Phase 2 plan) | 1.5 |
+| T21 | Strict gating + status migration (only runs if T0-rerun passes) | 1 |
+| T22 | QA post-coding | 1.5 |
+| T23 | QA verdict → Task status | 0.5 |
+| T24 | Admin override + stuck-orchestrator reaper | 0.5 |
+| T25 | Specialists UI tab | 1 |
+| T26 | Cutover | 0.25 |
+| T27 | Dogfood harness + results report | 1 |
+| T28 | Cleanup + runbook | 0.5 |
+
+### What changed vs v5
+
+1. **Lenient gating ships first** (as T18). Strict gating is contingent on T0-rerun passing.
+2. **T-A2 cost-attribution scope expanded** to end-to-end fix (dataclass field + base class compute + repo writer + reader + Decimal precision + cost-ceiling rollup). 1 day, not 0.5.
+3. **T-A1 has a fallback spec** — if error rate can't drop <15% after max_tokens tuning + retry-on-ValidationException, we stay on lenient gating permanently and document.
+4. **T19 moved forward** so dogfood corpus reflects actual Phase 2 topology.
+5. **T-A3 target raised** to 50+ tickets / ≥15 BA / ≥15 security / ≥10 qa per-role non-error counts (not a flat 30).
+6. **T-A3 overlaps with T18** — dogfood runs while lenient gating is live, producing real override/block decisions for the strict-gating decision.
+
+### Fallback path (if errors stay high)
+
+If T-A1 can't drive error rate below 15%, the plan stays at lenient gating permanently:
+- T20 (SQS worker) still ships.
+- T21 (strict migration) does NOT ship.
+- T22 QA ships but runs only advisory (never blocks via `security_rules_verification.followed=false`).
+- T24 override endpoint still ships for the cases where lenient-gating false-positives.
+- T27 dogfood still measures "did specialist output influence the PR diff" as the primary value metric.
+
+Lenient gating + observability is the minimum viable Phase 2. Strict gating is an upside if the data supports it.
 **Author:** Session 2026-05-01
 **Depends on:** Phase 1 (T1–T17 + T5b) on `feature/orchestrator-phase1`.
 
