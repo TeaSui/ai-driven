@@ -1,7 +1,7 @@
 # Roadmap — 90 Days to GA, then 12 Months
 
-**Reference date:** 2026-04-22
-**Current state:** Design-partner pilot (1 team), Next.js UI substantially complete, 4 agents working, evaluation loop live. Findings in `docs/review/findings-final.md` block GA.
+**Reference date:** 2026-05-01 (post Phase 2 close; live mode on `feature/orchestrator-phase1`)
+**Current state:** Design-partner pilot (1 team), Next.js UI substantially complete, 4 core agents + 6 specialists + orchestrator/QA gate, evaluation loop live. Phase 2 shipped strict gating + post-coding QA + admin override + reapers (see `docs/phase2-retrospective.md`). Findings in `docs/review/findings-final.md` still contain unfixed P1s that block GA.
 
 ## Now (weeks 0–2) — Close the findings
 
@@ -15,23 +15,26 @@ Goal: every P1 from the review is either fixed or has a dated mitigation.
 | Demo fallback gated behind `NEXT_PUBLIC_DEMO_MODE` | Frontend | `review/findings-final.md §3.7` | ✅ |
 | SWR stops polling on terminal task statuses | Frontend | `review/findings-final.md §5.1` | ✅ |
 | Severity taxonomy migration (enum + CHECK + normalize) | Backend + Data | `implementation/07-severity-taxonomy-migration.md` | 🔲 plan written |
-| WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `implementation/08-auth-and-ws-security.md` | 🔲 plan written |
-| `cancelled` terminal state replaces `failed` on `/stop` | Backend + UI | `implementation/08` §Phase 1.5 | 🔲 |
+| WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `implementation/08-auth-and-ws-security.md` | ◐ partial — `/login` + session tokens shipped; WS authz + middleware still pending |
+| `cancelled` terminal state replaces `failed` on `/stop` | Backend + UI | `implementation/08` §Phase 1.5 | ✅ |
 | Model IDs — bump Opus 4.6 → 4.7 + re-benchmark | AI Eng | `config.py:39` | ✅ landed (re-benchmark still TODO) |
+| **Phase 2 orchestrator + specialists + QA gate + admin override** | Backend + Frontend | `docs/plans/2026-05-01-orchestrator-phase-2.md`, `docs/phase2-retrospective.md`, `docs/runbooks/orchestrator-phase2.md` | ✅ live mode flipped 2026-05-01 (PR #33) |
 
 **Exit criteria:** every row green; zero P1 findings open; `successRate` metric excludes `cancelled`; debug banner visible when `AI_DRIVEN_DEBUG=true`.
 
 ## Next (weeks 3–6) — Launch-ready polish
 
-| Theme | Deliverable |
-|---|---|
-| Observability | Budget burn-down bar in header; disable "New run" at 100% cap; DLQ & stuck-task view under `/admin/runs`. |
-| Safety | Emergency-stop admin toggle (drains queues); per-repo auto-merge opt-in toggle with human-required stage indicator. |
-| Reviews UX | Split `/dashboard/reviews` into "Awaiting me" / "Awaiting others" / "Merged" with keyboard shortcuts (j/k/a/r). |
-| Cost | Per-team daily/monthly spend dashboard with model-routing breakdown. |
-| Evaluation | Backfill eval scores for last 30 days of completed tasks; surface 7-day rolling weighted avg on overview hero. |
-| Accessibility | axe-core CI check, aria-live on streaming panels, visible focus rings, kill remaining `alert()`. |
-| Onboarding | `/onboarding` wizard: connect repo → install GitHub app → configure webhook → pick default agent. |
+| Theme | Deliverable | Status |
+|---|---|---|
+| Observability | Budget burn-down bar in header; disable "New run" at 100% cap; DLQ & stuck-task view under `/admin/runs`. | ◐ DLQ + stuck-task reapers ✅ (T24); budget bar + dispatch-disable ✅; dashboard view of DLQ pending |
+| Safety | Emergency-stop admin toggle (drains queues); per-repo auto-merge opt-in toggle with human-required stage indicator. | 🔲 |
+| Reviews UX | Split `/dashboard/reviews` into "Awaiting me" / "Awaiting others" / "Merged" with keyboard shortcuts (j/k/a/r). | 🔲 |
+| Cost | Per-team daily/monthly spend dashboard with model-routing breakdown. | ◐ per-artifact cost attribution ✅ (T-A2); dashboard surface pending |
+| Evaluation | Backfill eval scores for last 30 days of completed tasks; surface 7-day rolling weighted avg on overview hero. | 🔲 |
+| Accessibility | axe-core CI check, aria-live on streaming panels, visible focus rings, kill remaining `alert()`. | 🔲 |
+| Onboarding | `/onboarding` wizard: connect repo → install GitHub app → configure webhook → pick default agent. | 🔲 |
+| Specialists UI | Task-detail "Specialists" tab with per-role artifact cards, QA-failure breakdown, admin override button. | ✅ shipped in T25 |
+| Dogfood harness | Corpus + harness + markdown report for measuring specialist error rate, override rate, cost/task. | ✅ shipped in T27 (`scripts/phase2_dogfood_*`) |
 
 **Exit criteria:** a new customer can go from "landed on the marketing page" to "first AI-merged PR" in under 30 minutes unassisted.
 
