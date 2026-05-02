@@ -158,11 +158,22 @@ as TechLead — no consumer in Phase 2 pipeline.
 
 ---
 
+## Ops state at Phase 2 close
+
+- **Live mode active** — `AI_DRIVEN_ORCHESTRATOR_MODE=live` pinned in
+  `.env.local` (flipped 2026-05-01). Cutover smoke record:
+  `docs/phase2-cutover-smoke-results.md`.
+- **Seed team named `admin`** with `admin@ai-driven.local` member
+  (migration `f6a7b8c9d0e1`). Ships with a non-functional `__seed__`
+  hash; operators rotate before first use.
+- **Consumer terminal-state preservation** in place — wrapper-committed
+  `blocked` / `qa_failed` are not overwritten with `completed` on
+  successful `AgentResult`.
+- **Timeline stage projections** cover all Phase 2 statuses (see
+  runbook "Timeline stage mapping").
+
 ## Operational next steps (owned by ops, not this PR)
 
-- Execute T26 cutover per `docs/runbooks/orchestrator-phase2.md` → Common
-  tasks → "Rollback to shadow mode" (read in reverse). Confirm one
-  fast_path + one full_workflow ticket after the flip.
 - Wire the P2/P3 alerts in the runbook into the on-call rotation.
 - Review override-audit weekly for the first month post-cutover to
   spot FP patterns early; feed findings into the runbook's "Known

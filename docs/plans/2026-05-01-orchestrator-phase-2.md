@@ -1,6 +1,6 @@
 # Orchestrator Phase 2 — Live mode, context injection, QA gating
 
-**Status: SHIPPED** (2026-05-01) — PR #33 on `feature/orchestrator-phase1`. T26 cutover is a manual ops step (env flip) and is tracked separately. Retrospective: `docs/phase2-retrospective.md`. Operator runbook: `docs/runbooks/orchestrator-phase2.md`.
+**Status: SHIPPED** (2026-05-01) — PR #33 on `feature/orchestrator-phase1`. Live mode active (`AI_DRIVEN_ORCHESTRATOR_MODE=live`). Retrospective: `docs/phase2-retrospective.md`. Operator runbook: `docs/runbooks/orchestrator-phase2.md`. Cutover smoke record: `docs/phase2-cutover-smoke-results.md`.
 
 **Status (historical):** v6 — T0 returned ABORT-STRICT; pivoted to Path A+B hybrid per 5th red-team round. Ready to dispatch T-A2.
 
@@ -30,7 +30,7 @@ Flipping straight to strict gating would halt a majority of pipelines for infras
 | T23 | QA verdict → Task status | 0.5 | ✅ `5ea27ff` + `0e5ac71` + `cbfd450` + `b9a5458` + `c66aa3e` + `0846cc4` + `eb2195d` |
 | T24 | Admin override + stuck-orchestrator reaper | 0.5 | ✅ `96d8c43` + `2663353` + `2a02c3c` + `3f3c9c0` + `2fef2a8` + `92ebb05` + `3fb803c` + `65a3459` + `0bf0def` |
 | T25 | Specialists UI tab | 1 | ✅ `1ab836f` + `b4fa32c` + `3a6ae7d` + `1d2ca7f` + `c41329d` + `1acbfd7` |
-| T26 | Cutover | 0.25 | ⏳ **pending manual ops** — env flip per `docs/runbooks/orchestrator-phase2.md` |
+| T26 | Cutover | 0.25 | ✅ **DONE** (2026-05-01) — `AI_DRIVEN_ORCHESTRATOR_MODE=live` in `.env.local`; smoke record in `docs/phase2-cutover-smoke-results.md` |
 | T27 | Dogfood harness + results report | 1 | ✅ `d9e39e3` + `085f173` + `1196e02` + `4ba3625` + `ffcddbc` |
 | T28 | Cleanup + runbook | 0.5 | ✅ this PR (runbook, retrospective, dead-code removal, archive rename, CHANGELOG) |
 
@@ -426,7 +426,7 @@ Results compiled into `docs/phase2-dogfood-results.md`.
 | T23 | QA verdict → Task status | 0.5 | ✅ `5ea27ff` + `0e5ac71` + `cbfd450` + `b9a5458` + `c66aa3e` + `0846cc4` + `eb2195d` |
 | T24 | Admin override endpoint | 0.5 | ✅ `96d8c43` + `2663353` + `2a02c3c` + `3f3c9c0` + `2fef2a8` + `92ebb05` + `3fb803c` + `65a3459` + `0bf0def` |
 | T25 | Specialists UI tab | 1 | ✅ `1ab836f` + `b4fa32c` + `3a6ae7d` + `1d2ca7f` + `c41329d` + `1acbfd7` |
-| T26 | Cutover | 0.25 | ⏳ pending manual ops |
+| T26 | Cutover | 0.25 | ✅ live mode flipped 2026-05-01 |
 | T27 | Dogfood 10 tickets | 1 | ✅ `d9e39e3` + `085f173` + `1196e02` + `4ba3625` + `ffcddbc` |
 | T28 | Runbook + docs | 0.5 | ✅ this PR |
 | **Total** | | **~9.75 working days** | shipped PR #33 (2026-05-01) |

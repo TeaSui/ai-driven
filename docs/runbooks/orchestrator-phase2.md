@@ -1,8 +1,12 @@
 # Orchestrator Phase 2 — Operator Runbook
 
-**Last verified:** 2026-05-01 (T28 wrap-up commit). Update this line and the
+**Last verified:** 2026-05-01 (post-cutover). Update this line and the
 "Known false positives" section every time you change orchestrator state,
 alerting, or env flags. A stale runbook is worse than no runbook.
+
+**Current mode:** `live` (flipped 2026-05-01). `.env.local` pins the value
+explicitly; any deployment env should do the same rather than relying on the
+`shadow` default in `config.py`.
 
 ---
 
@@ -58,7 +62,31 @@ stateDiagram-v2
 Status values are enforced by `ck_tasks_status` (see Alembic migrations
 adding `blocked`, `awaiting_qa`, `qa_failed`). Every transition is written by
 a single worker (orchestrator → coding → qa) or the admin override endpoint;
-no code path writes status twice in the same request.
+no code path writes status twice in the same request. The outer SQS
+`_process_message` respects wrapper-committed terminal states (`blocked`,
+`qa_failed`) and does NOT overwrite them with `completed` when the wrapper
+returns a successful AgentResult — gating decisions are preserved.
+
+### Timeline stage mapping (admin UI)
+
+`GET /api/admin/pipeline/runs` projects each Task's `status` onto a
+(`stage`, `stageStatus`) pair consumed by the Timeline UI. The projections:
+
+| status | stage | stageStatus | UI pill |
+|---|---|---|---|
+| `queued` / `planning` | `jira` | `queued` / `active` | Queued / Coding |
+| `running` / `coding` / `testing` | `code` | `active` | Coding |
+| `blocked` | `code` | `failed` | Blocked |
+| `awaiting_qa` | `review` | `active` | Reviewing |
+| `qa_failed` | `review` | `failed` | Blocked |
+| `completed` (coding agent) | `review` | `passed` | PR Open |
+| `completed` (workflow agent) | `monitor` | `passed` | Deployed |
+| `failed` | `code` | `failed` | Blocked |
+| `cancelled` | `code` | `cancelled` | Cancelled |
+
+The `_AGENT_COMPLETED_STAGE` override (coding agent ⇒ `review`) is skipped
+for `blocked` / `awaiting_qa` / `qa_failed` so a specialist-halted task
+doesn't mis-render as "In review."
 
 ---
 
@@ -73,6 +101,28 @@ The mode is **stamped on each SQS message at enqueue time** in `producer.py`
 — in-flight messages during a mode flip keep their original mode so the
 flip is safe mid-deploy. The worker reads the stamped value, NOT the
 current env var.
+
+---
+
+## Teams & auth
+
+The DB always has these two system-owned rows (seeded by migration
+`f6a7b8c9d0e1_add_task_override_audit`):
+
+| id | name | email | purpose |
+|---|---|---|---|
+| `00000000-0000-0000-0000-000000000000` | `admin` | — | ops team — authenticates human operators |
+| `00000000-0000-0000-0000-000000000001` | — | `admin@ai-driven.local` | team_member row referenced by reaper + override_audit writes |
+
+The `admin` team ships with `api_key_hash = '__seed__'` — a non-SHA256-shaped
+sentinel that can never match a hashed input. **It is NOT usable as-is.**
+Operators MUST rotate to a real key before first use, either via
+`POST /api/admin/teams/{admin_id}/rotate-key` (requires an already-working key
+for auth — bootstrap via DB), or via a direct DB update that replaces
+`api_key_hash` with `sha256(<new-plaintext-key>)` and prints the plaintext once.
+
+Every other team the operator creates is a normal owner-keyed team; role
+checks (`require_admin`) accept `owner` and `admin` roles interchangeably.
 
 ---
 

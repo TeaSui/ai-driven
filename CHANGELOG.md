@@ -83,11 +83,19 @@ QA specialist, and expose a human override + stuck-task reaper path. PR
 - In-process shadow-orchestrator fire-and-forget path in the HTTP
   layer — all orchestration goes through SQS now.
 
-### Pending ops
-- **T26 — Cutover** — flipping `AI_DRIVEN_ORCHESTRATOR_MODE=live` in
-  production is a manual env change and is NOT part of this PR. Follow
-  `docs/runbooks/orchestrator-phase2.md` → "Rollback to shadow mode"
-  (read in reverse) for the procedure.
+### Ops state
+- **Live mode active** — `AI_DRIVEN_ORCHESTRATOR_MODE=live` pinned in
+  `.env.local`. Rollback procedure in
+  `docs/runbooks/orchestrator-phase2.md` → "Rollback to shadow mode."
+- **Seed team renamed** — the reaper-attribution seed team is named
+  `admin` (not `system`), email `admin@ai-driven.local`, seeded with a
+  non-functional `__seed__` hash. Rotate to a real key before use.
+- **Consumer terminal-state preservation** — `_process_message` respects
+  wrapper-committed `blocked` / `qa_failed` and does not overwrite them
+  with `completed`.
+- **Timeline stage mapping** — `blocked` / `awaiting_qa` / `qa_failed`
+  have explicit stage + stageStatus projections so the Timeline UI
+  renders gated tasks accurately (see runbook).
 
 ### Docs
 - `docs/phase2-retrospective.md` — what landed / learned / cut /
