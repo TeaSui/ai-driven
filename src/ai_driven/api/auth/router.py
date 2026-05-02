@@ -25,7 +25,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ai_driven.db.postgres.models import Team, TeamMember
@@ -211,13 +211,17 @@ async def get_session_endpoint(
 class LoginRequest(CamelModel):
     """Body for POST /api/auth/login.
 
-    ``email`` is optional and stored as session metadata for audit purposes
-    and as the forward-compatible field for the future Cognito migration. It
-    is NOT a second authentication factor.
+    ``email`` is REQUIRED and must match a ``team_members`` row whose
+    ``team_id`` is owned by the team the ``apiKey`` authenticates. This
+    binds every session to a specific human so audit logs and
+    ``require_admin`` have a real member_id to attribute actions to.
+
+    The API key proves "you belong to this team." The email proves
+    "you are this member of that team." Without both, you get 401.
     """
 
     apiKey: str
-    email: str | None = None
+    email: str
 
 
 class LoginResponse(CamelModel):
@@ -226,12 +230,15 @@ class LoginResponse(CamelModel):
     Serialized as camelCase: ``{sessionToken, teamId, memberId, email,
     role, createdAt, lastSeenAt, expiresAt}``. Consistent with every
     other API response on the platform (see api/_shared.py).
+
+    ``memberId`` and ``email`` are non-null because login now requires a
+    matching team_members row.
     """
 
     sessionToken: str
     teamId: str
-    memberId: str | None = None
-    email: str | None = None
+    memberId: str
+    email: str
     role: str
     createdAt: str
     lastSeenAt: str
@@ -244,13 +251,19 @@ async def login(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> LoginResponse:
-    """Exchange a valid API key for a short-lived session token.
+    """Exchange a valid (apiKey, email) pair for a short-lived session token.
 
     Returns a cookie (`session_token`) and the same token in the JSON body so
     non-browser clients can use `Authorization: Bearer` if they want to.
 
+    Auth rule: the API key must resolve to a team, AND the email must
+    identify an active team_member belonging to that SAME team. Either
+    missing or mismatched → 401 with a generic "Invalid credentials"
+    (we do not reveal which half failed, per standard auth practice).
+
     Failure modes:
-        * 401 — API key invalid
+        * 401 — API key invalid, email not registered to the team, or
+          the matched member is inactive
         * 503 — Redis unavailable (fail-closed; retry shortly)
     """
     from ai_driven.auth import sessions as session_store
@@ -259,39 +272,43 @@ async def login(
 
     settings = get_settings()
     key = body.apiKey.strip()
-    if not key:
-        raise HTTPException(status_code=401, detail="API key is required")
+    email = (body.email or "").strip().lower()
+    if not key or not email:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
     key_hash = hash_api_key(key)
     team_result = await session.execute(
-        select(Team).where(Team.api_key_hash == key_hash)
+        select(Team).where(
+            Team.api_key_hash == key_hash,
+            Team.is_active.is_(True),
+        )
     )
     team = team_result.scalar_one_or_none()
     if not team:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    # If the key matches a specific member, hang the member_id + their
-    # registered email on the session for audit; else team-level session.
-    member_id: str | None = None
-    member_email: str | None = None
-    member_role = "owner"  # Team-level keys get owner by convention.
+    # Email MUST identify an active team_member on THIS team. The api_key
+    # proved the caller belongs to the team; email proves *which* member.
     member_result = await session.execute(
         select(TeamMember).where(
             TeamMember.team_id == team.id,
-            TeamMember.api_key_hash == key_hash,
+            func.lower(TeamMember.email) == email,
+            TeamMember.is_active.is_(True),
         )
     )
     member = member_result.scalar_one_or_none()
-    if member:
-        member_id = str(member.id)
-        member_email = member.email
-        member_role = member.role
+    if member is None:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    member_id = str(member.id)
+    member_email = member.email
+    member_role = member.role
 
     try:
         sess = await session_store.create_session(
             team_id=str(team.id),
             member_id=member_id,
-            email=body.email or member_email,
+            email=member_email,
             role=member_role,
         )
     except Exception:

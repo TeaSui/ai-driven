@@ -29,12 +29,26 @@ def _make_team(name: str = "Test Team", key_hash: str = "kh123") -> MagicMock:
     return t
 
 
-def _fake_session(team_id: str) -> Session:
+def _make_member(
+    team_id: uuid.UUID,
+    email: str = "me@example.com",
+    role: str = "owner",
+) -> MagicMock:
+    m = MagicMock()
+    m.id = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    m.team_id = team_id
+    m.email = email
+    m.role = role
+    m.is_active = True
+    return m
+
+
+def _fake_session(team_id: str, member_id: str = "22222222-2222-2222-2222-222222222222") -> Session:
     now = time.time()
     return Session(
         token="test-token-abc",
         team_id=team_id,
-        member_id=None,
+        member_id=member_id,
         email="me@example.com",
         role="owner",
         created_at=now,
@@ -43,13 +57,14 @@ def _fake_session(team_id: str) -> Session:
 
 
 class TestLoginValid:
-    def test_valid_key_returns_session_and_sets_cookie(self) -> None:
+    def test_valid_key_and_email_returns_session_and_sets_cookie(self) -> None:
         team = _make_team(key_hash="hash_of_good_key")
+        member = _make_member(team.id)
 
         team_scalar = MagicMock()
         team_scalar.scalar_one_or_none.return_value = team
         member_scalar = MagicMock()
-        member_scalar.scalar_one_or_none.return_value = None
+        member_scalar.scalar_one_or_none.return_value = member
 
         db_session = MagicMock()
         db_session.execute = AsyncMock(side_effect=[team_scalar, member_scalar])
@@ -76,6 +91,7 @@ class TestLoginValid:
 
         assert result.sessionToken == "test-token-abc"
         assert result.teamId == str(team.id)
+        assert result.memberId == str(member.id)
         assert result.email == "me@example.com"
         assert result.role == "owner"
 
@@ -105,12 +121,43 @@ class TestLoginInvalidKey:
             with pytest.raises(HTTPException) as exc:
                 asyncio.run(
                     login(
-                        body=LoginRequest(apiKey="bad-key"),
+                        body=LoginRequest(apiKey="bad-key", email="me@example.com"),
                         response=MagicMock(),
                         session=db_session,
                     )
                 )
         assert exc.value.status_code == 401
+
+
+class TestLoginEmailNotRegistered:
+    def test_valid_key_but_unknown_email_returns_401(self) -> None:
+        """API key valid, but no team_member with that email on this team."""
+        from fastapi import HTTPException
+
+        team = _make_team(key_hash="hash_of_good_key")
+        team_scalar = MagicMock()
+        team_scalar.scalar_one_or_none.return_value = team
+        member_scalar = MagicMock()
+        member_scalar.scalar_one_or_none.return_value = None  # no member match
+
+        db_session = MagicMock()
+        db_session.execute = AsyncMock(side_effect=[team_scalar, member_scalar])
+
+        with patch(
+            "ai_driven.auth.middleware.hash_api_key",
+            return_value="hash_of_good_key",
+        ):
+            with pytest.raises(HTTPException) as exc:
+                asyncio.run(
+                    login(
+                        body=LoginRequest(apiKey="good-key", email="stranger@example.com"),
+                        response=MagicMock(),
+                        session=db_session,
+                    )
+                )
+        assert exc.value.status_code == 401
+        # Error message is generic — we do not disclose which half failed.
+        assert exc.value.detail == "Invalid credentials"
 
 
 class TestLoginEmptyKey:
@@ -123,7 +170,24 @@ class TestLoginEmptyKey:
         with pytest.raises(HTTPException) as exc:
             asyncio.run(
                 login(
-                    body=LoginRequest(apiKey="   "),
+                    body=LoginRequest(apiKey="   ", email="me@example.com"),
+                    response=MagicMock(),
+                    session=db_session,
+                )
+            )
+        assert exc.value.status_code == 401
+        db_session.execute.assert_not_awaited()
+
+    def test_empty_email_returns_401_without_db_hit(self) -> None:
+        from fastapi import HTTPException
+
+        db_session = MagicMock()
+        db_session.execute = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(
+                login(
+                    body=LoginRequest(apiKey="good-key", email="   "),
                     response=MagicMock(),
                     session=db_session,
                 )
@@ -137,10 +201,11 @@ class TestLoginRedisOutage:
         from fastapi import HTTPException
 
         team = _make_team(key_hash="hash_of_good_key")
+        member = _make_member(team.id)
         team_scalar = MagicMock()
         team_scalar.scalar_one_or_none.return_value = team
         member_scalar = MagicMock()
-        member_scalar.scalar_one_or_none.return_value = None
+        member_scalar.scalar_one_or_none.return_value = member
 
         db_session = MagicMock()
         db_session.execute = AsyncMock(side_effect=[team_scalar, member_scalar])
@@ -155,7 +220,7 @@ class TestLoginRedisOutage:
             with pytest.raises(HTTPException) as exc:
                 asyncio.run(
                     login(
-                        body=LoginRequest(apiKey="good-key"),
+                        body=LoginRequest(apiKey="good-key", email="me@example.com"),
                         response=MagicMock(),
                         session=db_session,
                     )

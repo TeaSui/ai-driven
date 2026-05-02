@@ -14,18 +14,24 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!key.trim()) return
+    if (!email.trim()) {
+      setError('Email is required. It must match a team member registered on this team.')
+      return
+    }
 
     setLoading(true)
     setError('')
 
     try {
-      // Exchange the API key for a short-lived session token. The backend
-      // sets an HttpOnly session_token cookie on success AND returns the
-      // same token in the JSON body — we stash it in localStorage so the
+      // Exchange (API key, email) for a short-lived session token. Backend
+      // binds the session to a specific team_member identified by the
+      // email; without a match it returns 401. The backend sets an
+      // HttpOnly session_token cookie on success AND returns the same
+      // token in the JSON body — we stash it in localStorage so the
       // WebSocket can send it as a first-message auth frame (HttpOnly
       // cookies are unreadable from JS and Next.js rewrites() drop WS
       // upgrades, so the WS path cannot rely on the cookie).
-      const result = await login(key.trim(), email.trim() || undefined)
+      const result = await login(key.trim(), email.trim())
       try {
         localStorage.setItem('session_token', result.sessionToken)
       } catch {
@@ -50,7 +56,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} style={styles.form} noValidate>
           <label htmlFor="email" style={styles.label}>
-            Email <span style={styles.optional}>(optional, for audit log)</span>
+            Email <span style={styles.optional}>(must match a team member)</span>
           </label>
           <input
             id="email"
@@ -59,6 +65,7 @@ export default function LoginPage() {
             value={email}
             onChange={e => setEmail(e.target.value)}
             autoComplete="email"
+            required
             style={styles.input}
           />
 

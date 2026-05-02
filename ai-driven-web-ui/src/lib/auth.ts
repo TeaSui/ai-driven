@@ -80,12 +80,15 @@ export interface LoginResult {
   expiresAt: string
 }
 
-export async function login(apiKey: string, email?: string): Promise<LoginResult> {
+export async function login(apiKey: string, email: string): Promise<LoginResult> {
+  // email is REQUIRED — backend binds the session to a specific team_member
+  // identified by (apiKey → team, email → member) and rejects 401 without
+  // both halves.
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiKey, email: email || undefined }),
+    body: JSON.stringify({ apiKey, email }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))

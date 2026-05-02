@@ -387,21 +387,19 @@ async def require_admin(request: Request) -> TeamMemberInfo:
             email="debug@local",
         )
 
-    # Session-token path: middleware has populated role (and optionally
-    # member_id). Team-level logins (X-API-Key owner token exchanged for a
-    # session) have role='owner' but no member_id because team keys don't
-    # map to a specific team_member row — attribute those to the system
-    # member, same convention as the X-API-Key branch below.
+    # Session-token path: middleware populated team_role + member_id. We
+    # require BOTH — a session without a bound member_id cannot satisfy
+    # require_admin because we can't attribute its actions to a real human
+    # in the audit log. The /api/auth/login endpoint enforces this at
+    # creation time by requiring email + matching team_members row.
     role = getattr(request.state, "team_role", None)
     member_id = getattr(request.state, "member_id", None)
 
-    if role:
+    if role and member_id:
         if role not in {"admin", "owner"}:
             raise HTTPException(status_code=403, detail="Admin role required")
         return TeamMemberInfo(
-            member_id=member_id or SYSTEM_MEMBER_ID,
-            team_id=team_id,
-            role=role,
+            member_id=member_id, team_id=team_id, role=role
         )
 
     # X-API-Key path: role was set by middleware (team-level keys are

@@ -26,7 +26,7 @@ def _session(team_id: str) -> Session:
     return Session(
         token="tok",
         team_id=team_id,
-        member_id=None,
+        member_id="22222222-2222-2222-2222-222222222222",
         email="e@x",
         role="owner",
         created_at=now,
@@ -38,10 +38,16 @@ def _run_login(env: Environment) -> MagicMock:
     """Invoke login() with a fake DB + session store; return the response mock
     so the caller can inspect the Secure flag passed to set_cookie()."""
     team = _team()
+    member = MagicMock()
+    member.id = "22222222-2222-2222-2222-222222222222"
+    member.email = "e@x"
+    member.role = "owner"
+    member.is_active = True
+
     team_scalar = MagicMock()
     team_scalar.scalar_one_or_none.return_value = team
     member_scalar = MagicMock()
-    member_scalar.scalar_one_or_none.return_value = None
+    member_scalar.scalar_one_or_none.return_value = member
     db = MagicMock()
     db.execute = AsyncMock(side_effect=[team_scalar, member_scalar])
     response = MagicMock()
@@ -59,7 +65,11 @@ def _run_login(env: Environment) -> MagicMock:
     ), patch(
         "ai_driven.config.get_settings", return_value=fake_settings
     ):
-        asyncio.run(login(body=LoginRequest(apiKey="k"), response=response, session=db))
+        asyncio.run(login(
+            body=LoginRequest(apiKey="k", email="e@x"),
+            response=response,
+            session=db,
+        ))
     return response
 
 
