@@ -1,98 +1,130 @@
-# Workflow Agent — End-to-End Pipeline
+# Ticket → Merge — End-to-End Pipeline
 
-Full Jira-to-merge scenario: Jira webhook triggers Workflow Agent, which orchestrates Coding Agent → Review Agent → merge → notify.
+Primary path: Jira webhook → Orchestrator (classifier + specialists) →
+Coding (with injected BA + Security context) → PR → post-coding QA →
+`completed` or `qa_failed`. Slack notification via DevOps agent or direct
+coding-agent tool.
+
+Operator-oriented counterpart: [`docs/runbooks/06-orchestrator.md`](../runbooks/06-orchestrator.md).
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Jira as Jira Webhook
     participant API as FastAPI
-    participant WF as Workflow Agent
-    participant CA as Coding Agent
-    participant Claude as Claude API
-    participant GH as GitHub
-    participant RA as Review Agent
-    participant Slack as Slack API
+    participant SQS as SQS
+    participant ORCH as Orchestrator Wrapper
+    participant SPEC as Specialists
     participant PG as PostgreSQL
+    participant CA as Coding Agent
+    participant GH as GitHub
+    participant QA as QA Wrapper
+    participant Slack as Slack API
 
-    Note over Jira,PG: Scenario: Jira Ticket → Code → Review → Merge → Notify
+    Note over Jira,Slack: Scenario: Jira Ticket → Orchestrator gate → Code → Post-coding QA → Notify
 
     Jira->>API: POST /webhooks/jira/issue
-    Note over API: Issue transitioned to "Ready"
-    API->>PG: INSERT task (workflow agent)
-    API->>WF: Dispatch workflow
+    API->>PG: INSERT task (status=queued)
+    API->>SQS: enqueue orchestrator-task
 
-    WF->>Claude: Plan orchestration steps
-    Claude-->>WF: 1. Code  2. Review  3. Merge  4. Notify
-
-    rect rgb(232, 245, 233)
-        Note over WF,GH: Phase 1: Coding
-        WF->>CA: dispatch_coding_agent(jiraKey, repo)
-        CA->>Claude: Fetch Jira + explore repo
-        Claude-->>CA: tool_use: get_jira_issue
-        CA->>CA: Read files, search code
-        CA->>Claude: Write implementation
-        Claude-->>CA: tool_use: write_file (x N)
-        CA->>CA: Run tests in sandbox
-        CA->>GH: create_pull_request
-        GH-->>CA: PR #2418 created
-        CA->>Jira: add_jira_comment("PR opened")
-        CA-->>WF: {success: true, pr_number: 2418}
+    rect rgb(255, 224, 178)
+        Note over ORCH,PG: Phase 1: Orchestrator Gate
+        SQS->>ORCH: receive message
+        ORCH->>ORCH: classify → tier (fast_path | full_workflow | multi_domain)
+        ORCH->>SPEC: run BA → StackAnalyst → Security (+ UX, ApiTest if multi_domain)
+        SPEC-->>ORCH: verdict + payload per role
+        ORCH->>PG: INSERT task_artifacts (one row per role)
+        alt any verdict=block (live mode)
+            ORCH->>PG: UPDATE task SET status=blocked
+            ORCH-->>SQS: ack, terminal
+        else all pass
+            ORCH->>SQS: enqueue coding-task (with BA+Security payloads)
+        end
     end
 
-    WF->>WF: check_task_status (poll)
+    rect rgb(232, 245, 233)
+        Note over CA,GH: Phase 2: Coding
+        SQS->>CA: receive coding-task
+        CA->>CA: prompt_composer injects BA acceptance criteria + Security rules
+        CA->>GH: read repo, search code, RAG
+        CA->>CA: write files, run tests in sandbox
+        CA->>GH: create_pull_request
+        GH-->>CA: PR #2418
+        CA->>PG: UPDATE task SET status=awaiting_qa, output_data.pr_number=2418
+        CA->>SQS: enqueue qa-task
+    end
 
     rect rgb(227, 242, 253)
-        Note over WF,GH: Phase 2: Review
-        WF->>RA: dispatch_review_agent(repo, pr: 2418)
-        RA->>GH: get_pr_diff
-        GH-->>RA: Diff (+142 -38, 7 files)
-        RA->>Claude: Analyze diff for issues
-        Claude-->>RA: 3 comments, no blockers
-        RA->>GH: post_pr_comment (inline x3)
-        RA->>GH: approve_pr
-        RA-->>WF: {approved: true}
+        Note over QA,PG: Phase 3: Post-coding QA
+        SQS->>QA: receive qa-task
+        QA->>GH: get_pr_diff
+        QA->>QA: validate diff vs BA acceptance criteria + Security rules
+        QA->>PG: INSERT task_artifacts (role=qa)
+        alt verdict=pass | pass_with_notes
+            QA->>PG: UPDATE task SET status=completed
+        else verdict=block
+            QA->>PG: UPDATE task SET status=qa_failed, output_data.qa_failures=[...]
+        end
     end
 
     rect rgb(243, 229, 245)
-        Note over WF,GH: Phase 3: Merge + Notify
-        WF->>GH: merge_pull_request(squash)
-        GH-->>WF: Merged
-        WF->>Jira: Update status → "Done"
-        WF->>Slack: notify_team("PR #2418 merged")
-        Slack-->>WF: Message sent
+        Note over CA,Slack: Phase 4: Notify (if completed)
+        CA->>Slack: notify_team("PR #2418 ready for review")
+        CA->>Jira: add_comment("PR opened: ...")
     end
-
-    WF->>PG: UPDATE task completed
-    Note over WF,PG: Full cycle: Jira → Code → Review → Merge → Notify
 ```
 
-## Workflow Agent Tools
+## Tier Routing
 
-| Tool | Purpose |
-|------|---------|
-| `dispatch_coding_agent` | Enqueue coding task, returns task_id |
-| `dispatch_review_agent` | Enqueue review task for a PR |
-| `check_task_status` | Poll task state via DynamoDB TaskStateMachineStore |
-| `merge_pull_request` | Merge via GitHub/Bitbucket (squash/merge/rebase) |
-| `notify_team` | Send Slack message to channel (supports channel override) |
-| `mcp_*` | Additional MCP tools (GitHub, Jira, Slack) registered at startup if enabled |
+| Tier | Specialists (pre-coding) | Triggered by |
+|------|--------------------------|---------------|
+| `fast_path` | none (orchestrator skipped) | Trivial copy / config changes |
+| `full_workflow` | BusinessAnalyst → StackAnalyst → Security (+ TechLead / UxDesigner if picked) | Single-domain changes |
+| `multi_domain` | BA → StackAnalyst → TechLead → Security (+ UxDesigner / ApiTest if picked) | Changes spanning frontend + backend + infra |
 
-## Orchestration Pattern
+Source of truth: `src/ai_driven/agents/orchestrator/routing.py::TIER_RULES`.
+QA is NOT a pre-coding specialist — it runs post-coding against the real
+PR diff. See task T22 brief for rationale.
 
-```
-1. Parse input (Jira key, repo, branch)
-2. Dispatch CodingAgent → poll until completed
-3. Dispatch ReviewAgent → poll until approved
-4. Merge PR (squash by default)
-5. Update Jira status → "Done"
-6. Notify team via Slack
-7. Mark workflow task as completed
-```
+## Specialist → Coding Context Injection
 
-## Error Handling
+When specialists pass, the orchestrator re-enqueues the coding-task with
+the specialist payloads attached. The coding agent's prompt composer
+(T18/T19) injects:
 
-- If CodingAgent fails → workflow fails, Jira comment posted with error
-- If ReviewAgent requests changes → CodingAgent re-dispatched with feedback
-- If merge conflicts → workflow reports blocked status
-- Max polling attempts: 60 (with 10s intervals = 10min timeout per sub-task)
+- **BA payload** → concrete acceptance criteria at the top of the
+  user-prompt envelope.
+- **Security payload** → enforced rules and PII/auth constraints.
+- **StackAnalyst payload** → language / framework signals to bias
+  tool-use (e.g., test runner selection).
+
+Other specialist payloads (TechLead, UX, ApiTest) are persisted to
+`task_artifacts` for audit and UI display but not injected into the
+coding prompt by default.
+
+## Error Paths
+
+| Failure | Status | Recovery |
+|---------|--------|----------|
+| Specialist verdict=block (live) | `blocked` | Admin override `rerun_coding` re-enqueues coding with block ignored |
+| Coding loop ends without PR | `failed` | Reaper or admin override |
+| Stuck > 30 min at `orchestrating` / `running` / `awaiting_qa` | reaped to `failed` | Written by `src/ai_driven/background/reapers.py`; see runbook |
+| QA verdict=block | `qa_failed` | Admin override: `rerun_qa` (cheap, single invocation) or `force_pass` |
+| Specialist returns `verdict=error` (Bedrock flake) | Treated as `pass` when `AI_DRIVEN_ORCHESTRATOR_TREAT_ERRORS_AS_PASS=true` (default) | Counter `orchestrator.specialist.fallback_activated{role}` |
+
+## Legacy Workflow Agent Path
+
+The Workflow Agent still exists and registers its `dispatch_coding_agent`
+/ `dispatch_review_agent` / `merge_pull_request` / `notify_team` /
+`check_task_status` tools. It is **no longer the primary intake** — new
+tickets flow through the orchestrator queue. Workflow Agent invocations
+remain supported for:
+
+- Explicit `agent_type="workflow"` tasks submitted by older integrations.
+- Operator-driven orchestration of multi-PR changes where the LLM's
+  tool-use loop is preferred over the fixed tier plan.
+
+When invoked, the Workflow Agent polls child task status via
+`check_task_status` (default 60 attempts × 10s = 10 min timeout per
+sub-task) and composes the same PR → merge → notify sequence. It does
+NOT go through the Orchestrator Wrapper or post-coding QA.
