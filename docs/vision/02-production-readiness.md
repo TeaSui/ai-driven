@@ -15,12 +15,12 @@ Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/rev
 
 ## 2. Security
 
-- [ ] Every admin endpoint requires `team_id`-scoped auth (`implementation/08`). Phase 2 added `require_admin` to 3 endpoints (override, artifacts, override-audit); most `/api/admin/*` routes still lack role checks.
-- [ ] WebSocket `/stream/{task_id}` enforces team ownership before the first event is sent.
+- [x] Every admin endpoint requires `team_id`-scoped auth (`implementation/08`). Tier-1 Item A landed 2026-05-01 (commit `fef6ea7`): all 32 `/api/admin/*` routes now gate on `require_admin`, and several pre-existing cross-tenant leaks were closed in the same commit (dashboard/pipeline/insights aggregates, `POST /incidents` team commingling, `DELETE /teams/{id}` without scope guard, etc.). Mutating routes with another team's resource ID return 404 per the existence-leak convention.
+- [x] WebSocket `/stream/{task_id}` enforces team ownership before the first event is sent. `api/chat/router.py:628` calls `_auth_from_ws(websocket, task_id)` which resolves the task row and rejects on team mismatch before any event is emitted.
 - [x] API keys stored hashed (SHA-256); rotation flow tested (`POST /admin/teams/{id}/rotate-key`); **grace period is 48h in code, not the 7-day target** — decide whether to bump or update the goal.
 - [ ] Secrets only in AWS Secrets Manager; no `.env` in prod.
 - [ ] `AI_DRIVEN_DEBUG=true` is flagged visually and alerts operators within 60 s of being set.
-- [ ] Cross-tenant probe is a permanent CI test (`teamA` token hitting `teamB` IDs must 404). T25 artifacts + T27 override-audit endpoints return 404 on cross-team by design; not yet asserted in CI.
+- [x] Cross-tenant probe is a permanent CI test (`teamA` token hitting `teamB` IDs must 404). Landed 2026-05-01 (commit `9ce4ef0`) as `tests/integration/test_cross_tenant_isolation.py`: parametrized over 6 mutating endpoints + 3 representative reads + 3 list endpoints, asserting 404 on cross-team known-ID and empty results on cross-tenant list aggregates.
 - [ ] PII masking verified at every log sink (DataDog, PostgreSQL, Redis events).
 - [ ] Dependency audit (`pip-audit` + `npm audit`) clean on main.
 - [ ] SBOM generated for every release tag.

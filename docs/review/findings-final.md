@@ -53,13 +53,14 @@ Requires a UX pass on pipeline bubbles; not touched by Phase 2.
 ## 3. Production-readiness gaps
 
 ### ~~3.1 WebSocket endpoint authz~~ — ✅ FIXED
-`api/chat/router.py:628` now calls `_auth_from_ws(websocket, task_id)` before accepting the subscription. Verify the implementation enforces team ownership (probably fine, but worth the ~15-min read).
+`api/chat/router.py:628` now calls `_auth_from_ws(websocket, task_id)` before accepting the subscription. Verified 2026-05-01 during Tier-1 Item A: `_auth_from_ws` resolves the task row, compares `task.team_id` to the resolved session/API-key team, and closes the WS before sending any event on mismatch. Tier-1 Item A (commit `fef6ea7`) closes the parallel gap on the REST admin surface: every `/api/admin/*` endpoint now requires `require_admin` AND enforces per-resource team scoping.
 
 ### ~~3.2 `/stop` → `failed` status pollution~~ — ✅ FIXED
 `router.py:464-479` now sets `status="cancelled"` (not `failed`) and returns `{"status": "cancelled"}`. `SUCCESS_STATUSES` / `FAILURE_STATUSES` constants in `admin/router.py` treat them distinctly. KPIs correct.
 
 ### 3.3 No login / session / team switcher — ◐ PARTIAL
 - Login: ✅ `/api/auth/login` with session tokens in Redis.
+- Admin role enforcement: ✅ as of 2026-05-01 (commit `fef6ea7`) — every `/api/admin/*` endpoint requires `require_admin` with team-scoped authz. Previously only 3 endpoints (override/artifacts/override-audit) checked roles.
 - Team switcher: 🔲 still missing.
 - API-key UI for webhooks/CI: 🔲 still missing.
 
@@ -131,9 +132,9 @@ Unchanged; all still stand as guidance.
 | 2.6 Settings alert() | ✅ | Removed |
 | 2.7 Next.js middleware | ◐ | File exists; content unaudited |
 | 2.8 Auto-merge UX | 🔲 | Unchanged |
-| 3.1 WS authz | ✅ | `_auth_from_ws` enforces |
+| 3.1 WS authz | ✅ | `_auth_from_ws` enforces; REST admin surface also closed 2026-05-01 (`fef6ea7`) |
 | 3.2 `/stop` = cancelled | ✅ | Distinct terminal state |
-| 3.3 Login + session | ◐ | Login ✅; team switcher 🔲; API-key UI 🔲 |
+| 3.3 Login + session | ◐ | Login ✅; admin role gate ✅ (`fef6ea7`); team switcher 🔲; API-key UI 🔲 |
 | 3.4 Debug banner | ◐ | Backend ✅; UI render unaudited |
 | 3.5 Budget bar | ✅ | Header burn-down live |
 | 3.6 DLQ / stuck-task | ◐ | Reapers ✅; UI dashboard 🔲 |
