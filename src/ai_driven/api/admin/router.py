@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ai_driven.auth.middleware import hash_api_key
+from ai_driven.auth.middleware import TeamMemberInfo, hash_api_key, require_admin
 from ai_driven.billing.tracker import BudgetStatus, CostTracker, DailyUsage
 from ai_driven.db.postgres.repository import RepoRepository, TaskRepository, TeamRepository
 from ai_driven.db.postgres.session import get_session
@@ -22,6 +22,22 @@ from ai_driven.domain.enums import IncidentSeverity
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Sentinel used by the debug bypass in auth/middleware.require_admin — when
+# set, the caller is the system "all-teams" debug principal and cross-team
+# filters become no-ops so local dev can see everything in the dashboard.
+_DEBUG_TEAM_ID = "00000000-0000-0000-0000-000000000000"
+
+
+def _is_debug_principal(member: TeamMemberInfo) -> bool:
+    """Return True when the caller is the debug sentinel team.
+
+    Used by every admin read endpoint to decide whether to apply the
+    ``team_id == member.team_id`` filter. Without this escape hatch, the
+    local dev dashboard (which always runs under the sentinel team) would
+    see an empty list because no real task rows carry that team id.
+    """
+    return member.team_id == _DEBUG_TEAM_ID
 
 # T24: admin override endpoint. Defined in its own module for length
 # (override.py) but mounted onto the same /api/admin router so callers
@@ -218,12 +234,26 @@ class TeamListResponse(BaseModel):
 
 @router.get("/teams", response_model=list[TeamListItem])
 async def list_teams(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[TeamListItem]:
-    """List all active teams with their repositories."""
+    """List teams visible to the caller with their repositories.
+
+    Tier-1 Item A — cross-tenant leak fix:
+      Pre-gate, this endpoint called ``team_repo.list_all()`` and returned
+      EVERY team in the database regardless of who was authenticated. That
+      let team A enumerate team B's id + name + repo list. Post-fix we
+      return only the caller's own team (debug principal still sees all
+      teams for the local dev dashboard).
+    """
     team_repo = TeamRepository(session)
     repo_repo = RepoRepository(session)
-    teams = await team_repo.list_all()
+
+    if _is_debug_principal(member):
+        teams = await team_repo.list_all()
+    else:
+        team = await team_repo.get_by_id(uuid.UUID(member.team_id))
+        teams = [team] if team is not None else []
 
     result = []
     for team in teams:
@@ -239,9 +269,15 @@ async def list_teams(
 @router.post("/teams", response_model=TeamResponse)
 async def create_team(
     body: TeamCreate,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> TeamResponse:
-    """Create a new team and generate an API key."""
+    """Create a new team and generate an API key.
+
+    Tier-1 Item A: gated by ``require_admin`` — only admin/owner roles can
+    provision teams. Pre-gate this endpoint was anonymous, meaning anyone
+    with a valid API key (any role) could mint new teams.
+    """
     api_key = f"aidrv_{secrets.token_urlsafe(32)}"
 
     repo = TeamRepository(session)
@@ -264,13 +300,25 @@ async def create_team(
 @router.delete("/teams/{team_id}", status_code=204)
 async def delete_team(
     team_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Soft-delete a team (set is_active=False)."""
+    """Soft-delete a team (set is_active=False).
+
+    Tier-1 Item A: gated by ``require_admin`` AND scoped so an admin on
+    team A cannot soft-delete team B. Cross-team attempts return 404
+    (existence-leak avoidance — matches the T25 artifacts convention).
+    """
     try:
         parsed_id = uuid.UUID(team_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid team ID format")
+
+    # Cross-team guard: except for the debug sentinel, admins can only
+    # delete their own team. Collapse to 404 rather than 403 to avoid
+    # leaking team-id existence.
+    if not _is_debug_principal(member) and str(parsed_id) != member.team_id:
+        raise HTTPException(status_code=404, detail="Team not found")
 
     team_repo = TeamRepository(session)
     team = await team_repo.get_by_id(parsed_id)
@@ -291,9 +339,14 @@ class KeyRotateResponse(CamelModel):
 async def rotate_api_key(
     request: Request,
     team_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> KeyRotateResponse:
-    """Rotate a team's API key. Old key gets a 48h grace period."""
+    """Rotate a team's API key. Old key gets a 48h grace period.
+
+    Tier-1 Item A: gated by ``require_admin``. Cross-team protection
+    is already enforced by the ``team.id != team_id`` 404 below.
+    """
     team = await _get_team_from_request(request, session)
     if str(team.id) != team_id:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -342,9 +395,15 @@ async def list_tasks(
     request: Request,
     limit: int = 50,
     offset: int = 0,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> TaskListResponse:
-    """List tasks for the authenticated team (or all tasks in debug mode)."""
+    """List tasks for the authenticated team (or all tasks in debug mode).
+
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping was already
+    in place via ``request.state.team_id`` + ``list_for_team`` — no
+    change to the query logic.
+    """
     from ai_driven.config import get_settings
 
     task_repo = TaskRepository(session)
@@ -413,18 +472,35 @@ async def list_tasks(
 @router.get("/dashboard", response_model=DashboardSummaryResponse)
 @router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
 async def get_dashboard_summary(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> DashboardSummaryResponse:
-    """Return KPI data for the admin dashboard."""
+    """Return KPI data for the admin dashboard.
+
+    Tier-1 Item A — cross-tenant leak fix:
+      Pre-gate, every aggregate (task counts, success rate, active
+      agents, tokens, cost) was computed across the whole ``tasks``
+      table. Team A saw team B's throughput. Post-fix, we filter every
+      query by the caller's ``team_id`` unless the caller is the debug
+      principal (local dev dashboard).
+    """
     from ai_driven.db.postgres.models import Task as TaskModel
 
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     yesterday_start = today_start - timedelta(days=1)
 
+    # Team scope. Debug principal ⇒ no filter (sees all teams).
+    scope_filters: list = []
+    if not _is_debug_principal(member):
+        scope_filters.append(TaskModel.team_id == uuid.UUID(member.team_id))
+
     # --- Today's task counts ---
     today_total_result = await session.execute(
-        select(func.count(TaskModel.id)).where(TaskModel.created_at >= today_start)
+        select(func.count(TaskModel.id)).where(
+            TaskModel.created_at >= today_start,
+            *scope_filters,
+        )
     )
     tasks_today = today_total_result.scalar() or 0
 
@@ -433,6 +509,7 @@ async def get_dashboard_summary(
         select(func.count(TaskModel.id)).where(
             TaskModel.created_at >= yesterday_start,
             TaskModel.created_at < today_start,
+            *scope_filters,
         )
     )
     tasks_yesterday = yesterday_total_result.scalar() or 0
@@ -446,6 +523,7 @@ async def get_dashboard_summary(
         select(func.count(TaskModel.id)).where(
             TaskModel.created_at >= today_start,
             TaskModel.status.in_(SUCCESS_STATUSES),
+            *scope_filters,
         )
     )
     completed_count = completed_result.scalar() or 0
@@ -454,6 +532,7 @@ async def get_dashboard_summary(
         select(func.count(TaskModel.id)).where(
             TaskModel.created_at >= today_start,
             TaskModel.status.in_(FAILURE_STATUSES),
+            *scope_filters,
         )
     )
     failed_count = failed_result.scalar() or 0
@@ -471,7 +550,7 @@ async def get_dashboard_summary(
     active_statuses = tuple(IN_FLIGHT_STATUSES) + ("planning", "coding", "testing")
     active_result = await session.execute(
         select(TaskModel.agent_type, func.count(TaskModel.id))
-        .where(TaskModel.status.in_(active_statuses))
+        .where(TaskModel.status.in_(active_statuses), *scope_filters)
         .group_by(TaskModel.agent_type)
     )
     active_counts: dict[str, int] = {}
@@ -488,16 +567,19 @@ async def get_dashboard_summary(
     # --- Token totals from DB for today ---
     token_sum_result = await session.execute(
         select(func.coalesce(func.sum(TaskModel.total_tokens), 0)).where(
-            TaskModel.created_at >= today_start
+            TaskModel.created_at >= today_start,
+            *scope_filters,
         )
     )
     _db_total_tokens = token_sum_result.scalar() or 0
 
     # --- Cost and budget from CostTracker (Redis) ---
-    debug_team_id = "00000000-0000-0000-0000-000000000000"
+    # CostTracker keys are per-team; use caller's team_id so each team
+    # sees only its own burn. Debug principal still gets the sentinel
+    # team's counters (which is what the old code always returned).
     tracker = CostTracker()
-    usage = await tracker.get_daily_usage(debug_team_id)
-    budget = await tracker.check_budget(debug_team_id)
+    usage = await tracker.get_daily_usage(member.team_id)
+    budget = await tracker.check_budget(member.team_id)
 
     total_tokens = TotalTokensResponse(
         input=usage.input_tokens,
@@ -519,9 +601,14 @@ async def get_dashboard_summary(
 @router.get("/usage/history", response_model=list[UsageHistoryItem])
 async def get_usage_history(
     days: int = Query(default=7, ge=1, le=30),
+    member: TeamMemberInfo = Depends(require_admin),
 ) -> list[UsageHistoryItem]:
-    """Return daily token/cost data for the last N days (default 7, max 30)."""
-    debug_team_id = "00000000-0000-0000-0000-000000000000"
+    """Return daily token/cost data for the last N days (default 7, max 30).
+
+    Tier-1 Item A — fix: previously this endpoint always read from the
+    debug-sentinel team's CostTracker bucket, so every team saw the same
+    numbers. Now scoped to the caller's team id.
+    """
     tracker = CostTracker()
 
     today = date_type.today()
@@ -530,7 +617,7 @@ async def get_usage_history(
     for i in range(days - 1, -1, -1):
         day = today - timedelta(days=i)
         day_str = day.isoformat()
-        usage = await tracker.get_daily_usage(debug_team_id, date=day_str)
+        usage = await tracker.get_daily_usage(member.team_id, date=day_str)
         result.append(
             UsageHistoryItem(
                 date=day_str,
@@ -545,12 +632,22 @@ async def get_usage_history(
 
 @router.get("/usage/by-agent", response_model=list[UsageByAgentItem])
 async def get_usage_by_agent(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[UsageByAgentItem]:
-    """Return cost breakdown by agent type for today's tasks."""
+    """Return cost breakdown by agent type for today's tasks.
+
+    Tier-1 Item A — cross-tenant leak fix: previously aggregated across
+    every team's tasks. Now filtered by the caller's ``team_id`` unless
+    the caller is the debug principal (sees all teams).
+    """
     from ai_driven.db.postgres.models import Task as TaskModel
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    scope_filters: list = []
+    if not _is_debug_principal(member):
+        scope_filters.append(TaskModel.team_id == uuid.UUID(member.team_id))
 
     result = await session.execute(
         select(
@@ -559,7 +656,7 @@ async def get_usage_by_agent(
             func.coalesce(func.sum(TaskModel.total_cost_usd), 0.0),
             func.count(TaskModel.id),
         )
-        .where(TaskModel.created_at >= today_start)
+        .where(TaskModel.created_at >= today_start, *scope_filters)
         .group_by(TaskModel.agent_type)
     )
 
@@ -580,9 +677,14 @@ async def get_usage_by_agent(
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Get a single task by ID with full details."""
+    """Get a single task by ID with full details.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team attempts
+    return 404 (existence-leak avoidance).
+    """
     try:
         parsed_id = uuid.UUID(task_id)
     except ValueError:
@@ -591,6 +693,9 @@ async def get_task(
     task_repo = TaskRepository(session)
     task = await task_repo.get_by_id(parsed_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
         raise HTTPException(status_code=404, detail="Task not found")
 
     output = task.output_data or {}
@@ -619,9 +724,13 @@ async def get_task(
 @router.get("/tasks/{task_id}/evaluations")
 async def get_task_evaluations(
     task_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    """Get evaluation results for a task."""
+    """Get evaluation results for a task.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404.
+    """
     try:
         parsed_id = uuid.UUID(task_id)
     except ValueError:
@@ -630,6 +739,9 @@ async def get_task_evaluations(
     task_repo = TaskRepository(session)
     task = await task_repo.get_by_id(parsed_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
         raise HTTPException(status_code=404, detail="Task not found")
 
     from ai_driven.evaluation.models import TaskEvaluation
@@ -659,9 +771,15 @@ async def get_task_evaluations(
 @router.post("/tasks/{task_id}/evaluate")
 async def trigger_evaluation(
     task_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    """Manually trigger evaluation for a task."""
+    """Manually trigger evaluation for a task.
+
+    Tier-1 Item A: gated by ``require_admin``. Cross-team attempts
+    return 404 (existence-leak avoidance) so an admin on team A cannot
+    probe task IDs to discover what team B is running.
+    """
     try:
         parsed_id = uuid.UUID(task_id)
     except ValueError:
@@ -670,6 +788,9 @@ async def trigger_evaluation(
     task_repo = TaskRepository(session)
     task = await task_repo.get_by_id(parsed_id)
     if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
         raise HTTPException(status_code=404, detail="Task not found")
 
     if task.status != "completed":
@@ -709,12 +830,35 @@ async def trigger_evaluation(
 
 
 @router.get("/tasks/{task_id}/events")
-async def get_task_events(task_id: str) -> list[dict[str, Any]]:
-    """Return stored agent events for a task from Redis."""
+async def get_task_events(
+    task_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Return stored agent events for a task from Redis.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team check against
+    the Postgres ``tasks.team_id`` row. Redis by itself doesn't know
+    about teams, so we must resolve ownership through Postgres before
+    reading the event log.
+    """
     import json as _json
 
     import redis.asyncio as aioredis
     from ai_driven.config import get_settings
+
+    try:
+        parsed_id = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task ID format")
+
+    task_repo = TaskRepository(session)
+    task = await task_repo.get_by_id(parsed_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
+        raise HTTPException(status_code=404, detail="Task not found")
 
     settings = get_settings()
     try:
@@ -855,13 +999,29 @@ def _extract_repo_and_pr(events: list[dict[str, Any]]) -> tuple[str | None, int 
 async def get_task_diff(
     task_id: str,
     path: str,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Return the unified diff patch for `path` in this task's PR.
 
     Picks GitHub or Bitbucket based on the linked `Repository.scm_type`.
     Falls back to GitHub for tasks without a repo row (legacy).
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404.
     """
     from ai_driven.scm.factory import get_scm_client_from_settings
+
+    try:
+        parsed_id = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task ID format")
+
+    task_repo = TaskRepository(session)
+    task = await task_repo.get_by_id(parsed_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
+        raise HTTPException(status_code=404, detail="Task not found")
 
     events = await _load_task_events(task_id)
     repo_full_name, pr_number = _extract_repo_and_pr(events)
@@ -905,14 +1065,30 @@ async def get_task_diff(
 async def get_task_file(
     task_id: str,
     path: str,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
     """Return the live contents of a file the agent touched.
 
     Reads from the actual SCM provider the task's repo is registered under
     (GitHub or Bitbucket Cloud). For legacy tasks with no `Repository` row,
     falls back to GitHub.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404.
     """
     from ai_driven.scm.factory import get_scm_client_from_settings
+
+    try:
+        parsed_id = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task ID format")
+
+    task_repo = TaskRepository(session)
+    task = await task_repo.get_by_id(parsed_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
+        raise HTTPException(status_code=404, detail="Task not found")
 
     events = await _load_task_events(task_id)
     repo_full_name, ref = _extract_repo_and_ref_for_path(events, path)
@@ -975,6 +1151,7 @@ class DataPurgeResponse(CamelModel):
 async def export_team_data(
     request: Request,
     team_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> DataExportResponse:
     """Export all data for a team (GDPR data portability)."""
@@ -996,6 +1173,7 @@ async def export_team_data(
 async def purge_team_data(
     request: Request,
     team_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> DataPurgeResponse:
     """Permanently delete all data for a team (GDPR right to erasure).
@@ -1024,9 +1202,14 @@ async def purge_team_data(
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     request: Request,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> MeResponse:
-    """Return the authenticated team identity."""
+    """Return the authenticated team identity.
+
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping is inherent
+    (endpoint always returns the caller's own team).
+    """
     team = await _get_team_from_request(request, session)
     return MeResponse(teamId=str(team.id), teamName=team.name)
 
@@ -1110,9 +1293,15 @@ def _clone_url_for(scm_type: str, full_name: str) -> str:
 async def create_repo(
     request: Request,
     body: RepoCreate,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> RepoResponse:
-    """Register a repository for the authenticated team."""
+    """Register a repository for the authenticated team.
+
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping is already
+    handled by ``_get_team_from_request`` below — the repo is created
+    under the caller's team.
+    """
     team = await _get_team_from_request(request, session)
 
     repo_repo = RepoRepository(session)
@@ -1187,9 +1376,14 @@ async def list_repos(
     request: Request,
     limit: int = 50,
     offset: int = 0,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> RepoListResponse:
-    """List repositories for the authenticated team."""
+    """List repositories for the authenticated team.
+
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping already in
+    place via ``_get_team_from_request`` + ``list_for_team``.
+    """
     team = await _get_team_from_request(request, session)
 
     repo_repo = RepoRepository(session)
@@ -1206,6 +1400,7 @@ async def delete_repo(
     request: Request,
     repo_id: str,
     hard: bool = False,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> None:
     """Delete a repository.
@@ -1241,9 +1436,14 @@ async def update_repo(
     request: Request,
     repo_id: str,
     body: RepoUpdate,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> RepoResponse:
-    """Update repository settings."""
+    """Update repository settings.
+
+    Tier-1 Item A: gated by ``require_admin``. Cross-team attempts 404
+    via the existing ``repo.team_id != team.id`` check in the handler.
+    """
     team = await _get_team_from_request(request, session)
 
     try:
@@ -1280,12 +1480,16 @@ async def update_repo(
 async def get_usage(
     request: Request,
     date: str | None = None,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> UsageResponse:
     """Return token usage and cost for the authenticated team.
 
     Query parameters:
         date: Optional date in YYYY-MM-DD format. Defaults to today.
+
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping already in
+    place via ``_get_team_from_request`` — tracker is keyed on team id.
     """
     team = await _get_team_from_request(request, session)
 
@@ -1394,17 +1598,26 @@ class PipelineRunResponse(CamelModel):
 
 @router.get("/pipeline/runs", response_model=list[PipelineRunResponse])
 async def list_pipeline_runs(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[PipelineRunResponse]:
-    """Return active/recent tasks as pipeline run entries for the timeline view."""
+    """Return active/recent tasks as pipeline run entries for the timeline view.
+
+    Tier-1 Item A — cross-tenant leak fix: pre-gate, this returned every
+    team's tasks in the last 24h. Now filtered by caller's ``team_id``.
+    """
     from ai_driven.db.postgres.models import Task as TaskModel
 
     now_utc = datetime.now(timezone.utc)
     cutoff = now_utc - timedelta(hours=24)
 
+    scope_filters: list = []
+    if not _is_debug_principal(member):
+        scope_filters.append(TaskModel.team_id == uuid.UUID(member.team_id))
+
     result = await session.execute(
         select(TaskModel)
-        .where(TaskModel.created_at >= cutoff)
+        .where(TaskModel.created_at >= cutoff, *scope_filters)
         .order_by(TaskModel.created_at.desc())
         .limit(50)
     )
@@ -1536,27 +1749,44 @@ def _incident_to_response(inc: Any) -> IncidentResponse:
 
 @router.get("/incidents", response_model=list[IncidentResponse])
 async def list_incidents(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[IncidentResponse]:
-    """List all incidents, most recent first."""
+    """List incidents for the caller's team, most recent first.
+
+    Tier-1 Item A — cross-tenant leak fix: ``list_all()`` returned every
+    team's incidents; now we use ``list_for_team`` scoped to the
+    caller. Debug principal still sees all teams' incidents.
+    """
     from ai_driven.db.postgres.repository import IncidentRepository
 
     repo = IncidentRepository(session)
-    incidents = await repo.list_all()
+    if _is_debug_principal(member):
+        incidents = await repo.list_all()
+    else:
+        incidents = await repo.list_for_team(uuid.UUID(member.team_id))
     return [_incident_to_response(i) for i in incidents]
 
 
 @router.post("/incidents", response_model=IncidentResponse, status_code=201)
 async def create_incident(
     body: IncidentCreate,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> IncidentResponse:
-    """Create a new incident."""
+    """Create a new incident.
+
+    Tier-1 Item A: gated by ``require_admin`` AND scoped to the caller's
+    team. Pre-gate, this endpoint always wrote ``team_id = 0000...0000``
+    (the debug sentinel), which meant every team's incidents were filed
+    under one shared bucket — a real cross-tenant data commingling bug,
+    not just an authz hole.
+    """
     from ai_driven.db.postgres.repository import IncidentRepository
 
     repo = IncidentRepository(session)
     inc = await repo.create(
-        team_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+        team_id=uuid.UUID(member.team_id),
         title=body.title,
         severity=body.severity.value,
         service=body.service,
@@ -1702,19 +1932,29 @@ def _review_to_response(r: Any) -> ReviewDetailResponse:
 
 @router.get("/reviews", response_model=list[ReviewDetailResponse])
 async def list_reviews(
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> list[ReviewDetailResponse]:
-    """List all code reviews with inline comments."""
-    from ai_driven.db.postgres.repository import ReviewRepository
-    from sqlalchemy.orm import selectinload
-    from ai_driven.db.postgres.models import Review as ReviewModel
+    """List code reviews for the caller's team with inline comments.
 
-    result = await session.execute(
+    Tier-1 Item A — cross-tenant leak fix: pre-gate, this returned every
+    review in the DB. Reviews carry team ownership via their linked
+    ``Task.team_id``; we now filter by joining the two tables.
+    """
+    from sqlalchemy.orm import selectinload
+    from ai_driven.db.postgres.models import Review as ReviewModel, Task as TaskModel
+
+    stmt = (
         select(ReviewModel)
         .options(selectinload(ReviewModel.task))
         .order_by(ReviewModel.created_at.desc())
         .limit(50)
     )
+    if not _is_debug_principal(member):
+        stmt = stmt.join(TaskModel, ReviewModel.task_id == TaskModel.id).where(
+            TaskModel.team_id == uuid.UUID(member.team_id)
+        )
+    result = await session.execute(stmt)
     reviews = list(result.scalars().all())
     return [_review_to_response(r) for r in reviews]
 
@@ -1722,9 +1962,14 @@ async def list_reviews(
 @router.get("/reviews/{review_id}", response_model=ReviewDetailResponse)
 async def get_review(
     review_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> ReviewDetailResponse:
-    """Get a single review by ID."""
+    """Get a single review by ID.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404 via
+    linked ``Task.team_id``.
+    """
     from sqlalchemy.orm import selectinload
     from ai_driven.db.postgres.models import Review as ReviewModel
 
@@ -1740,6 +1985,13 @@ async def get_review(
     )
     review = result.scalar_one_or_none()
     if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    if (
+        not _is_debug_principal(member)
+        and review.task is not None
+        and str(review.task.team_id) != member.team_id
+    ):
         raise HTTPException(status_code=404, detail="Review not found")
 
     return _review_to_response(review)
@@ -1783,14 +2035,25 @@ async def _resolve_review_scm_target(
 @router.get("/reviews/{review_id}/reviewers")
 async def get_review_reviewers(
     review_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return the reviewer list from the underlying PR, with the AI reviewer prepended."""
+    """Return the reviewer list from the underlying PR, with the AI reviewer prepended.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404 via
+    linked ``Task.team_id``.
+    """
     from ai_driven.scm.factory import get_scm_client_from_settings
 
     review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
         review_id, session
     )
+    if (
+        not _is_debug_principal(member)
+        and review.task is not None
+        and str(review.task.team_id) != member.team_id
+    ):
+        raise HTTPException(status_code=404, detail="Review not found")
 
     ai_reviewer = {
         "username": "gotyme-x-ai",
@@ -1833,14 +2096,24 @@ async def get_review_reviewers(
 @router.get("/reviews/{review_id}/checks")
 async def get_review_checks(
     review_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return the CI check-run list for the PR's head commit."""
+    """Return the CI check-run list for the PR's head commit.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404.
+    """
     from ai_driven.scm.factory import get_scm_client_from_settings
 
     _review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
         review_id, session
     )
+    if (
+        not _is_debug_principal(member)
+        and _review.task is not None
+        and str(_review.task.team_id) != member.team_id
+    ):
+        raise HTTPException(status_code=404, detail="Review not found")
 
     try:
         scm = get_scm_client_from_settings(scm_type)
@@ -1872,14 +2145,24 @@ async def get_review_checks(
 @router.get("/reviews/{review_id}/commits")
 async def get_review_commits(
     review_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, Any]:
-    """Return the commit list for the PR behind this review."""
+    """Return the commit list for the PR behind this review.
+
+    Tier-1 Item A: gated by ``require_admin`` + cross-team 404.
+    """
     from ai_driven.scm.factory import get_scm_client_from_settings
 
     _review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
         review_id, session
     )
+    if (
+        not _is_debug_principal(member)
+        and _review.task is not None
+        and str(_review.task.team_id) != member.team_id
+    ):
+        raise HTTPException(status_code=404, detail="Review not found")
 
     try:
         scm = get_scm_client_from_settings(scm_type)
@@ -1952,9 +2235,15 @@ class InsightsResponse(CamelModel):
 @router.get("/insights", response_model=InsightsResponse)
 async def get_insights(
     time_range: str = Query(default="30d", pattern="^(7d|30d|90d)$", alias="range"),
+    member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> InsightsResponse:
-    """Return engineering productivity insights computed from task data."""
+    """Return engineering productivity insights computed from task data.
+
+    Tier-1 Item A — cross-tenant leak fix: previously aggregated every
+    team's tasks and reviews. Now filtered by caller's ``team_id``.
+    Reviews are scoped via their linked ``Task.team_id``.
+    """
     from ai_driven.db.postgres.models import Task as TaskModel, Review as ReviewModel
 
     days = {"7d": 7, "30d": 30, "90d": 90}[time_range]
@@ -1962,9 +2251,13 @@ async def get_insights(
     cutoff = now_utc - timedelta(days=days)
     prev_cutoff = cutoff - timedelta(days=days)
 
+    task_scope: list = []
+    if not _is_debug_principal(member):
+        task_scope.append(TaskModel.team_id == uuid.UUID(member.team_id))
+
     # Current period tasks
     cur_result = await session.execute(
-        select(TaskModel).where(TaskModel.created_at >= cutoff)
+        select(TaskModel).where(TaskModel.created_at >= cutoff, *task_scope)
     )
     cur_tasks = list(cur_result.scalars().all())
 
@@ -1973,22 +2266,30 @@ async def get_insights(
         select(TaskModel).where(
             TaskModel.created_at >= prev_cutoff,
             TaskModel.created_at < cutoff,
+            *task_scope,
         )
     )
     prev_tasks = list(prev_result.scalars().all())
 
-    # Reviews in current period
-    review_result = await session.execute(
-        select(func.count(ReviewModel.id)).where(ReviewModel.created_at >= cutoff)
+    # Reviews in current period — scoped via join on Task.team_id.
+    review_stmt = select(func.count(ReviewModel.id)).where(
+        ReviewModel.created_at >= cutoff
     )
-    prs_merged = review_result.scalar() or 0
+    prev_review_stmt = select(func.count(ReviewModel.id)).where(
+        ReviewModel.created_at >= prev_cutoff,
+        ReviewModel.created_at < cutoff,
+    )
+    if not _is_debug_principal(member):
+        review_stmt = review_stmt.join(
+            TaskModel, ReviewModel.task_id == TaskModel.id
+        ).where(TaskModel.team_id == uuid.UUID(member.team_id))
+        prev_review_stmt = prev_review_stmt.join(
+            TaskModel, ReviewModel.task_id == TaskModel.id
+        ).where(TaskModel.team_id == uuid.UUID(member.team_id))
 
-    prev_review_result = await session.execute(
-        select(func.count(ReviewModel.id)).where(
-            ReviewModel.created_at >= prev_cutoff,
-            ReviewModel.created_at < cutoff,
-        )
-    )
+    review_result = await session.execute(review_stmt)
+    prs_merged = review_result.scalar() or 0
+    prev_review_result = await session.execute(prev_review_stmt)
     prev_prs = prev_review_result.scalar() or 0
 
     # Compute metrics

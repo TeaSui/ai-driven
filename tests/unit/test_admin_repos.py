@@ -58,9 +58,18 @@ def _make_app_and_client(mock_team, mock_session):
 
     A lightweight middleware is added that mimics what APIKeyMiddleware does:
     it hashes the X-API-Key header and stores it on ``request.state``.
+
+    Tier-1 Item A: the admin endpoints now require ``require_admin``.
+    We override the dep to yield a TeamMemberInfo matching ``mock_team``
+    so the existing test bodies keep working with no behavior change
+    other than the auth gate.
     """
     from starlette.middleware.base import BaseHTTPMiddleware
-    from ai_driven.auth.middleware import hash_api_key as _hash
+    from ai_driven.auth.middleware import (
+        TeamMemberInfo,
+        hash_api_key as _hash,
+        require_admin,
+    )
 
     app = FastAPI()
 
@@ -68,6 +77,10 @@ def _make_app_and_client(mock_team, mock_session):
         async def dispatch(self, request, call_next):
             key = request.headers.get("X-API-Key")
             if key:
+                # Mirror the production X-API-Key path: set api_key_hash
+                # only. The existing handler body uses
+                # ``_get_team_from_request`` which then looks up the team
+                # via ``get_by_api_key_hash`` against the mocked session.
                 request.state.api_key_hash = _hash(key)
             return await call_next(request)
 
@@ -80,6 +93,15 @@ def _make_app_and_client(mock_team, mock_session):
 
     from ai_driven.db.postgres.session import get_session
     app.dependency_overrides[get_session] = _fake_session
+
+    def _fake_admin():
+        return TeamMemberInfo(
+            member_id="00000000-0000-0000-0000-000000000001",
+            team_id=str(mock_team.id),
+            role="admin",
+        )
+
+    app.dependency_overrides[require_admin] = _fake_admin
 
     client = TestClient(app)
     return app, client
