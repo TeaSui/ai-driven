@@ -150,9 +150,9 @@ class Settings(BaseSettings):
     sqs_review_queue_url: str = ""
     sqs_devops_queue_url: str = ""
 
-    # SQS — orchestrator + specialists (Phase 1 of orchestrator rollout)
+    # SQS — orchestrator. Phase 2's _OrchestratorWrapper runs specialists
+    # in-process on this queue; there is no separate specialists queue.
     sqs_orchestrator_queue_url: str = ""
-    sqs_specialists_queue_url: str = ""
 
     # SQS — QA post-coding worker (T22). Dedicated queue so QA's long
     # visibility timeout (1800s) and independent DLQ tuning don't affect

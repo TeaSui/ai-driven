@@ -79,7 +79,7 @@ def _settings_mock(**overrides):
     s.sqs_task_queue_url = "https://sqs.local/coding"
     s.sqs_review_queue_url = "https://sqs.local/review"
     s.sqs_devops_queue_url = "https://sqs.local/devops"
-    s.sqs_specialists_queue_url = "https://sqs.local/spec"
+    s.sqs_qa_queue_url = ""
     s.aws_region = "us-east-1"
     s.sqs_endpoint_url = ""
     for k, v in overrides.items():

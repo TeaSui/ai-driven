@@ -1516,6 +1516,15 @@ async def get_usage(
 # ---- Pipeline Runs (Timeline view) ----
 
 
+# Maps the set of statuses the DB's ck_tasks_status CHECK actually allows
+# to the 5 pipeline stages the Timeline UI renders. Keys here MUST be a
+# subset of the CHECK constraint's enum — mis-mapping an impossible status
+# would be latent dead code.
+#
+# Legacy statuses removed 2026-05-01 dead-code sweep: pr_created lives on
+# (BaseAgent writes it), but `reviewing`, `review_passed`, `review_failed`,
+# `deploying`, `deploy_failed`, `deployed`, `monitoring` are never written
+# by any live code path and aren't even in ck_tasks_status.
 _STATUS_TO_STAGE: dict[str, str] = {
     "queued": "jira",
     "planning": "jira",
@@ -1523,13 +1532,8 @@ _STATUS_TO_STAGE: dict[str, str] = {
     "coding": "code",
     "testing": "code",
     "pr_created": "review",
-    "reviewing": "review",
-    "review_passed": "deploy",
-    "review_failed": "review",
-    "deploying": "deploy",
-    "deploy_failed": "deploy",
-    "deployed": "monitor",
-    "monitoring": "monitor",
+    "awaiting_input": "code",
+    "paused": "code",
     "completed": "deploy",    # coding agent done = PR ready for review/deploy
     "failed": "code",         # failed stays at code stage (not monitor)
     "cancelled": "code",
@@ -1558,13 +1562,8 @@ _STATUS_TO_STAGE_STATUS: dict[str, str] = {
     "coding": "active",
     "testing": "active",
     "pr_created": "active",
-    "reviewing": "active",
-    "review_passed": "passed",
-    "review_failed": "failed",
-    "deploying": "active",
-    "deploy_failed": "failed",
-    "deployed": "passed",
-    "monitoring": "active",
+    "awaiting_input": "active",
+    "paused": "queued",
     "completed": "passed",
     "failed": "failed",
     "cancelled": "cancelled",

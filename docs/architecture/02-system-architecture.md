@@ -51,7 +51,7 @@ flowchart TD
     subgraph Infra["Infrastructure"]
         PG[("PostgreSQL\n+ pgvector\n11 tables")]
         REDIS[("Redis\nPub/Sub + Cost\n+ Event Log")]
-        SQS["SQS Queues (5 active)\ntask / review / devops\norchestrator / qa\n(specialists reserved, unused)"]
+        SQS["SQS Queues (5)\ntask / review / devops\norchestrator / qa"]
     end
 
     subgraph Integrations["External Integrations"]
@@ -178,7 +178,6 @@ flowchart TD
 | `devops` | DevOps worker | Incident/alert handling |
 | `orchestrator` | Orchestrator worker | Runs classifier + specialists, re-enqueues coding-task |
 | `qa` | QA post-coding worker | Validates PR diff after coding completes |
-| `specialists` | _(unused)_ | Reserved for future pre-coding specialist workers |
 
 ## Key Data Flows
 

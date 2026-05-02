@@ -21,7 +21,7 @@ def test_orchestrator_mode_accepts_shadow_live_off() -> None:
 def test_new_sqs_queue_urls_default_empty() -> None:
     s = Settings()
     assert s.sqs_orchestrator_queue_url == ""
-    assert s.sqs_specialists_queue_url == ""
+    assert s.sqs_qa_queue_url == ""
 
 
 def test_orchestrator_mode_env_var_picks_up_prefix() -> None:

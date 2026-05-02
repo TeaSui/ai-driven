@@ -29,7 +29,6 @@ class TaskProducer:
             "review": settings.sqs_review_queue_url,
             "devops": settings.sqs_devops_queue_url,
             "orchestrator": settings.sqs_orchestrator_queue_url,
-            "specialist": settings.sqs_specialists_queue_url,
             # T22: post-coding QA runs on its own queue (longer visibility
             # timeout, independent DLQ tuning). No rerouting — QA tasks
             # are enqueued directly by the Coding worker hook.

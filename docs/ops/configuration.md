@@ -29,7 +29,6 @@ documented below is readable as `get_settings().<field>` in Python or
 | `AI_DRIVEN_SQS_DEVOPS_QUEUE_URL` | DevOps-agent queue |
 | `AI_DRIVEN_SQS_ORCHESTRATOR_QUEUE_URL` | Phase 2 orchestrator worker |
 | `AI_DRIVEN_SQS_QA_QUEUE_URL` | Phase 2 post-coding QA worker |
-| `AI_DRIVEN_SQS_SPECIALISTS_QUEUE_URL` | Reserved for future pre-coding specialist workers |
 
 ## Orchestrator mode
 
