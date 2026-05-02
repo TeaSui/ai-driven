@@ -82,7 +82,7 @@ sequenceDiagram
 | `full_workflow` | BusinessAnalyst → StackAnalyst → Security (+ TechLead / UxDesigner if picked) | Single-domain changes |
 | `multi_domain` | BA → StackAnalyst → TechLead → Security (+ UxDesigner / ApiTest if picked) | Changes spanning frontend + backend + infra |
 
-Source of truth: `src/ai_driven/agents/orchestrator/routing.py::TIER_RULES`.
+Source of truth: `backend/src/ai_driven/agents/orchestrator/routing.py::TIER_RULES`.
 QA is NOT a pre-coding specialist — it runs post-coding against the real
 PR diff. See task T22 brief for rationale.
 
@@ -108,7 +108,7 @@ coding prompt by default.
 |---------|--------|----------|
 | Specialist verdict=block (live) | `blocked` | Admin override `rerun_coding` re-enqueues coding with block ignored |
 | Coding loop ends without PR | `failed` | Reaper or admin override |
-| Stuck > 30 min at `orchestrating` / `running` / `awaiting_qa` | reaped to `failed` | Written by `src/ai_driven/background/reapers.py`; see runbook |
+| Stuck > 30 min at `orchestrating` / `running` / `awaiting_qa` | reaped to `failed` | Written by `backend/src/ai_driven/background/reapers.py`; see runbook |
 | QA verdict=block | `qa_failed` | Admin override: `rerun_qa` (cheap, single invocation) or `force_pass` |
 | Specialist returns `verdict=error` (Bedrock flake) | Treated as `pass` when `AI_DRIVEN_ORCHESTRATOR_TREAT_ERRORS_AS_PASS=true` (default) | Counter `orchestrator.specialist.fallback_activated{role}` |
 

@@ -15,7 +15,7 @@ This policy covers the `ai-driven` platform, which consists of two dependency gr
 | Component | Runtime | Dependency file |
 |-----------|---------|-----------------|
 | Backend API | Python 3.12 | `pyproject.toml` + `poetry.lock` |
-| Web UI | Node.js 20 | `ai-driven-web-ui/package-lock.json` |
+| Web UI | Node.js 20 | `frontend/package-lock.json` |
 
 ## SBOM Format
 
@@ -37,7 +37,7 @@ SBOMs are NOT committed to the repository. They change with every dependency upd
 The workflow calls `scripts/generate-sbom.sh`, which:
 
 1. Installs `cyclonedx-bom` (Python) and runs `cyclonedx-py poetry --no-dev` against `pyproject.toml` + `poetry.lock`.
-2. Runs `npx @cyclonedx/cyclonedx-npm --production` against `ai-driven-web-ui/package-lock.json`.
+2. Runs `npx @cyclonedx/cyclonedx-npm --production` against `frontend/package-lock.json`.
 3. Runs `pip-audit` to produce a vulnerability report against the locked Python dependency set.
 4. Runs `npm audit` to produce a vulnerability report for Node.js dependencies.
 

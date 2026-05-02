@@ -199,14 +199,14 @@ Triggers are registered as listeners on the state machine. They fire after each 
 
 | Component | Primary File | Key Class/Function |
 |-----------|-------------|-------------------|
-| State machine | `src/ai_driven/agents/workflow/state_machine.py` | `WorkflowStateMachine` |
-| Workflow agent | `src/ai_driven/agents/workflow/agent.py` | `WorkflowAgent` |
-| Event triggers | `src/ai_driven/agents/workflow/triggers.py` | `WorkflowTriggers` |
-| WebSocket streaming | `src/ai_driven/api/chat/router.py` | WebSocket endpoint |
-| Event publishing | `src/ai_driven/agents/base.py` | `BaseAgent._publish_event()` |
-| Dashboard | `ai-driven-web-ui/src/app/dashboard/page.tsx` | Task table |
-| Task detail | `ai-driven-web-ui/src/app/dashboard/tasks/[id]/page.tsx` | Conversation log |
-| Agent stream | `ai-driven-web-ui/src/components/agent-stream.tsx` | WebSocket client |
+| State machine | `backend/src/ai_driven/agents/workflow/state_machine.py` | `WorkflowStateMachine` |
+| Workflow agent | `backend/src/ai_driven/agents/workflow/agent.py` | `WorkflowAgent` |
+| Event triggers | `backend/src/ai_driven/agents/workflow/triggers.py` | `WorkflowTriggers` |
+| WebSocket streaming | `backend/src/ai_driven/api/chat/router.py` | WebSocket endpoint |
+| Event publishing | `backend/src/ai_driven/agents/base.py` | `BaseAgent._publish_event()` |
+| Dashboard | `frontend/src/app/dashboard/page.tsx` | Task table |
+| Task detail | `frontend/src/app/dashboard/tasks/[id]/page.tsx` | Conversation log |
+| Agent stream | `frontend/src/components/agent-stream.tsx` | WebSocket client |
 
 ## Configuration
 

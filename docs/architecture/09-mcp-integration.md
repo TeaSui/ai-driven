@@ -2,7 +2,7 @@
 
 This project ships a project-scoped `.mcp.json` that registers two MCP servers for Claude Code. These are **development tools** — they run locally in your Claude Code session, *not* in the deployed application.
 
-The deployed coding + review agents already use their own MCP client manager (`src/ai_driven/mcp/`) that talks to the GitHub MCP server via stdio. That's separate from this file.
+The deployed coding + review agents already use their own MCP client manager (`backend/src/ai_driven/mcp/`) that talks to the GitHub MCP server via stdio. That's separate from this file.
 
 ## Registered servers
 
@@ -32,5 +32,5 @@ Asked and answered: the project already has `@playwright/test` running 32 real E
 
 ## Related
 
-- `src/ai_driven/mcp/` — the coding + review agents' MCP client manager (GitHub MCP via stdio). Unrelated to `.mcp.json`.
+- `backend/src/ai_driven/mcp/` — the coding + review agents' MCP client manager (GitHub MCP via stdio). Unrelated to `.mcp.json`.
 - `docs/ops/configuration.md` — for `AI_DRIVEN_JIRA_*` env var wiring into the backend.

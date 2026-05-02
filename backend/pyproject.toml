@@ -44,18 +44,15 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-include = ["ai_driven*", "slack_bot*"]
+where = ["src"]
+include = ["ai_driven*"]
 exclude = [
   "tests*", "docs*", "docker*", "alembic*", "scripts*",
-  "ai-driven-web-ui*", "node_modules*", ".venv*",
+  "node_modules*", ".venv*",
 ]
 
-# slack_bot lives at repo root; ai_driven lives under src/. Use a mapping so
-# both can be imported as top-level packages after a single `pip install -e .`.
 [tool.setuptools.package-dir]
-"ai_driven" = "src/ai_driven"
-"slack_bot" = "slack_bot"
+"" = "src"
 
 [tool.ruff]
 line-length = 120

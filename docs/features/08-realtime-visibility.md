@@ -41,7 +41,7 @@ Agent (BaseAgent.run())
 
 ## Backend Implementation
 
-**File: `src/ai_driven/agents/base.py`**
+**File: `backend/src/ai_driven/agents/base.py`**
 
 Events are published via Redis pub/sub in callback hooks:
 - `on_tool_call` → publishes `tool_call_start` with truncated `input_data`
@@ -50,7 +50,7 @@ Events are published via Redis pub/sub in callback hooks:
 
 Events are also stored in Redis list `task:{task_id}:event_log` with 24h TTL for late-joining clients.
 
-**File: `src/ai_driven/api/chat/router.py`**
+**File: `backend/src/ai_driven/api/chat/router.py`**
 
 WebSocket endpoint `/api/chat/stream/{task_id}`:
 - Subscribes to Redis channel `task:{task_id}:events`
@@ -59,7 +59,7 @@ WebSocket endpoint `/api/chat/stream/{task_id}`:
 
 ## Frontend Implementation
 
-**File: `ai-driven-web-ui/src/app/dashboard/tasks/[id]/page.tsx`**
+**File: `frontend/src/app/dashboard/tasks/[id]/page.tsx`**
 
 The task detail page renders events as an interactive timeline:
 

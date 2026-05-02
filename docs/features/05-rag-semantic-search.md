@@ -41,11 +41,11 @@ Query: "authentication middleware"
 
 | File | Purpose |
 |------|---------|
-| `src/ai_driven/rag/models.py` | `CodeEmbedding` SQLAlchemy model with `Vector(1024)` column |
-| `src/ai_driven/rag/chunker.py` | Python AST-based chunking (functions/classes) + fixed-size fallback |
-| `src/ai_driven/rag/embeddings.py` | `VoyageEmbedder` — async client for `voyage-code-3`, batch size 128 |
-| `src/ai_driven/rag/indexer.py` | `CodeIndexer` — walks repo, chunks files, embeds, upserts to pgvector |
-| `src/ai_driven/rag/retriever.py` | `CodeRetriever` — hybrid search with RRF merge |
+| `backend/src/ai_driven/rag/models.py` | `CodeEmbedding` SQLAlchemy model with `Vector(1024)` column |
+| `backend/src/ai_driven/rag/chunker.py` | Python AST-based chunking (functions/classes) + fixed-size fallback |
+| `backend/src/ai_driven/rag/embeddings.py` | `VoyageEmbedder` — async client for `voyage-code-3`, batch size 128 |
+| `backend/src/ai_driven/rag/indexer.py` | `CodeIndexer` — walks repo, chunks files, embeds, upserts to pgvector |
+| `backend/src/ai_driven/rag/retriever.py` | `CodeRetriever` — hybrid search with RRF merge |
 
 ## Database Schema
 

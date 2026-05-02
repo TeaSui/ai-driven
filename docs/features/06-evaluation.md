@@ -48,10 +48,10 @@ Agent completes task
 
 | File | Purpose |
 |------|---------|
-| `src/ai_driven/evaluation/models.py` | `TaskEvaluation` SQLAlchemy model |
-| `src/ai_driven/evaluation/grader.py` | `TaskGrader` — builds prompt, calls Haiku, parses structured JSON |
-| `src/ai_driven/evaluation/runner.py` | `EvaluationRunner` + `run_post_task_evaluation()` entry point |
-| `src/ai_driven/agents/base.py` | Fire-and-forget call in `BaseAgent.run()` after completion |
+| `backend/src/ai_driven/evaluation/models.py` | `TaskEvaluation` SQLAlchemy model |
+| `backend/src/ai_driven/evaluation/grader.py` | `TaskGrader` — builds prompt, calls Haiku, parses structured JSON |
+| `backend/src/ai_driven/evaluation/runner.py` | `EvaluationRunner` + `run_post_task_evaluation()` entry point |
+| `backend/src/ai_driven/agents/base.py` | Fire-and-forget call in `BaseAgent.run()` after completion |
 
 ## Database Schema
 

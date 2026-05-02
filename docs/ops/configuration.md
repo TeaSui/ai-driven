@@ -1,7 +1,7 @@
 # Configuration
 
 Runtime configuration is environment-variable-driven. **Source of truth is
-`src/ai_driven/config.py`** — this doc is a pointer, not a duplicate.
+`backend/src/ai_driven/config.py`** — this doc is a pointer, not a duplicate.
 
 ## How config is loaded
 
@@ -67,7 +67,7 @@ inline instead of through SQS. **Never set debug=true in production.**
 
 ## Not documented here
 
-- Per-agent model IDs / cost ceilings — see `src/ai_driven/config.py`.
+- Per-agent model IDs / cost ceilings — see `backend/src/ai_driven/config.py`.
 - Secrets handling in prod — see [`policies/sbom.md`](../policies/sbom.md)
   and (future) `policies/secrets.md`.
 - Team-scoped settings (claude_provider override, max_concurrent_tasks) —

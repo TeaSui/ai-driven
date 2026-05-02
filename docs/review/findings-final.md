@@ -12,7 +12,7 @@ Closed items are struck through + annotated. Open items are kept in their origin
 `docs/architecture/05-rag-caching-evaluation.md:11` now says "1024-dim" matching DDL. Audit: `grep 1024 docs/architecture/05-rag-caching-evaluation.md` resolves.
 
 ### ~~1.2 Incident severity normalization~~ — ✅ FIXED
-Migration `alembic/versions/a1b2c3d4e5f7_severity_uppercase.py` added `ck_incidents_severity` CHECK constraint. `src/ai_driven/agents/devops/incident.py:11` now references an `IncidentSeverity` enum. Both call sites normalized.
+Migration `alembic/versions/a1b2c3d4e5f7_severity_uppercase.py` added `ck_incidents_severity` CHECK constraint. `backend/src/ai_driven/agents/devops/incident.py:11` now references an `IncidentSeverity` enum. Both call sites normalized.
 
 ### ~~1.3 Coding Agent tool count in `docs/architecture/02`~~ — ✅ FIXED
 Refreshed 2026-05-01 in `fb73880`. Current doc shows live tool counts (Coding 13, Review 12, DevOps 7, Workflow 5, Orchestrator 0, QA 3, StackAnalyst 1, rest 0) across the Core / Orchestration / Specialists split.
@@ -25,7 +25,7 @@ Refreshed 2026-05-01 in `fb73880`. Current doc shows live tool counts (Coding 13
 ## 2. Doc ↔ UI implementation issues
 
 ### ~~2.1 WebSocket hardcoded port~~ — ✅ FIXED
-`ai-driven-web-ui/.env.local:4` defines `NEXT_PUBLIC_WS_URL=ws://localhost:8888`; `tasks/[id]/page.tsx:1558-1562` reads it with a same-origin fallback. The rewrites-don't-proxy-WS note remains operationally true (document in deploy runbook when we get one).
+`frontend/.env.local:4` defines `NEXT_PUBLIC_WS_URL=ws://localhost:8888`; `tasks/[id]/page.tsx:1558-1562` reads it with a same-origin fallback. The rewrites-don't-proxy-WS note remains operationally true (document in deploy runbook when we get one).
 
 ### ~~2.2 Pause/Resume/Stop wired~~ — ✅ FIXED
 `tasks/[id]/page.tsx` imports `pauseTask`, `resumeTask`, `stopTask` and wires them at lines 1842-1889. Note: they still render behind `!isRealMode` and `DEMO_MODE` gates in some branches — verify once you exercise a real task that all three buttons surface.
@@ -43,7 +43,7 @@ The "Alex Chen · Platform · Manila" string no longer appears in `sidebar.tsx`.
 No `alert()` calls in `sidebar.tsx`.
 
 ### 2.7 Next.js `middleware.ts` — ◐ PARTIAL
-`ai-driven-web-ui/src/middleware.ts` now exists. Contents weren't audited; confirm it actually guards session and isn't a stub.
+`frontend/src/middleware.ts` now exists. Contents weren't audited; confirm it actually guards session and isn't a stub.
 
 ### 2.8 Auto-merge narrative vs default — 🔲 STILL OPEN (P2)
 Requires a UX pass on pipeline bubbles; not touched by Phase 2.
@@ -158,7 +158,7 @@ The original plan's items 1-6 are done. What remains, ordered by leverage:
 
 | # | Item | Priority | Effort | Where |
 |---|---|---|---|---|
-| A | Complete auth + WS security (`implementation/08`): role checks on ~20 non-Phase-2 admin endpoints; cross-tenant CI probe; verify `middleware.ts` isn't a stub | P1 | 2-3 d | `src/ai_driven/api/admin/*`, `ai-driven-web-ui/src/middleware.ts` |
+| A | Complete auth + WS security (`implementation/08`): role checks on ~20 non-Phase-2 admin endpoints; cross-tenant CI probe; verify `middleware.ts` isn't a stub | P1 | 2-3 d | `backend/src/ai_driven/api/admin/*`, `frontend/src/middleware.ts` |
 | B | Severity taxonomy closure (`implementation/07`): verify migration ran, backfill any stragglers, remove the doc-drift note | P1 | 2 h | `alembic/` + `docs/architecture/07` |
 | C | Architecture docs refresh: arch/01 table count, arch/02 agent count + queue count, arch/04 state machine (blocked/awaiting_qa/qa_failed), arch/06 orchestrator path | P1 docs | 4 h | `docs/architecture/` |
 | D | Model ID bump (1.4): benchmark Opus 4.6 → 4.7 + Sonnet 4.6 → 4.7 + re-run eval suite; bump constants in `config.py:45-47,114` | P2 | 4 h | `config.py` + benchmark harness |
@@ -188,7 +188,7 @@ Run of 9 tickets against live mode on `MinnMinn/skills-introduction-to-github`:
 - 5/5 informally-worded tickets classified as `fast_path` — including one asking for a `plaintext_passwords.md` file. Security specialist never ran.
 - 3/3 tickets with explicit trust-boundary language ("treat as a trust-boundary change", "multi-domain", "production credentials in plaintext") correctly classified as `full_workflow` or `multi_domain` — BA blocked 2 of them as expected.
 
-Root cause: `TIER_CLASSIFIER_SYSTEM_PROMPT` (`src/ai_driven/claude/prompts/orchestrator.py`) relies on the LLM inferring trust-boundary from ticket intent. On Sonnet-fast with `max_tokens=16`, the classifier defaults to `fast_path` for anything that reads like a routine-looking request.
+Root cause: `TIER_CLASSIFIER_SYSTEM_PROMPT` (`backend/src/ai_driven/claude/prompts/orchestrator.py`) relies on the LLM inferring trust-boundary from ticket intent. On Sonnet-fast with `max_tokens=16`, the classifier defaults to `fast_path` for anything that reads like a routine-looking request.
 
 **Fix options** (not yet ranked):
 - Prompt: add explicit trigger keywords ("If the ticket mentions: password, secret, credential, auth, login, payment, PII, credit-card, token, API key → MUST be at least full_workflow").
@@ -227,7 +227,7 @@ Evidence: `reviews` table row for `pr_number=34` carries the fallback summary ab
 
 Added `file.write_batch` tool that writes N files in ONE commit. GitHub path uses the Git Data API (`git/blobs` in parallel → `git/trees` with `base_tree` → `git/commits` → `PATCH refs/heads/{branch}` with `force=false`). Bitbucket path generalizes the existing `/repositories/{repo}/src` multipart POST to accept multiple file parts (already one commit per POST per Atlassian docs). System prompt + initial-message workflow block now instruct the model to prefer batch writes when 2+ files are part of the same logical change. Registered alongside `file.write` — single-file writes still supported for ticket-like updates.
 
-Evidence: `src/ai_driven/scm/interface.py`, `scm/github_client.py::create_or_update_files_batch`, `scm/bitbucket_client.py::create_or_update_files_batch`, `agents/coding/agent.py::write_files_batch` tool. Coverage: `tests/unit/test_github_batch_write.py`, `tests/unit/test_bitbucket_batch_write.py`, `tests/unit/test_coding_agent_batch_tool.py` (16 tests, all pass).
+Evidence: `backend/src/ai_driven/scm/interface.py`, `scm/github_client.py::create_or_update_files_batch`, `scm/bitbucket_client.py::create_or_update_files_batch`, `agents/coding/agent.py::write_files_batch` tool. Coverage: `tests/unit/test_github_batch_write.py`, `tests/unit/test_bitbucket_batch_write.py`, `tests/unit/test_coding_agent_batch_tool.py` (16 tests, all pass).
 
 ---
 

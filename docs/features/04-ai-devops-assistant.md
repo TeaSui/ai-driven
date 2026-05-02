@@ -49,7 +49,7 @@ ECS worker polls the devops SQS queue:
 
 ### Step 3: Context Gathering (Tool Calls)
 
-**File: `src/ai_driven/agents/devops/agent.py`**
+**File: `backend/src/ai_driven/agents/devops/agent.py`**
 
 The agent investigates the incident:
 
@@ -168,12 +168,12 @@ Severity is determined by Claude based on error rates, user impact scope, and se
 
 | Component | Primary File | Key Class/Function |
 |-----------|-------------|-------------------|
-| Webhook handler | `src/ai_driven/api/webhooks/datadog.py` | `handle_datadog_webhook()` |
-| DevOps agent | `src/ai_driven/agents/devops/agent.py` | `DevOpsAgent` |
-| Incident model | `src/ai_driven/agents/devops/incident.py` | `IncidentReport` |
-| DataDog client | `src/ai_driven/integrations/datadog_client.py` | `DataDogClient` |
-| System prompt | `src/ai_driven/claude/prompts/devops_agent.py` | Triage instructions |
-| Jira integration | `src/ai_driven/jira/client.py` | `JiraClient.create_issue()` |
+| Webhook handler | `backend/src/ai_driven/api/webhooks/datadog.py` | `handle_datadog_webhook()` |
+| DevOps agent | `backend/src/ai_driven/agents/devops/agent.py` | `DevOpsAgent` |
+| Incident model | `backend/src/ai_driven/agents/devops/incident.py` | `IncidentReport` |
+| DataDog client | `backend/src/ai_driven/integrations/datadog_client.py` | `DataDogClient` |
+| System prompt | `backend/src/ai_driven/claude/prompts/devops_agent.py` | Triage instructions |
+| Jira integration | `backend/src/ai_driven/jira/client.py` | `JiraClient.create_issue()` |
 | Slack notification | `slack_bot/notifications.py` | `SlackNotifier` |
 
 ## Claude API Usage

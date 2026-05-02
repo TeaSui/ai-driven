@@ -27,10 +27,10 @@ Three tiers (from `routing.py`):
 | `full_workflow` | BA → StackAnalyst → Security | single-domain change touching one module |
 | `multi_domain` | BA → StackAnalyst → Security → UX → API-Test | change spanning frontend + backend + infra |
 
-Specialist implementations live under `src/ai_driven/agents/specialists/<role>/`.
+Specialist implementations live under `backend/src/ai_driven/agents/specialists/<role>/`.
 The orchestrator wrapper that SQS invokes is
-`src/ai_driven/queue/consumer.py::_OrchestratorWrapper`. The pure
-classification-and-fan-out logic is `src/ai_driven/agents/orchestrator/agent.py`.
+`backend/src/ai_driven/queue/consumer.py::_OrchestratorWrapper`. The pure
+classification-and-fan-out logic is `backend/src/ai_driven/agents/orchestrator/agent.py`.
 
 ---
 
@@ -133,7 +133,7 @@ checks (`require_admin`) accept `owner` and `admin` roles interchangeably.
 1. In DB, check `Task.output_data.qa_enqueued_at` and `pr_number`. If
    `qa_enqueued_at` is older than ~30 min, the qa-worker never picked it up
    or crashed without acking.
-2. The `qa_stuck` reaper (see `src/ai_driven/background/reapers.py`) should
+2. The `qa_stuck` reaper (see `backend/src/ai_driven/background/reapers.py`) should
    catch this within 5 min — check DataDog counter `reaper.qa.reaped`.
 3. If the reaper hasn't run (pod not started, reaper disabled), fall back to
    the admin override:

@@ -2,8 +2,8 @@
 # Usage:
 #   cd docker && docker compose up -d
 # Then back in repo root:
-#   make run                     # starts backend on :8888 in debug mode
-#   cd ai-driven-web-ui && npm run dev   # starts frontend on :3000
+#   make run            # starts backend on :8888 in debug mode
+#   make frontend-dev   # starts frontend on :3000
 
 services:
   postgres:
@@ -34,8 +34,8 @@ services:
 
   # Local stubs for AWS services so the platform runs without real AWS.
   # DynamoDB tables + SQS queues can still be missing — the backend has
-  # graceful fallbacks (see src/ai_driven/db/dynamo/models.py and
-  # src/ai_driven/queue/producer.py).
+  # graceful fallbacks (see backend/src/ai_driven/db/dynamo/models.py and
+  # backend/src/ai_driven/queue/producer.py).
   localstack:
     image: localstack/localstack:3
     ports:

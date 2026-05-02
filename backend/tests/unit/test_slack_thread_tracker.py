@@ -21,8 +21,8 @@ class TestSlackThreadTracker:
         mock_settings.slack_bot_token = token
         mock_settings.slack_default_channel = channel
 
-        with patch("slack_bot.thread_tracker.get_settings", return_value=mock_settings):
-            from slack_bot.thread_tracker import SlackThreadTracker
+        with patch("ai_driven.slack_bot.thread_tracker.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.thread_tracker import SlackThreadTracker
 
             return SlackThreadTracker()
 
@@ -42,7 +42,7 @@ class TestSlackThreadTracker:
         tracker = self._make_tracker()
         mock_client = self._mock_httpx_success(ts="111.222")
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             ts = await tracker.start_task("task-1", "Starting work on GTX-4821...")
 
         assert ts == "111.222"
@@ -59,7 +59,7 @@ class TestSlackThreadTracker:
         tracker = self._make_tracker()
         mock_client = self._mock_httpx_success()
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             # Start task first
             await tracker.start_task("task-1", "Starting...")
 
@@ -82,7 +82,7 @@ class TestSlackThreadTracker:
         tracker = self._make_tracker()
         mock_client = self._mock_httpx_success(ts="555.666")
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             ts = await tracker.post_thread_update("nonexistent", "Orphan update")
 
         assert ts == "555.666"
@@ -109,7 +109,7 @@ class TestSlackThreadTracker:
         tracker = self._make_tracker()
         mock_client = self._mock_httpx_success()
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             await tracker.start_task("task-1", "Starting...")
 
         assert "task-1" in tracker.active_threads
@@ -132,7 +132,7 @@ class TestSlackThreadTracker:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             ts = await tracker.start_task("task-1", "Hello")
 
         assert ts is None
@@ -146,7 +146,7 @@ class TestSlackThreadTracker:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             ts = await tracker.start_task("task-1", "Hello")
 
         assert ts is None
@@ -156,7 +156,7 @@ class TestSlackThreadTracker:
         tracker = self._make_tracker()
         mock_client = self._mock_httpx_success()
 
-        with patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
+        with patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client):
             await tracker.start_task("task-1", "Hello", channel="#alerts")
 
         payload = mock_client.post.call_args[1]["json"]
@@ -170,7 +170,7 @@ class TestSlackThreadTracker:
 
 class TestPRCardBlocks:
     def test_build_pr_card_blocks_structure(self):
-        from slack_bot.thread_tracker import build_pr_card_blocks
+        from ai_driven.slack_bot.thread_tracker import build_pr_card_blocks
 
         blocks = build_pr_card_blocks(
             repo_name="org/repo",
@@ -225,7 +225,7 @@ class TestPRCardBlocks:
         assert button["url"] == "https://github.com/org/repo/pull/2418"
 
     def test_build_pr_card_blocks_without_ai_review(self):
-        from slack_bot.thread_tracker import build_pr_card_blocks
+        from ai_driven.slack_bot.thread_tracker import build_pr_card_blocks
 
         blocks = build_pr_card_blocks(
             repo_name="org/repo",
@@ -258,10 +258,10 @@ class TestPRCardBlocks:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch("slack_bot.thread_tracker.get_settings", return_value=mock_settings),
-            patch("slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client),
+            patch("ai_driven.slack_bot.thread_tracker.get_settings", return_value=mock_settings),
+            patch("ai_driven.slack_bot.thread_tracker.httpx.AsyncClient", return_value=mock_client),
         ):
-            from slack_bot.thread_tracker import SlackThreadTracker
+            from ai_driven.slack_bot.thread_tracker import SlackThreadTracker
 
             tracker = SlackThreadTracker()
             await tracker.start_task("task-1", "Starting...")
@@ -304,8 +304,8 @@ class TestSlackNotifierWithTracker:
         mock_settings.slack_bot_token = "xoxb-test"
         mock_settings.slack_default_channel = "#dev"
 
-        with patch("slack_bot.notifications.get_settings", return_value=mock_settings):
-            from slack_bot.notifications import SlackNotifier
+        with patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier(thread_tracker=mock_tracker)
             await notifier.notify_task_started("task-1", "coding", "Test Task")
@@ -324,8 +324,8 @@ class TestSlackNotifierWithTracker:
         mock_settings.slack_bot_token = "xoxb-test"
         mock_settings.slack_default_channel = "#dev"
 
-        with patch("slack_bot.notifications.get_settings", return_value=mock_settings):
-            from slack_bot.notifications import SlackNotifier
+        with patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier(thread_tracker=mock_tracker)
             await notifier.notify_phase_change("task-1", "Planning", "4 files")
@@ -343,8 +343,8 @@ class TestSlackNotifierWithTracker:
         mock_settings.slack_bot_token = "xoxb-test"
         mock_settings.slack_default_channel = "#dev"
 
-        with patch("slack_bot.notifications.get_settings", return_value=mock_settings):
-            from slack_bot.notifications import SlackNotifier
+        with patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier(thread_tracker=mock_tracker)
             await notifier.notify_task_completed("task-1", pr_url="https://example.com")
@@ -362,8 +362,8 @@ class TestSlackNotifierWithTracker:
         mock_settings.slack_bot_token = "xoxb-test"
         mock_settings.slack_default_channel = "#dev"
 
-        with patch("slack_bot.notifications.get_settings", return_value=mock_settings):
-            from slack_bot.notifications import SlackNotifier
+        with patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier(thread_tracker=mock_tracker)
             await notifier.notify_task_failed("task-1", "Something broke")
@@ -380,8 +380,8 @@ class TestSlackNotifierWithTracker:
         mock_settings.slack_bot_token = "xoxb-test"
         mock_settings.slack_default_channel = "#dev"
 
-        with patch("slack_bot.notifications.get_settings", return_value=mock_settings):
-            from slack_bot.notifications import SlackNotifier
+        with patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings):
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier(thread_tracker=mock_tracker)
             await notifier.notify_pr_created(
@@ -409,10 +409,10 @@ class TestSlackNotifierWithTracker:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with (
-            patch("slack_bot.notifications.get_settings", return_value=mock_settings),
-            patch("slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
+            patch("ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings),
+            patch("ai_driven.slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             await notifier.notify_pr_created(
@@ -438,7 +438,7 @@ class TestSlackNotifierWithTracker:
 class TestHandleMention:
     @pytest.mark.asyncio
     async def test_empty_message_shows_help(self):
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {"text": "<@U12345>", "ts": "111.222", "channel": "C123"}
@@ -451,7 +451,7 @@ class TestHandleMention:
 
     @pytest.mark.asyncio
     async def test_no_jira_key_shows_error(self):
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {
@@ -467,7 +467,7 @@ class TestHandleMention:
 
     @pytest.mark.asyncio
     async def test_jira_key_dispatches_task(self):
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {
@@ -495,10 +495,10 @@ class TestHandleMention:
         mock_producer.enqueue_task = AsyncMock()
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
-            patch("slack_bot.app.TaskProducer", return_value=mock_producer),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.TaskProducer", return_value=mock_producer),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -522,7 +522,7 @@ class TestHandleMention:
 
     @pytest.mark.asyncio
     async def test_no_active_repo_reports_error(self):
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {
@@ -536,8 +536,8 @@ class TestHandleMention:
         mock_repo_repo.get_first_active = AsyncMock(return_value=None)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -549,7 +549,7 @@ class TestHandleMention:
     @pytest.mark.asyncio
     async def test_uses_thread_ts_from_event(self):
         """When replying in an existing thread, use the thread_ts."""
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {
@@ -566,7 +566,7 @@ class TestHandleMention:
 
     @pytest.mark.asyncio
     async def test_extracts_jira_key_from_complex_message(self):
-        from slack_bot.app import _handle_mention
+        from ai_driven.slack_bot.app import _handle_mention
 
         say = AsyncMock()
         event = {
@@ -593,10 +593,10 @@ class TestHandleMention:
         mock_producer.enqueue_task = AsyncMock()
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
-            patch("slack_bot.app.TaskProducer", return_value=mock_producer),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.TaskProducer", return_value=mock_producer),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_factory.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -708,27 +708,27 @@ class TestSlackSignatureVerification:
 
 class TestJiraKeySearchPattern:
     def test_finds_key_in_sentence(self):
-        from slack_bot.app import JIRA_KEY_SEARCH_PATTERN
+        from ai_driven.slack_bot.app import JIRA_KEY_SEARCH_PATTERN
 
         match = JIRA_KEY_SEARCH_PATTERN.search("please fix GTX-4821 asap")
         assert match is not None
         assert match.group(1) == "GTX-4821"
 
     def test_finds_key_at_start(self):
-        from slack_bot.app import JIRA_KEY_SEARCH_PATTERN
+        from ai_driven.slack_bot.app import JIRA_KEY_SEARCH_PATTERN
 
         match = JIRA_KEY_SEARCH_PATTERN.search("PROJ-1 is broken")
         assert match is not None
         assert match.group(1) == "PROJ-1"
 
     def test_no_match_for_lowercase(self):
-        from slack_bot.app import JIRA_KEY_SEARCH_PATTERN
+        from ai_driven.slack_bot.app import JIRA_KEY_SEARCH_PATTERN
 
         match = JIRA_KEY_SEARCH_PATTERN.search("please fix proj-123")
         assert match is None
 
     def test_no_match_for_no_key(self):
-        from slack_bot.app import JIRA_KEY_SEARCH_PATTERN
+        from ai_driven.slack_bot.app import JIRA_KEY_SEARCH_PATTERN
 
         match = JIRA_KEY_SEARCH_PATTERN.search("just a regular message")
         assert match is None

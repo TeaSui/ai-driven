@@ -31,7 +31,7 @@ class TestJiraKeyPattern:
 class TestHandleAiCode:
     @pytest.mark.asyncio
     async def test_empty_text_shows_usage(self):
-        from slack_bot.app import _handle_ai_code
+        from ai_driven.slack_bot.app import _handle_ai_code
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -45,7 +45,7 @@ class TestHandleAiCode:
 
     @pytest.mark.asyncio
     async def test_invalid_jira_key_rejected(self):
-        from slack_bot.app import _handle_ai_code
+        from ai_driven.slack_bot.app import _handle_ai_code
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -58,7 +58,7 @@ class TestHandleAiCode:
 
     @pytest.mark.asyncio
     async def test_repo_not_found(self):
-        from slack_bot.app import _handle_ai_code
+        from ai_driven.slack_bot.app import _handle_ai_code
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -69,8 +69,8 @@ class TestHandleAiCode:
         mock_repo_repo.get_by_full_name = AsyncMock(return_value=None)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -83,7 +83,7 @@ class TestHandleAiCode:
 
     @pytest.mark.asyncio
     async def test_successful_task_creation(self):
-        from slack_bot.app import _handle_ai_code
+        from ai_driven.slack_bot.app import _handle_ai_code
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -111,10 +111,10 @@ class TestHandleAiCode:
         mock_producer.enqueue_task = AsyncMock()
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
-            patch("slack_bot.app.TaskProducer", return_value=mock_producer),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.TaskProducer", return_value=mock_producer),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -130,7 +130,7 @@ class TestHandleAiCode:
     @pytest.mark.asyncio
     async def test_parses_jira_key_without_repo(self):
         """When no 'in org/repo' is given, should use get_first_active."""
-        from slack_bot.app import _handle_ai_code
+        from ai_driven.slack_bot.app import _handle_ai_code
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -141,8 +141,8 @@ class TestHandleAiCode:
         mock_repo_repo.get_first_active = AsyncMock(return_value=None)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.RepoRepository", return_value=mock_repo_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.RepoRepository", return_value=mock_repo_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -157,7 +157,7 @@ class TestHandleAiCode:
 class TestHandleAiStatus:
     @pytest.mark.asyncio
     async def test_empty_task_id_shows_usage(self):
-        from slack_bot.app import _handle_ai_status
+        from ai_driven.slack_bot.app import _handle_ai_status
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -170,7 +170,7 @@ class TestHandleAiStatus:
 
     @pytest.mark.asyncio
     async def test_task_not_found(self):
-        from slack_bot.app import _handle_ai_status
+        from ai_driven.slack_bot.app import _handle_ai_status
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -181,8 +181,8 @@ class TestHandleAiStatus:
         mock_task_repo.get_by_id = AsyncMock(return_value=None)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -195,7 +195,7 @@ class TestHandleAiStatus:
 
     @pytest.mark.asyncio
     async def test_completed_task_shows_output(self):
-        from slack_bot.app import _handle_ai_status
+        from ai_driven.slack_bot.app import _handle_ai_status
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -214,8 +214,8 @@ class TestHandleAiStatus:
         mock_task_repo.get_by_id = AsyncMock(return_value=mock_task)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -230,7 +230,7 @@ class TestHandleAiStatus:
 
     @pytest.mark.asyncio
     async def test_failed_task_shows_error(self):
-        from slack_bot.app import _handle_ai_status
+        from ai_driven.slack_bot.app import _handle_ai_status
 
         ack = AsyncMock()
         say = AsyncMock()
@@ -249,8 +249,8 @@ class TestHandleAiStatus:
         mock_task_repo.get_by_id = AsyncMock(return_value=mock_task)
 
         with (
-            patch("slack_bot.app.async_session_factory") as mock_factory,
-            patch("slack_bot.app.TaskRepository", return_value=mock_task_repo),
+            patch("ai_driven.slack_bot.app.async_session_factory") as mock_factory,
+            patch("ai_driven.slack_bot.app.TaskRepository", return_value=mock_task_repo),
         ):
             mock_factory.return_value.__aenter__ = AsyncMock(
                 return_value=mock_session
@@ -272,9 +272,9 @@ class TestSlackNotifier:
         mock_settings.slack_default_channel = "#general"
 
         with patch(
-            "slack_bot.notifications.get_settings", return_value=mock_settings
+            "ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             # Should not raise
@@ -288,9 +288,9 @@ class TestSlackNotifier:
         mock_settings.slack_default_channel = ""
 
         with patch(
-            "slack_bot.notifications.get_settings", return_value=mock_settings
+            "ai_driven.slack_bot.notifications.get_settings", return_value=mock_settings
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             await notifier.notify_task_completed("task-1")
@@ -312,12 +312,12 @@ class TestSlackNotifier:
 
         with (
             patch(
-                "slack_bot.notifications.get_settings",
+                "ai_driven.slack_bot.notifications.get_settings",
                 return_value=mock_settings,
             ),
-            patch("slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
+            patch("ai_driven.slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             await notifier.notify_task_failed("task-1", "Something broke")
@@ -348,12 +348,12 @@ class TestSlackNotifier:
 
         with (
             patch(
-                "slack_bot.notifications.get_settings",
+                "ai_driven.slack_bot.notifications.get_settings",
                 return_value=mock_settings,
             ),
-            patch("slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
+            patch("ai_driven.slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             # Should not raise
@@ -373,12 +373,12 @@ class TestSlackNotifier:
 
         with (
             patch(
-                "slack_bot.notifications.get_settings",
+                "ai_driven.slack_bot.notifications.get_settings",
                 return_value=mock_settings,
             ),
-            patch("slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
+            patch("ai_driven.slack_bot.notifications.httpx.AsyncClient", return_value=mock_client),
         ):
-            from slack_bot.notifications import SlackNotifier
+            from ai_driven.slack_bot.notifications import SlackNotifier
 
             notifier = SlackNotifier()
             # Should not raise

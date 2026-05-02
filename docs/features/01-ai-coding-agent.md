@@ -42,7 +42,7 @@ Given a Jira ticket `PROJ-123: Add user profile endpoint`, the agent produces:
 
 ### Step 2: Worker Picks Up Task
 
-**File: `src/ai_driven/queue/consumer.py`**
+**File: `backend/src/ai_driven/queue/consumer.py`**
 
 1. ECS Fargate worker polls SQS queue
 2. Receives message, extracts `task_id`
@@ -52,7 +52,7 @@ Given a Jira ticket `PROJ-123: Add user profile endpoint`, the agent produces:
 
 ### Step 3: Agent Loop (Claude API + Extended Thinking + Tool Use)
 
-**File: `src/ai_driven/agents/coding/agent.py`**
+**File: `backend/src/ai_driven/agents/coding/agent.py`**
 
 The CodingAgent uses a single multi-turn loop that handles both planning and implementation:
 
@@ -88,7 +88,7 @@ ClaudeClient.run_agent_loop()
 
 ### Step 4: Coding Phase (Sandbox Execution)
 
-**File: `src/ai_driven/agents/coding/sandbox.py`**
+**File: `backend/src/ai_driven/agents/coding/sandbox.py`**
 
 1. Clone repository into a Docker container (`docker/Dockerfile.sandbox`)
 2. Create feature branch: `feature/PROJ-123`
@@ -105,7 +105,7 @@ ClaudeClient.run_agent_loop()
 
 ### Step 5: PR Creation
 
-**File: `src/ai_driven/agents/coding/agent.py`**
+**File: `backend/src/ai_driven/agents/coding/agent.py`**
 
 Using the agent's tool loop:
 
@@ -128,17 +128,17 @@ Using the agent's tool loop:
 | Step | Primary File | Key Class/Function |
 |------|-------------|-------------------|
 | Trigger (Slack) | `slack_bot/app.py` | `handle_ai_code()` |
-| Trigger (Jira) | `src/ai_driven/api/webhooks/jira.py` | `handle_jira_webhook()` |
-| Trigger (Web UI) | `src/ai_driven/api/chat/router.py` | `send_message()` → `_process_task_inline()` |
-| Queue (production) | `src/ai_driven/queue/consumer.py` | `SQSConsumer.poll()` |
-| Sandbox | `src/ai_driven/agents/coding/sandbox.py` | `SandboxExecutor.execute()` / `MockSandboxExecutor` |
-| Agent loop | `src/ai_driven/agents/coding/agent.py` | `CodingAgent.run()` |
-| Claude API | `src/ai_driven/claude/client.py` | `ClaudeClient.run_agent_loop()` |
-| Claude Provider | `src/ai_driven/claude/provider.py` | `AnthropicProvider` / `BedrockProvider` / `MockProvider` |
-| Tool execution | `src/ai_driven/claude/tools/registry.py` | `ToolRegistry.execute()` |
-| SCM operations | `src/ai_driven/scm/github_client.py` | `GitHubClient.create_pull_request()` |
-| Jira operations | `src/ai_driven/jira/client.py` | `JiraClient.get_issue()` |
-| Event streaming | `src/ai_driven/agents/base.py` | `BaseAgent._publish_event()` → Redis pub/sub |
+| Trigger (Jira) | `backend/src/ai_driven/api/webhooks/jira.py` | `handle_jira_webhook()` |
+| Trigger (Web UI) | `backend/src/ai_driven/api/chat/router.py` | `send_message()` → `_process_task_inline()` |
+| Queue (production) | `backend/src/ai_driven/queue/consumer.py` | `SQSConsumer.poll()` |
+| Sandbox | `backend/src/ai_driven/agents/coding/sandbox.py` | `SandboxExecutor.execute()` / `MockSandboxExecutor` |
+| Agent loop | `backend/src/ai_driven/agents/coding/agent.py` | `CodingAgent.run()` |
+| Claude API | `backend/src/ai_driven/claude/client.py` | `ClaudeClient.run_agent_loop()` |
+| Claude Provider | `backend/src/ai_driven/claude/provider.py` | `AnthropicProvider` / `BedrockProvider` / `MockProvider` |
+| Tool execution | `backend/src/ai_driven/claude/tools/registry.py` | `ToolRegistry.execute()` |
+| SCM operations | `backend/src/ai_driven/scm/github_client.py` | `GitHubClient.create_pull_request()` |
+| Jira operations | `backend/src/ai_driven/jira/client.py` | `JiraClient.get_issue()` |
+| Event streaming | `backend/src/ai_driven/agents/base.py` | `BaseAgent._publish_event()` → Redis pub/sub |
 
 ## Claude API Usage
 
@@ -168,7 +168,7 @@ When `AI_DRIVEN_RAG_ENABLED=true`, the CodingAgent gets a `semantic_search_code`
 | Ranking | Reciprocal Rank Fusion (RRF, k=60) — 60% vector + 40% keyword |
 | Chunking | Python AST-based (functions/classes) + fixed-size fallback (1000 chars) |
 
-**Files:** `src/ai_driven/rag/` — `chunker.py`, `embeddings.py`, `indexer.py`, `retriever.py`, `models.py`
+**Files:** `backend/src/ai_driven/rag/` — `chunker.py`, `embeddings.py`, `indexer.py`, `retriever.py`, `models.py`
 
 The agent uses this for large repos where GitHub keyword search is insufficient. Chunks are indexed once per repo and stored in the `code_embeddings` table.
 
@@ -181,7 +181,7 @@ When `AI_DRIVEN_MCP_ENABLED=true`, the CodingAgent registers tools from external
 | GitHub MCP | Enhanced GitHub operations beyond the built-in SCM tools |
 | Context7 | Library/framework documentation lookup |
 
-**Files:** `src/ai_driven/mcp/` — `config.py`, `client_manager.py`, `tool_bridge.py`
+**Files:** `backend/src/ai_driven/mcp/` — `config.py`, `client_manager.py`, `tool_bridge.py`
 
 MCP tools are bridged into the agent's `ToolRegistry` at runtime via `register_mcp_tools()`.
 
@@ -198,7 +198,7 @@ When `AI_DRIVEN_EVALUATION_ENABLED=true`, every completed task is automatically 
 
 Grading uses `claude-sonnet-4-6 (all model slots pinned to Sonnet; see config.py)` with structured JSON output. Results are stored in `task_evaluations` and visible in the task detail UI.
 
-**Files:** `src/ai_driven/evaluation/` — `grader.py`, `runner.py`, `models.py`
+**Files:** `backend/src/ai_driven/evaluation/` — `grader.py`, `runner.py`, `models.py`
 
 ### Real-Time Event Streaming
 
@@ -214,7 +214,7 @@ The agent publishes events to Redis `task:{task_id}:events` throughout execution
 | `complete` | Total tool calls, iterations, duration | Agent finishes |
 | `error` | User-friendly error message | On failure |
 
-The task detail page (`ai-driven-web-ui/src/app/dashboard/tasks/[id]/page.tsx`) subscribes via WebSocket and renders these events with expandable panels for prompts, responses, and tool I/O.
+The task detail page (`frontend/src/app/dashboard/tasks/[id]/page.tsx`) subscribes via WebSocket and renders these events with expandable panels for prompts, responses, and tool I/O.
 
 ## Error Handling
 

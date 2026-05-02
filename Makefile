@@ -1,30 +1,36 @@
-.PHONY: install dev test lint format run docker-up docker-down
+.PHONY: install dev test test-all test-cov lint format run worker frontend-dev docker-up docker-down clean
 
 install:
-	pip install -e .
+	cd backend && pip install -e .
 
 dev:
-	pip install -e ".[dev]"
+	cd backend && pip install -e ".[dev]"
 
 test:
-	pytest tests/unit -v --tb=short
+	cd backend && pytest tests/unit -v --tb=short
 
 test-all:
-	pytest tests/ -v --tb=short
+	cd backend && pytest tests/ -v --tb=short
 
 test-cov:
-	pytest tests/unit -v --cov=ai_driven --cov-report=term-missing
+	cd backend && pytest tests/unit -v --cov=ai_driven --cov-report=term-missing
 
 lint:
-	ruff check src/ tests/
-	mypy src/ai_driven/
+	cd backend && ruff check src/ tests/
+	cd backend && mypy src/ai_driven/
 
 format:
-	ruff format src/ tests/
-	ruff check --fix src/ tests/
+	cd backend && ruff format src/ tests/
+	cd backend && ruff check --fix src/ tests/
 
 run:
-	AI_DRIVEN_DEBUG=true uvicorn ai_driven.main:app --host 0.0.0.0 --port 8888 --reload
+	cd backend && AI_DRIVEN_DEBUG=true uvicorn ai_driven.main:app --host 0.0.0.0 --port 8888 --reload
+
+worker:
+	cd backend && python -m ai_driven.worker
+
+frontend-dev:
+	cd frontend && npm run dev
 
 docker-up:
 	cd docker && docker compose up -d
@@ -35,4 +41,4 @@ docker-down:
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	rm -rf .mypy_cache .ruff_cache .pytest_cache htmlcov .coverage
+	rm -rf backend/.mypy_cache backend/.ruff_cache backend/.pytest_cache backend/htmlcov backend/.coverage

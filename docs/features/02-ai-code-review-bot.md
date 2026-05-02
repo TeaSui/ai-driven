@@ -48,7 +48,7 @@ Same as Coding Agent — ECS worker polls SQS, updates status to `RUNNING`.
 
 ### Step 3: Context Gathering (Tool Calls)
 
-**File: `src/ai_driven/agents/reviewer/agent.py`**
+**File: `backend/src/ai_driven/agents/reviewer/agent.py`**
 
 The review agent gathers the PR diff and surrounding context:
 
@@ -142,18 +142,18 @@ Stored in `teams.settings_json` under the `"review"` key.
 
 | Step | Primary File | Key Class/Function |
 |------|-------------|-------------------|
-| Trigger (GitHub) | `src/ai_driven/api/webhooks/github.py` | `_handle_pr_event()` |
-| Trigger (Bitbucket) | `src/ai_driven/api/webhooks/bitbucket.py` | `handle_bitbucket_webhook()` |
-| Self-review skip | `src/ai_driven/api/webhooks/github.py` | Bot author + label check |
-| Review config | `src/ai_driven/agents/reviewer/config.py` | `ReviewConfig.from_settings()` |
-| Agent loop | `src/ai_driven/agents/reviewer/agent.py` | `ReviewAgent.run()` |
-| Model selection | `src/ai_driven/agents/reviewer/agent.py` | `ReviewAgent._select_model()` |
-| Diff truncation | `src/ai_driven/agents/reviewer/agent.py` | `_truncate_diff_files()` |
-| Result parsing | `src/ai_driven/agents/reviewer/models.py` | `ReviewResult.parse_from_text()` |
-| Severity filtering | `src/ai_driven/agents/reviewer/models.py` | `filter_by_severity()` |
-| Path filtering | `src/ai_driven/agents/reviewer/models.py` | `filter_by_paths()` |
-| Summary formatting | `src/ai_driven/agents/reviewer/models.py` | `format_summary()` |
-| Comment posting | `src/ai_driven/scm/github_client.py` | `post_pr_comment()` |
+| Trigger (GitHub) | `backend/src/ai_driven/api/webhooks/github.py` | `_handle_pr_event()` |
+| Trigger (Bitbucket) | `backend/src/ai_driven/api/webhooks/bitbucket.py` | `handle_bitbucket_webhook()` |
+| Self-review skip | `backend/src/ai_driven/api/webhooks/github.py` | Bot author + label check |
+| Review config | `backend/src/ai_driven/agents/reviewer/config.py` | `ReviewConfig.from_settings()` |
+| Agent loop | `backend/src/ai_driven/agents/reviewer/agent.py` | `ReviewAgent.run()` |
+| Model selection | `backend/src/ai_driven/agents/reviewer/agent.py` | `ReviewAgent._select_model()` |
+| Diff truncation | `backend/src/ai_driven/agents/reviewer/agent.py` | `_truncate_diff_files()` |
+| Result parsing | `backend/src/ai_driven/agents/reviewer/models.py` | `ReviewResult.parse_from_text()` |
+| Severity filtering | `backend/src/ai_driven/agents/reviewer/models.py` | `filter_by_severity()` |
+| Path filtering | `backend/src/ai_driven/agents/reviewer/models.py` | `filter_by_paths()` |
+| Summary formatting | `backend/src/ai_driven/agents/reviewer/models.py` | `format_summary()` |
+| Comment posting | `backend/src/ai_driven/scm/github_client.py` | `post_pr_comment()` |
 
 ## Claude API Usage
 

@@ -17,7 +17,7 @@ is added.
 | ⚠️ Partial | The action's return value contains observation, but no separate read-back tool |
 | ❌ Unpaired | No way for the agent to verify the action's effect |
 
-## Coding agent ([src/ai_driven/agents/coding/agent.py](../../src/ai_driven/agents/coding/agent.py))
+## Coding agent ([backend/src/ai_driven/agents/coding/agent.py](../../backend/src/ai_driven/agents/coding/agent.py))
 
 | Action tool | Observation tool | Status | Notes |
 |---|---|---|---|
@@ -31,7 +31,7 @@ is added.
 | `jira.update_status` | `jira.get_issue` | ✅ Paired | |
 | `jira.add_comment` | `jira.get_issue` | ⚠️ Partial | `get_issue` does not always return comments. Either extend it or add `jira.get_issue_comments` |
 
-## Reviewer agent ([src/ai_driven/agents/reviewer/agent.py](../../src/ai_driven/agents/reviewer/agent.py))
+## Reviewer agent ([backend/src/ai_driven/agents/reviewer/agent.py](../../backend/src/ai_driven/agents/reviewer/agent.py))
 
 | Action tool | Observation tool | Status | Notes |
 |---|---|---|---|
@@ -40,7 +40,7 @@ is added.
 | `github.approve_pr` / `request_changes` | — | ❌ Unpaired | A `github.get_pr_reviews` would let the agent verify its review state and avoid duplicate submissions |
 | `bitbucket.approve_pr` / `request_changes` | — | ❌ Unpaired | Same |
 
-## DevOps agent ([src/ai_driven/agents/devops/agent.py](../../src/ai_driven/agents/devops/agent.py))
+## DevOps agent ([backend/src/ai_driven/agents/devops/agent.py](../../backend/src/ai_driven/agents/devops/agent.py))
 
 | Action tool | Observation tool | Status | Notes |
 |---|---|---|---|
@@ -52,7 +52,7 @@ is added.
 
 Independent of per-tool pairing, the agent loop itself enforces lesson 61 at
 the framework level: when `max_iterations` is exhausted while the model still
-wants tools, [`ClaudeClient.run_agent_loop`](../../src/ai_driven/claude/client.py)
+wants tools, [`ClaudeClient.run_agent_loop`](../../backend/src/ai_driven/claude/client.py)
 now executes the pending tool calls one last time, then makes a single
 no-tools synthesis call. The model is forced to emit a final text answer
 based on what it actually observed. Without this, an agent that hits its

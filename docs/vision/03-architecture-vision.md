@@ -118,7 +118,7 @@ Runs on Step Functions; each step is the existing agent dispatched with scoped i
 | DevOps triage | Sonnet 4.6 | Good enough, speed matters |
 | Evaluation | Haiku 4.5 | Cheap, deterministic rubric |
 
-Routing is configured once in `src/ai_driven/config.py` and exposed as a feature-flag override per team (year 2).
+Routing is configured once in `backend/src/ai_driven/config.py` and exposed as a feature-flag override per team (year 2).
 
 ## Failure modes — contracts
 

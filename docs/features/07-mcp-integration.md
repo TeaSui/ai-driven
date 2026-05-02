@@ -51,10 +51,10 @@ Agent ToolRegistry (built-in + MCP tools)
 
 | File | Purpose |
 |------|---------|
-| `src/ai_driven/mcp/__init__.py` | Package marker |
-| `src/ai_driven/mcp/config.py` | `McpServerConfig` and `get_mcp_servers()` — server configurations |
-| `src/ai_driven/mcp/client_manager.py` | `McpClientManager` singleton — manages stdio connections |
-| `src/ai_driven/mcp/tool_bridge.py` | `register_mcp_tools()` — bridges MCP tools into ToolRegistry |
+| `backend/src/ai_driven/mcp/__init__.py` | Package marker |
+| `backend/src/ai_driven/mcp/config.py` | `McpServerConfig` and `get_mcp_servers()` — server configurations |
+| `backend/src/ai_driven/mcp/client_manager.py` | `McpClientManager` singleton — manages stdio connections |
+| `backend/src/ai_driven/mcp/tool_bridge.py` | `register_mcp_tools()` — bridges MCP tools into ToolRegistry |
 
 ## How Tool Bridging Works
 

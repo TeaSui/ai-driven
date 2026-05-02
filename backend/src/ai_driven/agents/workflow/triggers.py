@@ -7,7 +7,7 @@ import uuid
 from typing import Any
 
 from ai_driven.queue.producer import TaskProducer
-from slack_bot.notifications import SlackNotifier
+from ai_driven.slack_bot.notifications import SlackNotifier
 
 logger = logging.getLogger(__name__)
 
