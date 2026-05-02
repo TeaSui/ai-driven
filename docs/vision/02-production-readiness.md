@@ -6,10 +6,10 @@ Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/rev
 
 ## 1. Correctness
 
-- [ ] Doc truth-drift resolved (`arch/01`, `arch/02`, `arch/04`, `arch/06` need Phase 2 updates — see `docs/retrospectives/2026-05-01-phase-2.md`).
-- [ ] Severity taxonomy migration shipped (`implementation/07`).
+- [x] Doc truth-drift resolved. `arch/01`, `arch/02`, `arch/04`, `arch/06` refreshed 2026-05-01 (`20d0e1b`, `fb73880`, `cb8ad15`, `ff697e9`).
+- [x] Severity taxonomy migration shipped. Migration `a1b2c3d4e5f7`, enum `IncidentSeverity`, CHECK constraint `ck_incidents_severity` re-verified 2026-05-01.
 - [x] `cancelled` task state exists and is honoured end-to-end (backend + UI + analytics). Phase 2 also added `blocked`, `awaiting_qa`, `qa_failed` to `ck_tasks_status`.
-- [x] Pydantic models + DB CHECK constraints cover every enum/union across `tasks` (Phase 2 statuses), `task_artifacts.verdict`, `task_override_audit.action`; `incidents` and `reviews` still rely on free-form strings in places.
+- [x] Pydantic models + DB CHECK constraints cover every enum/union across `tasks` (Phase 2 statuses), `task_artifacts.verdict`, `task_override_audit.action`, `incidents.severity` (P1-P4 enforced); `reviews` still has free-form status strings.
 - [ ] Integration tests cover the full Jira → Code → Review → Merge → Notify path on real Anthropic + Bedrock (not just mocks). Phase 2 ships `scripts/phase2_dogfood_harness.py` as the closest equivalent.
 - [ ] Evaluation score floor set (e.g. ≥ 7.0 weighted-avg) as a release gate.
 

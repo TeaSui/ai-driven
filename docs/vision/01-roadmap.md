@@ -14,8 +14,8 @@ Goal: every P1 from the review is either fixed or has a dated mitigation.
 | Wire Pause/Resume/Stop on real tasks | Frontend | `review/findings-final.md §2.2` | ✅ |
 | Demo fallback gated behind `NEXT_PUBLIC_DEMO_MODE` | Frontend | `review/findings-final.md §3.7` | ✅ |
 | SWR stops polling on terminal task statuses | Frontend | `review/findings-final.md §5.1` | ✅ |
-| Severity taxonomy migration (enum + CHECK + normalize) | Backend + Data | `implementation/07-severity-taxonomy-migration.md` | 🔲 plan written |
-| WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `implementation/08-auth-and-ws-security.md` | ◐ partial — `/login` + session tokens shipped; WS authz + middleware still pending |
+| Severity taxonomy migration (enum + CHECK + normalize) | Backend + Data | `archive/implementation/07-severity-taxonomy-migration.md` | ✅ migration `a1b2c3d4e5f7`, enum `IncidentSeverity`, CHECK constraint verified 2026-05-01 |
+| WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `archive/implementation/08-auth-and-ws-security.md` | ✅ WS authz via `_auth_from_ws`; middleware.ts enforces session; admin REST surface fully gated (`fef6ea7`) |
 | `cancelled` terminal state replaces `failed` on `/stop` | Backend + UI | `implementation/08` §Phase 1.5 | ✅ |
 | Model IDs — bump Opus 4.6 → 4.7 + re-benchmark | AI Eng | `config.py:39` | ✅ landed (re-benchmark still TODO) |
 | **Phase 2 orchestrator + specialists + QA gate + admin override** | Backend + Frontend | `docs/archive/phase-2/plan.md`, `docs/retrospectives/2026-05-01-phase-2.md`, `docs/runbooks/06-orchestrator.md` | ✅ live mode flipped 2026-05-01 (PR #33) |
