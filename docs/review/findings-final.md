@@ -146,7 +146,7 @@ Unchanged; all still stand as guidance.
 | 5.1 SWR terminal polling | ✅ | Dynamic refreshInterval |
 | 5.2-5.8 P3 polish | 🔲 | Mostly unchanged |
 
-**Counts:** 15 original findings ✅ closed · 4 ◐ partial · 13 🔲 still open · 4 new (§9.1–9.4) surfaced from 2026-05-02 dogfood.
+**Counts:** 15 original findings ✅ closed · 4 ◐ partial · 13 🔲 still open · 4 new (§9.1–9.4) surfaced from 2026-05-02 dogfood (9.4 ✅ closed).
 
 ---
 
@@ -223,20 +223,11 @@ Root cause candidates:
 
 Evidence: `reviews` table row for `pr_number=34` carries the fallback summary above.
 
-### 9.4 CodingAgent creates one commit per file (P3)
+### ~~9.4 CodingAgent creates one commit per file~~ — ✅ FIXED (commit `3003fc1`)
 
-`file.write` tool wraps GitHub's Contents API (`PUT /repos/{owner}/{repo}/contents/{path}`) which creates exactly one commit per call. When the agent writes N files on a single ticket, the PR ends up with N commits — one per file — even when the changes are logically a single unit.
+Added `file.write_batch` tool that writes N files in ONE commit. GitHub path uses the Git Data API (`git/blobs` in parallel → `git/trees` with `base_tree` → `git/commits` → `PATCH refs/heads/{branch}` with `force=false`). Bitbucket path generalizes the existing `/repositories/{repo}/src` multipart POST to accept multiple file parts (already one commit per POST per Atlassian docs). System prompt + initial-message workflow block now instruct the model to prefer batch writes when 2+ files are part of the same logical change. Registered alongside `file.write` — single-file writes still supported for ticket-like updates.
 
-Observed on PR #34 (ticket C5_multi_doc asking for 3 linked files): 3 commits (`bde46b7`, `cfa942a`, `431e41a`), one per file, each titled `docs: add <thing>`.
-
-Not a bug — the agent's output is valid — but PR history noise grows linearly with file count. Reviewers prefer one squash-worthy commit over a parade of N.
-
-**Fix options:**
-- Add a `file.write_batch` tool that takes a list of `{path, content}` + one `commit_message` and uses the GitHub Git Data API (`trees` + `commits` + `refs`) to produce a single commit. Same for Bitbucket.
-- Prompt nudge to accumulate writes before committing (brittle; model may not comply).
-- Accept and squash-merge at PR merge time (no code change; the noise persists in the PR page).
-
-Recommend the batch tool — clean model-side fix, one-shot implementation in `scm/github_client.py` + `bitbucket_client.py` + one new tool registration in `coding/agent.py`. ~4 hours.
+Evidence: `src/ai_driven/scm/interface.py`, `scm/github_client.py::create_or_update_files_batch`, `scm/bitbucket_client.py::create_or_update_files_batch`, `agents/coding/agent.py::write_files_batch` tool. Coverage: `tests/unit/test_github_batch_write.py`, `tests/unit/test_bitbucket_batch_write.py`, `tests/unit/test_coding_agent_batch_tool.py` (16 tests, all pass).
 
 ---
 

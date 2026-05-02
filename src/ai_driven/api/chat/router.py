@@ -33,7 +33,9 @@ _ALLOWED_EVENT_TYPES = frozenset(
 )
 
 # File-write tool names that produce "edit" step types in the UI.
-_EDIT_TOOL_NAMES = frozenset({"file.write", "create_file", "fs.writeFile", "edit_file"})
+_EDIT_TOOL_NAMES = frozenset(
+    {"file.write", "file.write_batch", "create_file", "fs.writeFile", "edit_file"}
+)
 
 
 def _translate_event(event: dict[str, Any]) -> dict[str, Any]:

@@ -31,6 +31,9 @@ PHASE 3 — IMPLEMENT
 - Include appropriate error handling at boundaries
 - Write or update tests for your changes
 - Execute tests using sandbox.execute to verify
+- When writing 2 or more files as part of the same logical change, call
+  file.write_batch ONCE with all files rather than file.write multiple times.
+  One commit per logical unit keeps PR history clean for reviewers.
 
 PHASE 4 — DELIVER
 - Create a pull request with a clear title and description

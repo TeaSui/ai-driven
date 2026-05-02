@@ -165,6 +165,11 @@ _MOCK_TOOL_RESULTS: dict[str, Any] = {
     "repo.search_code": {"matches": [{"file": "src/services/cache.py", "line": 8, "text": "class BalanceCache:"}]},
     "code.search": {"matches": [{"file": "src/services/cache.py", "line": 8, "text": "class BalanceCache:"}]},
     "file.write": {"success": True, "bytes_written": 487},
+    "file.write_batch": {
+        "status": "committed",
+        "count": 2,
+        "paths": ["src/services/cache.py", "tests/test_cache.py"],
+    },
     "git.create_branch": {"branch": "fix/mock-branch", "sha": "a3f21c8"},
     "github.create_pr": {
         "pr_number": 2419,

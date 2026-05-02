@@ -274,6 +274,46 @@ class BitbucketClient:
         )
         return resp.json() if resp.text else {}
 
+    async def create_or_update_files_batch(
+        self,
+        repo_full_name: str,
+        files: list[dict[str, str]],
+        message: str,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        """Commit MULTIPLE files in a single POST (one atomic commit).
+
+        Bitbucket's ``POST /repositories/{repo}/src`` accepts multiple file
+        parts in one multipart request and produces exactly one commit — so
+        this is just the single-file ``create_or_update_file`` path generalized
+        to N parts. Dedupes by path (last wins) to match the semantics of N
+        sequential writes.
+        """
+        if not files:
+            return {"message": message, "files": []}
+
+        # Dedupe by path, last-wins.
+        deduped: dict[str, str] = {}
+        for f in files:
+            deduped[f["path"]] = f["content"]
+
+        multipart = {
+            path: ("file", content.encode("utf-8"))
+            for path, content in deduped.items()
+        }
+        resp = await self._request(
+            "POST",
+            f"/repositories/{repo_full_name}/src",
+            data={"message": message, "branch": branch},
+            files=multipart,
+        )
+        if resp.text:
+            try:
+                return resp.json()
+            except Exception:
+                pass
+        return {"message": message, "files": list(deduped.keys())}
+
     # ------------------------------------------------------------------
     # Branch operations
     # ------------------------------------------------------------------

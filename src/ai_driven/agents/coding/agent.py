@@ -346,6 +346,54 @@ class CodingAgent(BaseAgent):
             return {"status": "committed", "path": path}
 
         @self._registry.tool(
+            name="file.write_batch",
+            description=(
+                "Create or update MULTIPLE files in the repository in ONE commit. "
+                "Strongly prefer this over multiple file.write calls when the "
+                "changes are part of the same logical unit (e.g. adding a feature "
+                "that touches docs + frontend + backend). Produces one clean "
+                "commit instead of N."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "repo_full_name": {"type": "string"},
+                    "files": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["path", "content"],
+                        },
+                        "minItems": 1,
+                    },
+                    "commit_message": {"type": "string"},
+                    "branch": {"type": "string"},
+                },
+                "required": ["repo_full_name", "files", "commit_message", "branch"],
+            },
+        )
+        async def write_files_batch(
+            repo_full_name: str,
+            files: list[dict[str, str]],
+            commit_message: str,
+            branch: str,
+        ) -> dict[str, Any]:
+            if not self._scm:
+                return {"error": "SCM client not configured"}
+            await self._scm.create_or_update_files_batch(
+                repo_full_name, files, commit_message, branch,
+            )
+            return {
+                "status": "committed",
+                "count": len(files),
+                "paths": [f["path"] for f in files],
+            }
+
+        @self._registry.tool(
             name="git.create_branch",
             description="Create a new branch in the repository.",
             input_schema={
@@ -979,8 +1027,11 @@ class CodingAgent(BaseAgent):
                      "path repo.list_files when you need to dig into one subtree.")
         parts.append("3. PLAN: pick an approach that matches existing conventions and "
                      "the test strategy already in the repo.")
-        parts.append("4. IMPLEMENT: call git.create_branch, then file.write for each "
-                     "change. Run tests via sandbox.execute.")
+        parts.append("4. IMPLEMENT: call git.create_branch, then commit changes. "
+                     "When writing 2+ files for the same logical change, call "
+                     "file.write_batch ONCE with all files (produces one commit). "
+                     "Only use file.write for a single isolated change. Run tests "
+                     "via sandbox.execute.")
         parts.append(f"5. DELIVER: call {pr_tool} to open the PR. Post a Jira comment "
                      "with the PR link if a ticket exists.")
         parts.append("</workflow>")

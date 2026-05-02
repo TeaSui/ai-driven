@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -314,6 +315,111 @@ class GitHubClient:
             json=body,
         )
         return resp.json()
+
+    async def create_or_update_files_batch(
+        self,
+        repo_full_name: str,
+        files: list[dict[str, str]],
+        message: str,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        """Write multiple files in a SINGLE commit via the Git Data API.
+
+        Atomic 5-step flow (plus a 6th PATCH to move the ref):
+
+          1. GET /repos/{repo}/git/ref/heads/{branch} → parent commit SHA
+          2. GET /repos/{repo}/git/commits/{parent_sha} → parent tree SHA
+          3. POST /repos/{repo}/git/blobs  (one per file, run in parallel with
+             asyncio.gather to avoid N× serial latency)
+          4. POST /repos/{repo}/git/trees  with base_tree = parent tree SHA
+          5. POST /repos/{repo}/git/commits with parents = [parent commit SHA]
+          6. PATCH /repos/{repo}/git/refs/heads/{branch}  (force=false — we
+             fast-forward from the parent we just read; a concurrent push
+             between step 1 and step 6 legitimately fails the PATCH and we
+             surface that error so the caller can retry.)
+
+        Duplicate paths are deduped (last wins) to match the semantics of N
+        sequential ``file.write`` calls.
+        """
+        if not files:
+            return {"sha": None, "message": message, "files": []}
+
+        # Dedupe by path — last entry wins, preserving call order.
+        deduped: dict[str, str] = {}
+        for f in files:
+            path = f["path"]
+            content = f["content"]
+            deduped[path] = content
+        ordered_paths = list(deduped.keys())
+
+        # Step 1: parent commit SHA from the branch ref.
+        ref_resp = await self._request(
+            "GET", f"/repos/{repo_full_name}/git/ref/heads/{branch}"
+        )
+        parent_commit_sha = ref_resp.json()["object"]["sha"]
+
+        # Step 2: parent tree SHA from the parent commit.
+        commit_resp = await self._request(
+            "GET",
+            f"/repos/{repo_full_name}/git/commits/{parent_commit_sha}",
+        )
+        parent_tree_sha = commit_resp.json()["tree"]["sha"]
+
+        # Step 3: create a blob per file, in parallel.
+        async def _create_blob(content: str) -> str:
+            resp = await self._request(
+                "POST",
+                f"/repos/{repo_full_name}/git/blobs",
+                json={"content": content, "encoding": "utf-8"},
+            )
+            return resp.json()["sha"]
+
+        blob_shas = await asyncio.gather(
+            *[_create_blob(deduped[p]) for p in ordered_paths]
+        )
+
+        # Step 4: build a new tree layered on the parent tree.
+        tree_entries = [
+            {
+                "path": path,
+                "mode": "100644",
+                "type": "blob",
+                "sha": sha,
+            }
+            for path, sha in zip(ordered_paths, blob_shas, strict=True)
+        ]
+        tree_resp = await self._request(
+            "POST",
+            f"/repos/{repo_full_name}/git/trees",
+            json={"base_tree": parent_tree_sha, "tree": tree_entries},
+        )
+        new_tree_sha = tree_resp.json()["sha"]
+
+        # Step 5: create the commit pointing at that tree.
+        commit_resp = await self._request(
+            "POST",
+            f"/repos/{repo_full_name}/git/commits",
+            json={
+                "message": message,
+                "tree": new_tree_sha,
+                "parents": [parent_commit_sha],
+            },
+        )
+        new_commit_sha = commit_resp.json()["sha"]
+
+        # Step 6: move the branch ref forward. force=false — fail loudly if
+        # someone else pushed concurrently rather than clobbering their work.
+        await self._request(
+            "PATCH",
+            f"/repos/{repo_full_name}/git/refs/heads/{branch}",
+            json={"sha": new_commit_sha, "force": False},
+        )
+
+        return {
+            "sha": new_commit_sha,
+            "message": message,
+            "files": ordered_paths,
+        }
 
     # ------------------------------------------------------------------
     # Branch operations

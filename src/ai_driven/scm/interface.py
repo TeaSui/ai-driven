@@ -118,3 +118,18 @@ class SCMClient(Protocol):
     ) -> list[Commit]:
         """List the commits on a pull request."""
         ...
+
+    async def create_or_update_files_batch(
+        self,
+        repo_full_name: str,
+        files: list[dict[str, str]],
+        message: str,
+        branch: str = "main",
+    ) -> dict[str, Any]:
+        """Write N files in a SINGLE commit.
+
+        ``files`` is ordered; later entries win on duplicate paths. Returns a
+        backend-specific response (GitHub: commit SHA envelope; Bitbucket:
+        commit object or a fallback echo of the paths).
+        """
+        ...

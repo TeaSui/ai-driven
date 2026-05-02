@@ -959,6 +959,21 @@ def _extract_repo_and_ref_for_path(
             ref = inp.get("branch") or ref
             if repo_full_name and ref:
                 break
+        if tool == "file.write_batch":
+            # Batch writes list the paths under `files[]`. Match on any
+            # entry to attribute the path to this commit.
+            batch_paths = [
+                (f or {}).get("path")
+                for f in (inp.get("files") or [])
+                if isinstance(f, dict)
+            ]
+            if path in batch_paths:
+                repo_full_name = inp.get("repo_full_name") or repo_full_name
+                ref = inp.get("branch") or ref
+                if repo_full_name and ref:
+                    break
+            if not repo_full_name and batch_paths:
+                repo_full_name = inp.get("repo_full_name") or repo_full_name
         if tool in ("git.create_branch", "create_branch") and not ref:
             ref = inp.get("branch_name") or inp.get("branch")
         if tool in ("file.write", "repo.write_file") and not repo_full_name:

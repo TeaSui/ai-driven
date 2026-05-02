@@ -20,7 +20,7 @@ flowchart TD
 
     subgraph Core["Core Agents (SDK tool loops)"]
         BASE["BaseAgent\nTool Registry + Event Loop"]
-        CODING["Coding Agent\n13 core tools + conditional RAG + MCP"]
+        CODING["Coding Agent\n14 core tools + conditional RAG + MCP"]
         REVIEW["Review Agent\n12 tools + shared RAG"]
         DEVOPS["DevOps Agent\n7 tools"]
         WORKFLOW["Workflow Agent\n5 tools (legacy intake path)"]
@@ -160,7 +160,7 @@ flowchart TD
 
 | Agent | Tools | Role |
 |-------|-------|------|
-| **Coding** | 13 core + conditional RAG + MCP | Implements the change, opens PR |
+| **Coding** | 14 core + conditional RAG + MCP | Implements the change, opens PR |
 | **Review** | 12 + shared RAG | Reviews PR diff, posts inline comments |
 | **DevOps** | 7 | Incident triage, Slack notify, Jira update |
 | **Workflow** | 5 | Legacy dispatch path (still functional, not the default intake) |
