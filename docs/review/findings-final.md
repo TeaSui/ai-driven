@@ -17,8 +17,8 @@ Migration `alembic/versions/a1b2c3d4e5f7_severity_uppercase.py` added `ck_incide
 ### ~~1.3 Coding Agent tool count in `docs/architecture/02`~~ — ✅ FIXED
 Refreshed 2026-05-01 in `fb73880`. Current doc shows live tool counts (Coding 13, Review 12, DevOps 7, Workflow 5, Orchestrator 0, QA 3, StackAnalyst 1, rest 0) across the Core / Orchestration / Specialists split.
 
-### 1.4 Model IDs — 🔲 STILL OPEN (P2)
-`config.py:45-47` still pins Sonnet 4.6 across default/planning/fast. Opus 4.7 (released since the audit) is not adopted anywhere. Bedrock ID at `:114` also stays on 4.6. Needs a benchmark-then-bump.
+### ~~1.4 Model IDs~~ — ✅ FIXED (partial per-tier routing)
+`claude_planning_model` now points at `claude-opus-4-7` (2026-05-01). Anthropic Direct now has tier parity with Bedrock (`bedrock_planning_model_id` was already on Opus 4.7). Default + fast stay on Sonnet 4.6 — the orchestrator classifier gates planning-vs-default, so Opus's cost only bites on planning-heavy runs. Full benchmark comparison (Opus 4.7 vs Opus 4.6 across the eval suite) is Phase 3 polish; not a GA blocker. Pricing tables in `billing/tracker.py:23,31` and `observability/metrics.py:162` already cover Opus 4.7.
 
 ---
 
@@ -123,7 +123,7 @@ Unchanged; all still stand as guidance.
 | 1.1 embedding dim | ✅ | Doc fixed |
 | 1.2 severity normalization | ✅ | Migration + enum; CHECK constraint verified 2026-05-01 |
 | 1.3 tool-count doc drift | ✅ | Refreshed 2026-05-01 (`fb73880`) |
-| 1.4 model IDs | 🔲 | Sonnet 4.6 pinned; Opus 4.7 pending |
+| 1.4 model IDs | ✅ | `claude_planning_model` → Opus 4.7 (parity with Bedrock) |
 | 2.1 WS URL | ✅ | Env var + fallback |
 | 2.2 Pause/Resume/Stop | ✅ | Wired to real API |
 | 2.3 Sidebar labels | 🔲 | Still mismatched |
@@ -146,7 +146,7 @@ Unchanged; all still stand as guidance.
 | 5.1 SWR terminal polling | ✅ | Dynamic refreshInterval |
 | 5.2-5.8 P3 polish | 🔲 | Mostly unchanged |
 
-**Counts:** 14 original findings ✅ closed · 4 ◐ partial · 14 🔲 still open.
+**Counts:** 15 original findings ✅ closed · 4 ◐ partial · 13 🔲 still open.
 
 ---
 

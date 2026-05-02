@@ -43,7 +43,15 @@ class Settings(BaseSettings):
     # Restore per-tier model choice if/when a tier-aware routing layer
     # (orchestrator classifier) is in place to bound the blast radius.
     claude_default_model: str = "claude-sonnet-4-6"
-    claude_planning_model: str = "claude-sonnet-4-6"
+    # Planning uses Opus 4.7 when running against Anthropic Direct so the
+    # tier parity with bedrock_planning_model_id holds. This is the single
+    # per-tier specialization we ship today — the orchestrator classifier
+    # (Phase 1 T4 / Phase 2 T20) satisfies the "tier-aware routing layer"
+    # precondition that the rest of the 3-constant block defers. Reviewer
+    # and specialists remain on the default via their own model_setting_attr
+    # overrides, so the blast radius of an Opus regression is scoped to
+    # planning-heavy calls.
+    claude_planning_model: str = "claude-opus-4-7"
     claude_fast_model: str = "claude-sonnet-4-6"
     # Output token cap. 4096 was too tight for coding runs — Sonnet 4.6's
     # final "open the PR, summarize, update Jira" turn routinely writes
