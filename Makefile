@@ -33,10 +33,10 @@ frontend-dev:
 	cd frontend && npm run dev
 
 docker-up:
-	cd docker && docker compose up -d
+	cd ops/docker && docker compose up -d
 
 docker-down:
-	cd docker && docker compose down
+	cd ops/docker && docker compose down
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

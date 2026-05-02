@@ -90,7 +90,7 @@ ClaudeClient.run_agent_loop()
 
 **File: `backend/src/ai_driven/agents/coding/sandbox.py`**
 
-1. Clone repository into a Docker container (`docker/Dockerfile.sandbox`)
+1. Clone repository into a Docker container (`ops/docker/sandbox/Dockerfile`)
 2. Create feature branch: `feature/PROJ-123`
 3. Run Claude Code CLI inside the sandbox with the plan
 4. Claude Code reads files, writes code, runs tests iteratively
