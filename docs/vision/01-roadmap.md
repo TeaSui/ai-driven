@@ -1,7 +1,7 @@
 # Roadmap — 90 Days to GA, then 12 Months
 
 **Reference date:** 2026-05-01 (post Phase 2 close; live mode on `feature/orchestrator-phase1`)
-**Current state:** Design-partner pilot (1 team), Next.js UI substantially complete, 4 core agents + 6 specialists + orchestrator/QA gate, evaluation loop live. Phase 2 shipped strict gating + post-coding QA + admin override + reapers (see `docs/phase2-retrospective.md`). Findings in `docs/review/findings-final.md` still contain unfixed P1s that block GA.
+**Current state:** Design-partner pilot (1 team), Next.js UI substantially complete, 4 core agents + 6 specialists + orchestrator/QA gate, evaluation loop live. Phase 2 shipped strict gating + post-coding QA + admin override + reapers (see `docs/retrospectives/2026-05-01-phase-2.md`). Findings in `docs/review/findings-final.md` still contain unfixed P1s that block GA.
 
 ## Now (weeks 0–2) — Close the findings
 
@@ -18,7 +18,7 @@ Goal: every P1 from the review is either fixed or has a dated mitigation.
 | WebSocket authz + Next.js middleware + /login | Backend + Frontend + Security | `implementation/08-auth-and-ws-security.md` | ◐ partial — `/login` + session tokens shipped; WS authz + middleware still pending |
 | `cancelled` terminal state replaces `failed` on `/stop` | Backend + UI | `implementation/08` §Phase 1.5 | ✅ |
 | Model IDs — bump Opus 4.6 → 4.7 + re-benchmark | AI Eng | `config.py:39` | ✅ landed (re-benchmark still TODO) |
-| **Phase 2 orchestrator + specialists + QA gate + admin override** | Backend + Frontend | `docs/plans/2026-05-01-orchestrator-phase-2.md`, `docs/phase2-retrospective.md`, `docs/runbooks/orchestrator-phase2.md` | ✅ live mode flipped 2026-05-01 (PR #33) |
+| **Phase 2 orchestrator + specialists + QA gate + admin override** | Backend + Frontend | `docs/archive/phase-2/plan.md`, `docs/retrospectives/2026-05-01-phase-2.md`, `docs/runbooks/06-orchestrator.md` | ✅ live mode flipped 2026-05-01 (PR #33) |
 
 **Exit criteria:** every row green; zero P1 findings open; `successRate` metric excludes `cancelled`; debug banner visible when `AI_DRIVEN_DEBUG=true`.
 

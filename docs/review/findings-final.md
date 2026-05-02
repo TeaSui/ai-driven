@@ -105,7 +105,7 @@ Draft suggested a banner from `/api/admin/health` — **that endpoint doesn't ex
 `DashboardSummary.budgetUsagePercent` is fetched but not rendered as a burn-down bar. Docs reference a $100/day halt — surface it. Disable the "New run" CTA at 100%; warn at 80%.
 
 ### 3.6 No DLQ / stuck-task visibility (P2)
-`docs/implementation/03-coding-agent.md` has DLQ as unchecked. Operators have no view of queue depth, longest in-flight, or stuck tasks. Add to `/dashboard/admin/runs`.
+`docs/archive/implementation/03-coding-agent.md` has DLQ as unchecked. Operators have no view of queue depth, longest in-flight, or stuck tasks. Add to `/dashboard/admin/runs`.
 
 ### 3.7 Demo fallback bleeds into production bundle (P2)
 [tasks/[id]/page.tsx:45-63](ai-driven-web-ui/src/app/dashboard/tasks/[id]/page.tsx:45) — on API outage, users see the **fake** `"race condition in ledger balance cache"` task. Gate `DEMO_STEPS` behind `NEXT_PUBLIC_DEMO_MODE`; otherwise show empty / retry state.

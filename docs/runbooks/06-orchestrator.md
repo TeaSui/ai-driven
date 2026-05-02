@@ -152,7 +152,7 @@ checks (`require_admin`) accept `owner` and `admin` roles interchangeably.
    to fall back to Phase-1 behaviour (coding-task always enqueued). Tickets
    submitted during the outage still run specialists for telemetry but the
    pipeline never halts on their output.
-4. See `docs/phase2-error-audit.md` for the top-3 error modes fixed in T-A1
+4. See `docs/archive/phase-2/error-audit.md` for the top-3 error modes fixed in T-A1
    and how to diagnose each.
 
 ### `qa_failed` task is a false positive
@@ -238,7 +238,7 @@ on-call at the stated severity.
 
 ## Known false positives
 
-Populated from T27 dogfood (`docs/phase2-dogfood-results.md`) + production
+Populated from T27 dogfood (`docs/archive/phase-2/briefs/t27-dogfood-harness-brief.md`) + production
 runs. Each entry: pattern, how it manifests, remediation applied (if any),
 signal to watch so the FP doesn't recur.
 
@@ -257,13 +257,13 @@ accumulates institutional knowledge. Format:_
 
 ## Cross-links
 
-- Phase 2 plan + task list: `docs/plans/2026-05-01-orchestrator-phase-2.md`
-- T22 (QA post-coding): `docs/plans/t22-qa-post-coding-brief.md`
-- T23 (QA verdict → status): `docs/plans/t23-qa-verdict-status-brief.md`
-- T24 (admin override + reapers): `docs/plans/t24-admin-override-reapers-brief.md`
-- T25 (Specialists UI tab): `docs/plans/t25-specialists-ui-brief.md`
-- T27 (dogfood harness + results): `docs/plans/t27-dogfood-harness-brief.md`,
-  `docs/phase2-dogfood-results.md`
-- T0 shadow baseline (historical): `docs/phase2-shadow-baseline.md`
-- Error audit (T-A1): `docs/phase2-error-audit.md`
-- Phase 2 retrospective: `docs/phase2-retrospective.md`
+- Phase 2 plan + task list: `docs/archive/phase-2/plan.md`
+- T22 (QA post-coding): `docs/archive/phase-2/briefs/t22-qa-post-coding-brief.md`
+- T23 (QA verdict → status): `docs/archive/phase-2/briefs/t23-qa-verdict-status-brief.md`
+- T24 (admin override + reapers): `docs/archive/phase-2/briefs/t24-admin-override-reapers-brief.md`
+- T25 (Specialists UI tab): `docs/archive/phase-2/briefs/t25-specialists-ui-brief.md`
+- T27 (dogfood harness + results): `docs/archive/phase-2/briefs/t27-dogfood-harness-brief.md`,
+  `docs/archive/phase-2/briefs/t27-dogfood-harness-brief.md`
+- T0 shadow baseline (historical): `docs/archive/phase-2/shadow-baseline.md`
+- Error audit (T-A1): `docs/archive/phase-2/error-audit.md`
+- Phase 2 retrospective: `docs/retrospectives/2026-05-01-phase-2.md`

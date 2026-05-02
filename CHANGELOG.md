@@ -49,7 +49,7 @@ QA specialist, and expose a human override + stuck-task reaper path. PR
   polls with 429 backoff; `phase2_dogfood_report.py` converts JSONL →
   markdown summary; `GET /api/admin/override-audit` feeds FP-rate
   numbers into the report.
-- **Phase 2 runbook (T28)** — new `docs/runbooks/orchestrator-phase2.md`
+- **Phase 2 runbook (T28)** — new `docs/runbooks/06-orchestrator.md`
   covering state machine (mermaid), env flags, common ops tasks,
   DataDog counters, alert response, and a seeded "Known false
   positives" section.
@@ -86,7 +86,7 @@ QA specialist, and expose a human override + stuck-task reaper path. PR
 ### Ops state
 - **Live mode active** — `AI_DRIVEN_ORCHESTRATOR_MODE=live` pinned in
   `.env.local`. Rollback procedure in
-  `docs/runbooks/orchestrator-phase2.md` → "Rollback to shadow mode."
+  `docs/runbooks/06-orchestrator.md` → "Rollback to shadow mode."
 - **Seed team renamed** — the reaper-attribution seed team is named
   `admin` (not `system`), email `admin@ai-driven.local`, seeded with a
   non-functional `__seed__` hash. Rotate to a real key before use.
@@ -98,11 +98,11 @@ QA specialist, and expose a human override + stuck-task reaper path. PR
   renders gated tasks accurately (see runbook).
 
 ### Docs
-- `docs/phase2-retrospective.md` — what landed / learned / cut /
+- `docs/retrospectives/2026-05-01-phase-2.md` — what landed / learned / cut /
   deferred.
-- `docs/plans/2026-05-01-orchestrator-phase-2.md` — annotated with
+- `docs/archive/phase-2/plan.md` — annotated with
   commit SHAs and SHIPPED header.
-- `docs/runbooks/orchestrator-phase2.md` — operator runbook (see
+- `docs/runbooks/06-orchestrator.md` — operator runbook (see
   Added, above).
 
 ### Tests

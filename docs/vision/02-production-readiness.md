@@ -2,11 +2,11 @@
 
 Use this before promoting an environment from beta → GA. Every item should be **green** and **dated**; red items must have an ADR waiving them.
 
-Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/review/findings-final.md` + `docs/phase2-retrospective.md`.
+Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/review/findings-final.md` + `docs/retrospectives/2026-05-01-phase-2.md`.
 
 ## 1. Correctness
 
-- [ ] Doc truth-drift resolved (`arch/01`, `arch/02`, `arch/04`, `arch/06` need Phase 2 updates — see `docs/phase2-retrospective.md`).
+- [ ] Doc truth-drift resolved (`arch/01`, `arch/02`, `arch/04`, `arch/06` need Phase 2 updates — see `docs/retrospectives/2026-05-01-phase-2.md`).
 - [ ] Severity taxonomy migration shipped (`implementation/07`).
 - [x] `cancelled` task state exists and is honoured end-to-end (backend + UI + analytics). Phase 2 also added `blocked`, `awaiting_qa`, `qa_failed` to `ck_tasks_status`.
 - [x] Pydantic models + DB CHECK constraints cover every enum/union across `tasks` (Phase 2 statuses), `task_artifacts.verdict`, `task_override_audit.action`; `incidents` and `reviews` still rely on free-form strings in places.
@@ -30,7 +30,7 @@ Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/rev
 - [ ] DataDog APM trace per `task_id`; "View trace" link in UI.
 - [ ] Redis event log retention = 24 h confirmed.
 - [x] Token + cost metrics dashboards live (per team, per model, per agent type). Phase 2 added per-artifact `cost_usd` attribution (T-A2) and `orchestrator.*`, `qa.*`, `admin.override.*`, `reaper.*` counters.
-- [ ] Alerts: error rate > 1%, latency p95 > 10 s, daily spend > 80% budget, queue depth > 100. Phase 2 alert specs in `docs/runbooks/orchestrator-phase2.md`; wiring to on-call is manual-ops work.
+- [ ] Alerts: error rate > 1%, latency p95 > 10 s, daily spend > 80% budget, queue depth > 100. Phase 2 alert specs in `docs/runbooks/06-orchestrator.md`; wiring to on-call is manual-ops work.
 - [ ] Log retention: 30 days hot, 90 days cold.
 
 ## 4. Reliability
@@ -83,7 +83,7 @@ Current status snapshot: 2026-05-01 (post Phase 2 close). Derived from `docs/rev
 
 - [ ] Architecture docs match code. Post-Phase-2 drift flagged — `arch/01` (table count), `arch/02` (agent count, queue count), `arch/04` (state machine), `arch/06` (workflow path) need updates.
 - [ ] Public API reference (OpenAPI) published. FastAPI auto-serves at `/openapi.json`; not published externally.
-- [x] Operator runbook for orchestrator: `docs/runbooks/orchestrator-phase2.md` (state machine, env flags, common ops tasks, counters, alert response).
+- [x] Operator runbook for orchestrator: `docs/runbooks/06-orchestrator.md` (state machine, env flags, common ops tasks, counters, alert response).
 - [ ] Customer-facing runbooks: "Add a repo", "Rotate API key", "Trigger a run from Slack", "What to do when a run gets stuck". Key-rotation procedure is in the Phase 2 runbook; the others still pending.
 - [x] Changelog discipline — `CHANGELOG.md` present with Phase 2 section.
 
