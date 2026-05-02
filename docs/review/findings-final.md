@@ -146,7 +146,7 @@ Unchanged; all still stand as guidance.
 | 5.1 SWR terminal polling | ✅ | Dynamic refreshInterval |
 | 5.2-5.8 P3 polish | 🔲 | Mostly unchanged |
 
-**Counts:** 15 original findings ✅ closed · 4 ◐ partial · 13 🔲 still open.
+**Counts:** 15 original findings ✅ closed · 4 ◐ partial · 13 🔲 still open · 3 new (§9.1–9.3) surfaced from 2026-05-02 dogfood.
 
 ---
 
@@ -177,6 +177,51 @@ The original plan's items 1-6 are done. What remains, ordered by leverage:
 ### Later
 
 - Reviews queue split (3.8), Onboarding wizard (4.4), Auto-merge UX (2.8), accessibility pass (4.5), and all P3 polish items.
+
+---
+
+## 9. New findings (2026-05-02 E2E dogfood run)
+
+### 9.1 Classifier is too lenient (P2)
+
+Run of 9 tickets against live mode on `MinnMinn/skills-introduction-to-github`:
+- 5/5 informally-worded tickets classified as `fast_path` — including one asking for a `plaintext_passwords.md` file. Security specialist never ran.
+- 3/3 tickets with explicit trust-boundary language ("treat as a trust-boundary change", "multi-domain", "production credentials in plaintext") correctly classified as `full_workflow` or `multi_domain` — BA blocked 2 of them as expected.
+
+Root cause: `TIER_CLASSIFIER_SYSTEM_PROMPT` (`src/ai_driven/claude/prompts/orchestrator.py`) relies on the LLM inferring trust-boundary from ticket intent. On Sonnet-fast with `max_tokens=16`, the classifier defaults to `fast_path` for anything that reads like a routine-looking request.
+
+**Fix options** (not yet ranked):
+- Prompt: add explicit trigger keywords ("If the ticket mentions: password, secret, credential, auth, login, payment, PII, credit-card, token, API key → MUST be at least full_workflow").
+- Structural: file-path signal — tickets touching `auth/`, `security/`, `payments/`, `secrets/` get a +1 tier bump.
+- Fallback: flip `_DEFAULT_TIER` semantics — when Sonnet output is ambiguous, prefer the stricter tier rather than fast_path.
+
+**Dogfood evidence:** `tasks` rows `bbd02c10-6866-4943-8a3e-11dbdd3c14d4` (plaintext passwords, fast_path missed) vs `374ec4d3-cad0-41a9-9d17-c74af0cd7848` (same spirit re-framed, multi_domain + BA blocked).
+
+### 9.2 Sidebar Code Review badge shows the wrong axis (P3)
+
+`sidebar.tsx:194` renders `count: reviewActive` where `reviewActive` comes from `dashboard/summary.activeAgents.review` — the count of in-flight `tasks` where `agent_type='review'`. Meanwhile clicking the badge takes the user to `/dashboard/reviews` which reads from the `reviews` table, populated only AFTER a ReviewAgent run completes. The two numbers are semantically different; when one is non-zero and the other is zero the page reads as "the badge lied."
+
+**Fix (~30 min):** either
+- count `reviews` table rows (consistent with the page), or
+- relabel badge ("2 reviews running") so users don't expect to see 2 cards after clicking.
+
+Worth pairing with 5.2 (hardcoded nav counts) on the same sidebar-cleanup commit.
+
+### 9.3 ReviewAgent falls back to `verdict=commented` when diff fetch fails silently (P2)
+
+Observed on PR #34 review task `d817e8e0-1f24-4436-9fee-2b662e32ab73`:
+- ReviewAgent returned `verdict=comment`, `issues_found=0`, `critical_issues=0`.
+- Summary: *"No diff or PR content was provided in this session — only a re-emit request for a previous reply that is not available. Unable to produce findings without source material."*
+- The agent never successfully called `github.get_pr_diff`.
+
+Root cause candidates:
+- Tool call dropped by Bedrock response path.
+- Prompt interpretation error — model treated the input as a re-emit request.
+- Default verdict `"commented"` (`agent.py:643`) masks the failure as "neutral review" rather than surfacing `verdict=error` so T22-style fallback logic can kick in.
+
+**Fix:** when `findings=[]` AND the model's summary contains failure-language ("no diff", "unable to", "re-emit"), the agent should re-try `github.get_pr_diff` explicitly OR return `verdict=error` so the task fails cleanly instead of storing a "0-issues approval-like comment" that downstream consumers mistake for a real pass. Reproducible on Bedrock (PR #32 succeeded on the same run pass, PR #34 did not — flaky, but silent-failure is the real issue).
+
+Evidence: `reviews` table row for `pr_number=34` carries the fallback summary above.
 
 ---
 
