@@ -1329,6 +1329,13 @@ _STATUS_TO_STAGE: dict[str, str] = {
     "completed": "deploy",    # coding agent done = PR ready for review/deploy
     "failed": "code",         # failed stays at code stage (not monitor)
     "cancelled": "code",
+    # Phase 2 statuses. `blocked` halts pre-coding (specialist verdict=block);
+    # `awaiting_qa` is between coding-success and post-coding QA verdict;
+    # `qa_failed` is post-coding QA verdict=block. Each anchors to the stage
+    # where the decision was made so the timeline badge reflects truth.
+    "blocked": "code",        # halted BEFORE code ran — sits at "code" stage
+    "awaiting_qa": "review",  # PR exists; QA has not yet returned a verdict
+    "qa_failed": "review",    # PR exists; QA blocked the merge
 }
 
 # Per-agent stage override: coding agent "completed" means PR opened (review stage),
@@ -1357,6 +1364,12 @@ _STATUS_TO_STAGE_STATUS: dict[str, str] = {
     "completed": "passed",
     "failed": "failed",
     "cancelled": "cancelled",
+    # Phase 2 statuses. The frontend's deriveStatus maps 'failed' to the
+    # 'blocked' pill, which is what we want for blocked + qa_failed.
+    # awaiting_qa is mid-pipeline → 'active'.
+    "blocked": "failed",
+    "awaiting_qa": "active",
+    "qa_failed": "failed",
 }
 
 
@@ -1418,7 +1431,15 @@ async def list_pipeline_runs(
         # same "done" bucket as completed/failed rather than falling
         # through to the default in-flight stage.
         if t.status in TERMINAL_STATUSES or t.status == "cancelled":
-            stage = _AGENT_COMPLETED_STAGE.get(t.agent_type, _STATUS_TO_STAGE.get(t.status, "code"))
+            # blocked = specialist halted BEFORE coding ran; keep it at the
+            # stage the status map says ("code") rather than promoting to
+            # "review" via the coding-agent completion override. Same rule
+            # for qa_failed + awaiting_qa — those are review-stage facts
+            # that shouldn't be clobbered by a generic completion rule.
+            if t.status in {"blocked", "qa_failed", "awaiting_qa"}:
+                stage = _STATUS_TO_STAGE.get(t.status, "code")
+            else:
+                stage = _AGENT_COMPLETED_STAGE.get(t.agent_type, _STATUS_TO_STAGE.get(t.status, "code"))
         else:
             stage = _STATUS_TO_STAGE.get(t.status, "code")
 
