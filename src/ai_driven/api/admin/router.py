@@ -307,6 +307,7 @@ async def rotate_api_key(
     new_hash = hash_api_key(new_api_key)
 
     # Store old hash in Redis with 48h grace period
+    from ai_driven.config import get_settings
     grace_ttl = int(timedelta(hours=48).total_seconds())
     settings = get_settings()
     try:
