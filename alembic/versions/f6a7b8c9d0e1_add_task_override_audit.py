@@ -98,18 +98,25 @@ def upgrade() -> None:
         ["task_id"],
     )
 
-    # --- 3. idempotent system team + member seeds ---
-    # Fixed UUIDs. Reused across all environments so reaper code can
-    # reference the constant without a bootstrap step. ON CONFLICT DO
-    # NOTHING guards the rare re-upgrade scenario on an already-seeded DB.
+    # --- 3. idempotent admin team + member seeds ---
+    # Fixed UUIDs — reaper code references these constants without a
+    # bootstrap step. ON CONFLICT DO NOTHING guards the rare re-upgrade
+    # scenario on an already-seeded DB.
+    #
+    # The api_key_hash is seeded as '__seed__' (a non-SHA256-shaped
+    # sentinel that cannot match any hashed input). Operators MUST rotate
+    # it out-of-band before this team is usable for auth — see
+    # docs/runbooks/orchestrator-phase2.md. The team doubles as the
+    # attribution target for background reapers (role='admin' so audit
+    # rows accurately label reaper-written entries as privileged actions).
     op.execute(
         sa.text(
             """
             INSERT INTO teams (id, name, api_key_hash, claude_provider,
                                settings_json, is_active, max_concurrent_tasks,
                                created_at, updated_at)
-            VALUES (:tid, 'system', '__system__', 'anthropic',
-                    '{}'::json, true, 5, now(), now())
+            VALUES (:tid, 'admin', '__seed__', 'anthropic',
+                    '{}'::json, true, 10, now(), now())
             ON CONFLICT (id) DO NOTHING
             """
         ).bindparams(tid=SYSTEM_TEAM_ID)
@@ -119,7 +126,7 @@ def upgrade() -> None:
             """
             INSERT INTO team_members (id, team_id, email, role,
                                       api_key_hash, is_active, created_at)
-            VALUES (:mid, :tid, 'system@ai-driven.local', 'admin',
+            VALUES (:mid, :tid, 'admin@ai-driven.local', 'admin',
                     NULL, true, now())
             ON CONFLICT (id) DO NOTHING
             """
