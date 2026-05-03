@@ -263,3 +263,74 @@ class TaskOverrideAudit(Base):
     __table_args__ = (
         sa.Index("ix_task_override_audit_task_id", "task_id"),
     )
+
+
+class UserScmConnection(Base):
+    """Per-user OAuth connection to GitHub / Bitbucket (PR 1).
+
+    One row per (team_member_id, provider). Tokens are stored as Fernet
+    ciphertext in BYTEA columns; decryption is handled in
+    ``auth/scm_tokens.py``. ``team_id`` is denormalized from
+    ``team_members.team_id`` to support the
+    ``(team_id, provider, scm_user_id)`` uniqueness guard — the
+    invariant is that ``team_members.team_id`` is immutable.
+
+    See migration ``a2b3c4d5e6f7_user_scm_connections.py`` for the
+    authoritative schema.
+    """
+
+    __tablename__ = "user_scm_connections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    team_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("teams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    team_member_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("team_members.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    scm_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    scm_username: Mapped[str] = mapped_column(String(128), nullable=False)
+    scm_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    access_token_enc: Mapped[bytes] = mapped_column(
+        sa.LargeBinary, nullable=False
+    )
+    refresh_token_enc: Mapped[bytes | None] = mapped_column(
+        sa.LargeBinary, nullable=True
+    )
+    scope: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    connected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    team_member: Mapped[TeamMember] = relationship()
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "team_member_id", "provider", name="uq_member_provider"
+        ),
+        sa.UniqueConstraint(
+            "team_id", "provider", "scm_user_id",
+            name="uq_team_provider_scmuser",
+        ),
+        sa.CheckConstraint(
+            "provider IN ('github', 'bitbucket')", name="ck_provider"
+        ),
+        sa.Index("ix_user_scm_connections_member", "team_member_id"),
+        sa.Index("ix_user_scm_connections_team", "team_id"),
+    )

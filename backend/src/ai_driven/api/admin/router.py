@@ -56,6 +56,11 @@ router.include_router(_artifacts_router)
 from ai_driven.api.admin.override_audit import router as _override_audit_router  # noqa: E402
 router.include_router(_override_audit_router)
 
+# SCM OAuth Connections PR 1: /me/connections (list/delete/test). Admin
+# surface, same mount pattern as the other admin sub-routers.
+from ai_driven.api.admin.connections import router as _connections_router  # noqa: E402
+router.include_router(_connections_router)
+
 # ---- Validation constants ----
 _FULL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
 _VALID_SCM_TYPES = {"github", "bitbucket"}

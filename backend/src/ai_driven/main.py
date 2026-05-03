@@ -13,6 +13,7 @@ from ai_driven.api.webhooks.jira import router as jira_webhook_router
 from ai_driven.api.webhooks.datadog import router as datadog_webhook_router
 from ai_driven.api.webhooks.slack import router as slack_webhook_router
 from ai_driven.api.auth.router import router as auth_router
+from ai_driven.api.auth.scm_oauth import router as scm_oauth_router
 from ai_driven.api.chat.router import router as chat_router
 from ai_driven.api.admin.router import router as admin_router
 from ai_driven.api.error_handlers import register_error_handlers
@@ -48,6 +49,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
     setup_logging(settings)
     setup_tracing(settings)
+    # SCM OAuth: scrub ``code=<value>`` from uvicorn access logs so the
+    # OAuth authorization code doesn't end up in log aggregation.
+    # Attach here (not in setup_logging) because uvicorn wires the
+    # ``uvicorn.access`` logger at startup; earlier attachment risks
+    # being overwritten by uvicorn's own handler configuration.
+    import logging as _logging
+    from ai_driven.observability.log_scrub import ScrubOAuthCodeFilter
+    _logging.getLogger("uvicorn.access").addFilter(ScrubOAuthCodeFilter())
     await init_db()
     if settings.debug:
         await _ensure_debug_team()
@@ -104,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(datadog_webhook_router, prefix="/webhooks/datadog", tags=["webhooks"])
     app.include_router(slack_webhook_router, prefix="/webhooks/slack", tags=["webhooks"])
     app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+    app.include_router(scm_oauth_router, prefix="/api/auth/scm", tags=["auth", "scm-oauth"])
     app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
     app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
 

@@ -30,6 +30,11 @@ PUBLIC_PATHS = {
     # already invalid.
     "/api/auth/login",
     "/api/auth/logout",
+    # SCM OAuth callbacks — the provider's redirect has no way to carry a
+    # session cookie. State parameter is the sole auth. Literal strings
+    # (not templates) because startswith matches literally.
+    "/api/auth/scm/github/callback",
+    "/api/auth/scm/bitbucket/callback",
 }
 
 # Redis cache TTL for team lookups (seconds)

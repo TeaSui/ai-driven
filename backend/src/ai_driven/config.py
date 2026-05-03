@@ -3,7 +3,7 @@
 from enum import Enum
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -245,6 +245,28 @@ class Settings(BaseSettings):
     github_token: str = ""
     bitbucket_username: str = ""
     bitbucket_app_password: str = ""
+
+    # SCM OAuth (per-user connection plumbing, PR 1 of the OAuth feature).
+    # ``scm_token_key`` (dev) holds the current Fernet key as a url-safe
+    # base64 string. ``scm_token_key_prior_keys`` is a list of older keys
+    # accepted for decryption during rotation (MultiFernet). In prod,
+    # ``scm_token_key_secret_arn`` takes precedence — the key lives in
+    # AWS Secrets Manager. Empty-string defaults mean "no key loaded";
+    # the OAuth flow raises at runtime rather than at import if a route
+    # actually needs the key.
+    scm_token_key: str = ""
+    scm_token_key_prior_keys: list[str] = []
+    scm_token_key_secret_arn: str = ""
+    # OAuth App credentials — registered once per env with the provider.
+    # See docs/runbooks/07-scm-oauth.md for registration steps.
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: SecretStr = SecretStr("")
+    bitbucket_oauth_client_id: str = ""
+    bitbucket_oauth_client_secret: SecretStr = SecretStr("")
+    # Prepended to the callback path when building the authorize-redirect
+    # URL. Dev: http://localhost:8888 . Prod: https://<domain>. Must be
+    # registered as a callback URL on the OAuth App at the provider.
+    scm_oauth_redirect_base: str = "http://localhost:8888"
 
     # DataDog
     dd_service: str = "ai-driven"
