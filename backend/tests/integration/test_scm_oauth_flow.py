@@ -275,11 +275,12 @@ def test_callback_state_is_single_use(fake_redis, fernet_key):
         f"/api/auth/scm/github/callback?code=abc&state={state}",
         follow_redirects=False,
     )
-    assert second.status_code == 400
-    assert second.json()["error"]["code"] == "OAUTH_INVALID_STATE"
+    assert second.status_code == 302
+    assert "error=OAUTH_INVALID_STATE" in second.headers["location"]
+    assert second.headers["location"].startswith("/dashboard/settings/connections")
 
 
-def test_callback_unknown_state_returns_400(fake_redis, fernet_key):
+def test_callback_unknown_state_redirects_with_error(fake_redis, fernet_key):
     session = _make_session()
     client = _make_app(session)
 
@@ -287,11 +288,11 @@ def test_callback_unknown_state_returns_400(fake_redis, fernet_key):
         "/api/auth/scm/github/callback?code=abc&state=never-existed",
         follow_redirects=False,
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"]["code"] == "OAUTH_INVALID_STATE"
+    assert resp.status_code == 302
+    assert "error=OAUTH_INVALID_STATE" in resp.headers["location"]
 
 
-def test_callback_missing_code_returns_400(fake_redis, fernet_key):
+def test_callback_missing_code_redirects_with_error(fake_redis, fernet_key):
     session = _make_session()
     client = _make_app(session)
 
@@ -299,11 +300,11 @@ def test_callback_missing_code_returns_400(fake_redis, fernet_key):
         "/api/auth/scm/github/callback?state=anything",
         follow_redirects=False,
     )
-    assert resp.status_code == 400
-    assert resp.json()["error"]["code"] == "OAUTH_INVALID_REQUEST"
+    assert resp.status_code == 302
+    assert "error=OAUTH_INVALID_REQUEST" in resp.headers["location"]
 
 
-def test_callback_token_exchange_failure_returns_502(fake_redis, fernet_key):
+def test_callback_token_exchange_failure_redirects_with_error(fake_redis, fernet_key):
     session = _make_session()
     client = _make_app(session)
 
@@ -322,5 +323,5 @@ def test_callback_token_exchange_failure_returns_502(fake_redis, fernet_key):
             follow_redirects=False,
         )
 
-    assert resp.status_code == 502
-    assert resp.json()["error"]["code"] == "OAUTH_TOKEN_EXCHANGE_FAILED"
+    assert resp.status_code == 302
+    assert "error=OAUTH_TOKEN_EXCHANGE_FAILED" in resp.headers["location"]

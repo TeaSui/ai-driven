@@ -68,8 +68,30 @@ _CONNECTED_REDIRECT = "/dashboard/settings/connections?connected={provider}"
 _FAILED_REDIRECT = "/dashboard/settings/connections?error={reason}"
 
 
+def _redirect_error(code: str, extra: dict[str, str] | None = None) -> RedirectResponse:
+    """302 back to the settings page with ?error=CODE (+ optional params).
+
+    Browser-facing errors during the callback (state invalid, token
+    exchange failed, identity already claimed) MUST redirect to the UI
+    so the user sees a toast rather than a raw JSON error page.
+    """
+    from urllib.parse import urlencode
+    params: dict[str, str] = {"error": code}
+    if extra:
+        params.update(extra)
+    return RedirectResponse(
+        url=f"/dashboard/settings/connections?{urlencode(params)}",
+        status_code=302,
+    )
+
+
 def _error(status: int, code: str, message: str, details: list[dict] | None = None) -> JSONResponse:
-    """Canonical error envelope — matches api/_shared.py convention."""
+    """Canonical error envelope — matches api/_shared.py convention.
+
+    Use for non-callback routes (authorize validation, /me/connections
+    endpoints). Callback paths should use ``_redirect_error`` so errors
+    land in the UI toast instead of a broken JSON tab.
+    """
     return JSONResponse(
         status_code=status,
         content={
@@ -281,43 +303,27 @@ async def callback(
     """
     err = _validate_provider(provider)
     if err:
-        return _error(400, err, f"Unknown SCM provider: {provider}")
+        return _redirect_error(err)
 
     code = request.query_params.get("code") or ""
     state = request.query_params.get("state") or ""
     if not code or not state:
-        return _error(
-            400,
-            "OAUTH_INVALID_REQUEST",
-            "Missing required 'code' or 'state' query parameter.",
-        )
+        return _redirect_error("OAUTH_INVALID_REQUEST")
 
     payload = await consume_state(state)
     if payload is None:
-        return _error(
-            400,
-            "OAUTH_INVALID_STATE",
-            "Invalid or expired authorization request. Please retry the connect flow.",
-        )
+        return _redirect_error("OAUTH_INVALID_STATE")
 
     # Defensive: state carries the provider we asked for; mismatched
     # provider in the redirect path means either tampering or a user
     # clicking an old link. Treat as invalid state.
     if payload.get("provider") != provider:
-        return _error(
-            400,
-            "OAUTH_INVALID_STATE",
-            "State provider mismatch.",
-        )
+        return _redirect_error("OAUTH_INVALID_STATE")
 
     member_id = payload.get("memberId")
     team_id = payload.get("teamId")
     if not member_id or not team_id:
-        return _error(
-            400,
-            "OAUTH_INVALID_STATE",
-            "State payload missing member or team identity.",
-        )
+        return _redirect_error("OAUTH_INVALID_STATE")
 
     redirect_uri = _resolve_redirect_uri(provider)
     try:
@@ -327,20 +333,12 @@ async def callback(
             token_json = await _bitbucket_exchange_code(code, redirect_uri)
     except httpx.HTTPError as ex:
         logger.warning("oauth_token_exchange_failed provider=%s err=%s", provider, ex)
-        return _error(
-            502,
-            "OAUTH_TOKEN_EXCHANGE_FAILED",
-            f"{provider} rejected the authorization code.",
-        )
+        return _redirect_error("OAUTH_TOKEN_EXCHANGE_FAILED")
 
     access_token = token_json.get("access_token")
     if not access_token:
         logger.warning("oauth_token_missing provider=%s payload_keys=%s", provider, list(token_json.keys()))
-        return _error(
-            502,
-            "OAUTH_TOKEN_EXCHANGE_FAILED",
-            f"{provider} did not return an access_token.",
-        )
+        return _redirect_error("OAUTH_TOKEN_EXCHANGE_FAILED")
     refresh_token = token_json.get("refresh_token")
     granted_scope = str(token_json.get("scope") or payload.get("requestedScope") or "")
     expires_in = token_json.get("expires_in")
@@ -355,19 +353,11 @@ async def callback(
             user_json = await _bitbucket_fetch_user(access_token)
     except httpx.HTTPError as ex:
         logger.warning("oauth_user_fetch_failed provider=%s err=%s", provider, ex)
-        return _error(
-            502,
-            "OAUTH_USER_FETCH_FAILED",
-            f"Could not fetch user profile from {provider}.",
-        )
+        return _redirect_error("OAUTH_USER_FETCH_FAILED")
 
     scm_user_id, scm_username, scm_email = _extract_user_fields(provider, user_json)
     if not scm_user_id or not scm_username:
-        return _error(
-            502,
-            "OAUTH_USER_FETCH_FAILED",
-            f"{provider} returned an incomplete user profile.",
-        )
+        return _redirect_error("OAUTH_USER_FETCH_FAILED")
 
     # --- Encrypt + upsert ---
     try:
@@ -375,11 +365,7 @@ async def callback(
         refresh_enc = encrypt_token(refresh_token) if refresh_token else None
     except RuntimeError as ex:
         logger.error("scm_token_key_unavailable: %s", ex)
-        return _error(
-            500,
-            "INTERNAL_ERROR",
-            "Token encryption is not available in this environment.",
-        )
+        return _redirect_error("OAUTH_NOT_CONFIGURED")
 
     import uuid as _uuid
 
@@ -429,23 +415,15 @@ async def callback(
     except IntegrityError as ex:
         await session.rollback()
         # Second unique constraint — another member of the same team is
-        # already connected as this SCM identity. Never fall through.
+        # already connected as this SCM identity. 302 back to the UI so
+        # the toast can render with scmUsername interpolated.
         if "uq_team_provider_scmuser" in str(ex.orig) or "uq_team_provider_scmuser" in str(ex):
-            return _error(
-                409,
+            return _redirect_error(
                 "SCM_IDENTITY_CLAIMED",
-                (
-                    f"Another member of your team is already connected "
-                    f"as this {provider} user."
-                ),
-                [{"scmUsername": scm_username}],
+                extra={"scmUsername": scm_username},
             )
         logger.warning("oauth_callback_integrity_error: %s", ex)
-        return _error(
-            500,
-            "INTERNAL_ERROR",
-            "Failed to persist SCM connection.",
-        )
+        return _redirect_error("INTERNAL_ERROR")
 
     return RedirectResponse(
         url=_CONNECTED_REDIRECT.format(provider=provider),

@@ -145,7 +145,10 @@ def test_identity_collision_returns_409(monkeypatch):
                 follow_redirects=False,
             )
 
-    assert resp2.status_code == 409, resp2.text
-    body = resp2.json()
-    assert body["error"]["code"] == "SCM_IDENTITY_CLAIMED"
-    assert body["error"]["details"][0]["scmUsername"] == "shared-user"
+    # Integrity conflict now redirects back to the UI so the toast can
+    # render the interpolated scmUsername. (See PR 1 follow-up commit.)
+    assert resp2.status_code == 302, resp2.text
+    loc = resp2.headers["location"]
+    assert loc.startswith("/dashboard/settings/connections")
+    assert "error=SCM_IDENTITY_CLAIMED" in loc
+    assert "scmUsername=shared-user" in loc
