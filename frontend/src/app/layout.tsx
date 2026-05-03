@@ -33,7 +33,12 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="gtx-app gtx-light gtx-density-balanced" style={{ height: '100%' }}>
+    // suppressHydrationWarning: the themeScript below mutates <html class=...>
+    // before React hydrates (reads localStorage + OS preference to pick
+    // dark/light). That's intentional — it prevents a flash of wrong theme.
+    // React otherwise warns that server ("gtx-light") ≠ client ("gtx-dark"),
+    // but only for THIS element's attributes; descendants still hydrate normally.
+    <html lang="en" className="gtx-app gtx-light gtx-density-balanced" style={{ height: '100%' }} suppressHydrationWarning>
       <head>
         {/* Blocking theme script — must execute before any paint to prevent flash of wrong theme */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
