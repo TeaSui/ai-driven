@@ -48,6 +48,17 @@ worker:
 frontend-dev:
 	cd frontend && npm run dev
 
+# Kill any running dev server, nuke the build cache, and start fresh.
+# Use this whenever chunks 404 or a hydration/module-not-found loop
+# appears in the dev console — it's the Next.js dev cache getting out
+# of sync with file-system renames from PR-level refactors.
+frontend-clean:
+	@pkill -f "next dev --port 3000" 2>/dev/null || true
+	@pkill -f "next-server" 2>/dev/null || true
+	@sleep 1
+	@rm -rf frontend/.next frontend/node_modules/.cache
+	@echo "Cleaned. Run 'make frontend-dev' to restart."
+
 docker-up:
 	cd ops/docker && docker compose up -d
 
