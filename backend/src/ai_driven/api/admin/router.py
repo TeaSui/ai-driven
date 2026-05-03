@@ -2206,6 +2206,108 @@ async def get_review_commits(
     }
 
 
+# ---- Review actions (approve / request-changes) ----
+
+
+class ReviewActionRequest(CamelModel):
+    comment: str = ""
+
+
+class ReviewActionResult(CamelModel):
+    id: str
+    status: str  # "approved" | "changes_requested"
+
+
+async def _apply_review_action(
+    review_id: str,
+    action: str,  # "approve" | "request_changes"
+    comment: str,
+    member: TeamMemberInfo,
+    session: AsyncSession,
+) -> ReviewActionResult:
+    """Shared SCM-call + DB-update path for the two review action endpoints."""
+    from ai_driven.scm.factory import get_scm_client_from_settings
+
+    review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
+        review_id, session,
+    )
+    # Cross-team 404 (matches get_review / reviewers / checks pattern).
+    if (
+        not _is_debug_principal(member)
+        and review.task is not None
+        and str(review.task.team_id) != member.team_id
+    ):
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    scm = get_scm_client_from_settings(scm_type)
+    try:
+        if action == "approve":
+            await scm.approve_pr(repo_full_name, pr_number, comment)
+            new_status = "approved"
+        elif action == "request_changes":
+            await scm.request_changes(repo_full_name, pr_number, comment)
+            new_status = "changes_requested"
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("review_action_scm_failed action=%s err=%s", action, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"SCM {action} failed: {str(exc)[:200]}",
+        )
+    finally:
+        await scm.close()
+
+    # Persist new status on the Review row so the UI's next fetch reflects truth.
+    from ai_driven.db.postgres.models import Review as ReviewModel
+    from sqlalchemy import update as sql_update
+    await session.execute(
+        sql_update(ReviewModel)
+        .where(ReviewModel.id == review.id)
+        .values(status=new_status)
+    )
+    await session.commit()
+
+    return ReviewActionResult(id=str(review.id), status=new_status)
+
+
+@router.post("/reviews/{review_id}/approve", response_model=ReviewActionResult)
+async def approve_review(
+    review_id: str,
+    body: ReviewActionRequest | None = None,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> ReviewActionResult:
+    """Submit an APPROVE review on the underlying PR and mark the Review row approved.
+
+    Cross-team 404 via linked Task.team_id. Returns 502 when the SCM call
+    fails (token expired, rate-limited, repo archived).
+    """
+    comment = (body.comment if body else "") or ""
+    return await _apply_review_action(
+        review_id, "approve", comment, member, session,
+    )
+
+
+@router.post("/reviews/{review_id}/request-changes", response_model=ReviewActionResult)
+async def request_changes_on_review(
+    review_id: str,
+    body: ReviewActionRequest | None = None,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> ReviewActionResult:
+    """Submit a REQUEST_CHANGES review on the underlying PR and mark the
+    Review row ``changes_requested``. Same auth + error semantics as
+    approve_review.
+    """
+    comment = (body.comment if body else "") or ""
+    return await _apply_review_action(
+        review_id, "request_changes", comment, member, session,
+    )
+
+
 # ---- Insights ----
 
 

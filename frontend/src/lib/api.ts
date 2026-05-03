@@ -215,26 +215,31 @@ export interface ReviewActionResult {
 /**
  * Approve a review.
  * Calls POST /api/admin/reviews/{id}/approve.
- * Backend endpoint is stubbed — returns optimistic success until implemented.
+ * Submits an APPROVE review to the underlying PR via the SCM client and
+ * marks the Review row ``approved`` in the DB. Errors propagate so the
+ * optimistic UI update can roll back.
  */
-export async function approveReview(id: string): Promise<ReviewActionResult> {
-  const res = await authFetch(`/api/admin/reviews/${id}/approve`, { method: 'POST' })
-  if (res.status === 404 || res.status === 405) {
-    // Stub: endpoint not yet implemented — return optimistic result
-    return { id, status: 'approved' }
-  }
+export async function approveReview(
+  id: string,
+  comment: string = '',
+): Promise<ReviewActionResult> {
+  const res = await authFetch(`/api/admin/reviews/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment }),
+  })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.detail ?? `Approve failed: ${res.status}`)
+    throw new Error(err?.detail ?? err?.error?.message ?? `Approve failed: ${res.status}`)
   }
-  const json = await res.json().catch(() => ({}))
-  return json ?? { id, status: 'approved' }
+  return (await res.json()) as ReviewActionResult
 }
 
 /**
  * Request changes on a review.
- * Calls POST /api/admin/reviews/{id}/request-changes with optional comment.
- * Backend endpoint is stubbed — returns optimistic success until implemented.
+ * Submits a REQUEST_CHANGES review to the underlying PR via the SCM client
+ * and marks the Review row ``changes_requested``. Errors propagate for
+ * optimistic rollback.
  */
 export async function requestChanges(
   id: string,
@@ -245,16 +250,11 @@ export async function requestChanges(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ comment }),
   })
-  if (res.status === 404 || res.status === 405) {
-    // Stub: endpoint not yet implemented — return optimistic result
-    return { id, status: 'changes_requested' }
-  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    throw new Error(err?.detail ?? `Request changes failed: ${res.status}`)
+    throw new Error(err?.detail ?? err?.error?.message ?? `Request changes failed: ${res.status}`)
   }
-  const json = await res.json().catch(() => ({}))
-  return json ?? { id, status: 'changes_requested' }
+  return (await res.json()) as ReviewActionResult
 }
 
 export async function getInsights(range: string): Promise<InsightsData> {
