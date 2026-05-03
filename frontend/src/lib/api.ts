@@ -636,3 +636,87 @@ export async function overrideTaskBlock(
   const json = await res.json()
   return (json?.data ?? json) as OverrideResponseData
 }
+
+// ── SCM Connections (PR 2 — Settings > Connections) ──────────────────────────
+
+export type ScmProvider = 'github' | 'bitbucket'
+
+/**
+ * A caller's OAuth connection to a source-control provider. Returned by
+ * `GET /api/admin/me/connections`, which on this router returns a BARE
+ * list[ConnectionResponse] — not wrapped in `{data, meta}`. The DELETE and
+ * `/test` endpoints on the same router DO use the envelope, so the helpers
+ * below tolerate both shapes with `json?.data ?? json`.
+ */
+export interface Connection {
+  id: string
+  provider: ScmProvider
+  scmUsername: string
+  scmEmail: string | null
+  /** Space-separated scope string, e.g. "public_repo read:user" or
+   *  "repo read:user". Classify repo-access level via `includes("repo")`
+   *  — the full-access `repo` scope is a superset of `public_repo`. */
+  scope: string
+  /** ISO timestamp; null when the token is non-expiring (GitHub OAuth App). */
+  expiresAt: string | null
+  connectedAt: string
+  lastUsedAt: string | null
+}
+
+export interface ConnectionTestResult {
+  ok: boolean
+  scmUsername?: string
+  scmEmail?: string
+  reason?: string
+}
+
+/**
+ * Fetch the caller's SCM connections. Backend returns a bare array, not
+ * `{data, meta}` — see `src/ai_driven/api/admin_connections.py`.
+ */
+export async function getMyConnections(): Promise<Connection[]> {
+  const res = await authFetch('/api/admin/me/connections')
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(
+      err?.detail ?? err?.error?.message ?? `Request failed: ${res.status}`,
+    )
+  }
+  const json = await res.json()
+  // Defensive: accept both bare-array (current backend) and wrapped shapes.
+  return (Array.isArray(json) ? json : json?.data ?? []) as Connection[]
+}
+
+/** Revoke the caller's connection for a given provider. */
+export async function disconnectConnection(provider: ScmProvider): Promise<void> {
+  const res = await authFetch(`/api/admin/me/connections/${provider}`, {
+    method: 'DELETE',
+  })
+  if (!res.ok && res.status !== 204) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(
+      err?.detail ?? err?.error?.message ?? `Request failed: ${res.status}`,
+    )
+  }
+}
+
+/**
+ * Ping the provider with the caller's token to check whether it's still
+ * valid. Unwraps the `{data, meta}` envelope but falls back to the bare
+ * shape so a backend shim change won't break the UI.
+ */
+export async function testConnection(
+  provider: ScmProvider,
+): Promise<ConnectionTestResult> {
+  const res = await authFetch(`/api/admin/me/connections/${provider}/test`, {
+    method: 'POST',
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(
+      err?.detail ?? err?.error?.message ?? `Request failed: ${res.status}`,
+    )
+  }
+  const json = await res.json()
+  return (json?.data ?? json) as ConnectionTestResult
+}

@@ -199,10 +199,14 @@ function buildNavItems(summary?: DashboardSummary): NavItem[] {
 }
 
 const SUB_ITEMS: SubNavItem[] = [
-  { id: 'repos', label: 'Repositories', href: '/dashboard/admin/repos', icon: <IconFolder size={14}/> },
-  { id: 'rules', label: 'Review rules', href: '/dashboard/admin/rules', icon: <IconShield size={14}/> },
-  { id: 'keys',  label: 'API keys',      href: '/dashboard/admin/api-keys', icon: <IconKey size={14}/> },
-  { id: 'runs',  label: 'Run history',  href: '/dashboard/admin/runs',  icon: <IconClock size={14}/> },
+  { id: 'repos',    label: 'Repositories', href: '/dashboard/admin/repos',    icon: <IconFolder size={14}/> },
+  { id: 'rules',    label: 'Review rules', href: '/dashboard/admin/rules',    icon: <IconShield size={14}/> },
+  { id: 'keys',     label: 'API keys',     href: '/dashboard/admin/api-keys', icon: <IconKey size={14}/> },
+  { id: 'runs',     label: 'Run history',  href: '/dashboard/admin/runs',     icon: <IconClock size={14}/> },
+  // PR 2: Settings shell. Kept in the Configure sub-nav (not wired through
+  // the bottom-left gear icon, which is the sign-out button — see the
+  // `sidebar-sign-out` testid below).
+  { id: 'settings', label: 'Settings',     href: '/dashboard/settings',       icon: <IconSettings size={13}/> },
 ]
 
 function NavRow({
