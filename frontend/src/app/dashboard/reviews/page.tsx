@@ -24,6 +24,7 @@ import {
   getReviewReviewers,
   getReviewChecks,
   getReviewCommits,
+  ReviewActionError,
   type ReviewDetail,
   type PRReviewer,
   type PRCheck,
@@ -1162,22 +1163,52 @@ export default function ReviewsPage() {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
+  // Surface PR 3's 412 precondition codes as an actionable toast. The
+  // existing ``notify()`` helper takes ``(message, tone)`` only — no
+  // action-link support — so we fold the "Go to Settings > Connections"
+  // CTA into the message text itself. When notify() grows an action
+  // API, this is the one place to update.
+  const handleReviewActionError = useCallback((ex: unknown) => {
+    if (ex instanceof ReviewActionError) {
+      if (ex.code === 'SCM_NOT_CONNECTED' || ex.code === 'SCM_RECONNECT_REQUIRED') {
+        notify(
+          `${ex.message} Go to Settings > Connections to connect.`,
+          'danger',
+          6000,
+        )
+        return
+      }
+      if (ex.code === 'SCM_SCOPE_UPGRADE_REQUIRED') {
+        notify(
+          'Private-repo action requires full repo access. Upgrade at Settings > Connections.',
+          'danger',
+          6000,
+        )
+        return
+      }
+      notify(ex.message || 'Action failed — please try again.', 'danger')
+      return
+    }
+    notify('Action failed — please try again.', 'danger')
+  }, [])
+
   const handleApprove = useCallback(
     async (id: string) => {
       setStatusOverrides((prev) => ({ ...prev, [id]: 'approved' }))
       try {
         await approveReview(id)
         swrMutate('reviews')
-      } catch {
+      } catch (ex) {
         // Rollback optimistic update on error
         setStatusOverrides((prev) => {
           const next = { ...prev }
           delete next[id]
           return next
         })
+        handleReviewActionError(ex)
       }
     },
-    [],
+    [handleReviewActionError],
   )
 
   const handleRequestChanges = useCallback(
@@ -1186,15 +1217,16 @@ export default function ReviewsPage() {
       try {
         await requestChanges(id)
         swrMutate('reviews')
-      } catch {
+      } catch (ex) {
         setStatusOverrides((prev) => {
           const next = { ...prev }
           delete next[id]
           return next
         })
+        handleReviewActionError(ex)
       }
     },
-    [],
+    [handleReviewActionError],
   )
 
   const handleOpen = useCallback((id: string) => {

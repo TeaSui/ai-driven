@@ -213,11 +213,57 @@ export interface ReviewActionResult {
 }
 
 /**
+ * Structured error thrown from approveReview / requestChanges so callers
+ * can branch on the canonical ``{"error": {"code": ...}}`` envelope —
+ * specifically the 412 precondition codes from PR 3:
+ * ``SCM_NOT_CONNECTED`` / ``SCM_RECONNECT_REQUIRED`` /
+ * ``SCM_SCOPE_UPGRADE_REQUIRED``. Older `new Error(message)` callers
+ * still get the same ``.message`` they used to read.
+ */
+export class ReviewActionError extends Error {
+  code: string
+  details: Array<Record<string, unknown>>
+  httpStatus: number
+
+  constructor(
+    code: string,
+    message: string,
+    details: Array<Record<string, unknown>> = [],
+    httpStatus: number = 0,
+  ) {
+    super(message)
+    this.name = 'ReviewActionError'
+    this.code = code
+    this.details = details
+    this.httpStatus = httpStatus
+  }
+}
+
+async function _throwReviewActionError(
+  res: Response,
+  fallbackPrefix: string,
+): Promise<never> {
+  const err = await res.json().catch(() => ({}))
+  const envelope = (err?.error ?? {}) as {
+    code?: string
+    message?: string
+    details?: Array<Record<string, unknown>>
+  }
+  throw new ReviewActionError(
+    envelope.code ?? `HTTP_${res.status}`,
+    envelope.message ?? err?.detail ?? `${fallbackPrefix}: ${res.status}`,
+    envelope.details ?? [],
+    res.status,
+  )
+}
+
+/**
  * Approve a review.
  * Calls POST /api/admin/reviews/{id}/approve.
  * Submits an APPROVE review to the underlying PR via the SCM client and
- * marks the Review row ``approved`` in the DB. Errors propagate so the
- * optimistic UI update can roll back.
+ * marks the Review row ``approved`` in the DB. Errors propagate as
+ * ``ReviewActionError`` so the caller can distinguish 412 precondition
+ * codes (connect / reconnect / scope-upgrade) from generic failures.
  */
 export async function approveReview(
   id: string,
@@ -229,8 +275,7 @@ export async function approveReview(
     body: JSON.stringify({ comment }),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err?.detail ?? err?.error?.message ?? `Approve failed: ${res.status}`)
+    await _throwReviewActionError(res, 'Approve failed')
   }
   return (await res.json()) as ReviewActionResult
 }
@@ -238,8 +283,8 @@ export async function approveReview(
 /**
  * Request changes on a review.
  * Submits a REQUEST_CHANGES review to the underlying PR via the SCM client
- * and marks the Review row ``changes_requested``. Errors propagate for
- * optimistic rollback.
+ * and marks the Review row ``changes_requested``. Errors propagate as
+ * ``ReviewActionError`` — same shape / codes as :func:`approveReview`.
  */
 export async function requestChanges(
   id: string,
@@ -251,8 +296,7 @@ export async function requestChanges(
     body: JSON.stringify({ comment }),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err?.detail ?? err?.error?.message ?? `Request changes failed: ${res.status}`)
+    await _throwReviewActionError(res, 'Request changes failed')
   }
   return (await res.json()) as ReviewActionResult
 }

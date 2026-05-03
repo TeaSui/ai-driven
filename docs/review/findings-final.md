@@ -81,6 +81,19 @@ Requires a UX pass on pipeline bubbles; not touched by Phase 2.
 ### 3.8 Reviews approval queue — 🔲 STILL OPEN (P2)
 Not touched.
 
+### ~~3.8b Review actions used bot token (attribution gap)~~ — ✅ FIXED (2026-05-03)
+Pre-PR 3, `POST /api/admin/reviews/{id}/approve` + `/request-changes` called
+`get_scm_client_from_settings(scm_type)`, which uses the shared
+`AI_DRIVEN_GITHUB_TOKEN` bot credential — meaning every human-initiated
+approve/request-changes was audited on the provider as "ai-driven bot",
+and the GitHub "no self-review" rule surfaced as confusing UX friction
+on the original review-action commit (`db19346`). PR 3 of the SCM OAuth
+Connections feature swaps in the caller's per-user token from
+`user_scm_connections`; actions now carry the human's GitHub identity.
+Missing/expired connection surfaces as 412 `SCM_NOT_CONNECTED` /
+`SCM_RECONNECT_REQUIRED` with a Connect-in-Settings CTA. Bitbucket
+OAuth-bearer action path is stubbed (412) pending a follow-up.
+
 ### 3.9 Emergency-stop / kill-switch — 🔲 STILL OPEN (P2)
 No admin toggle anywhere. Principle from `vision/00-vision.md` ("reversible by default"). Still P2.
 
@@ -173,6 +186,7 @@ The original plan's items 1-6 are done. What remains, ordered by leverage:
 | H | Emergency-stop kill-switch (3.9) | P2 | 4 h | admin endpoint + UI toggle |
 | I | Sidebar label↔route alignment (2.3) | P2 | 30 m | `sidebar.tsx:195-196` |
 | J | APM deep-link to DataDog trace (3.10) | P2 | 2 h | admin task detail + env-driven trace URL |
+| K | ✅ SCM OAuth Connections PR 3 closes the user-tokened review-action gap (3.8b) — approve/request-changes now use the caller's GitHub token via `user_scm_connections`, 412 + Connect CTA on missing. | P2 | done | `backend/src/ai_driven/api/admin/router.py`, `frontend/src/app/dashboard/reviews/page.tsx` |
 
 ### Later
 

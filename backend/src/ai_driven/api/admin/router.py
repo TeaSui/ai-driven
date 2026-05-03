@@ -2223,15 +2223,55 @@ class ReviewActionResult(CamelModel):
     status: str  # "approved" | "changes_requested"
 
 
+def _scm_error_response(
+    status: int, code: str, message: str, details: list | None = None
+) -> "JSONResponse":
+    """Canonical `{ "error": {...} }` envelope for the 412 precondition branches.
+
+    Kept local (not imported from api/_shared) so the tests can inspect
+    ``resp.json()["error"]["code"]`` verbatim without routing through
+    FastAPI's ``HTTPException.detail`` shape.
+    """
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=status,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "details": details or [],
+            }
+        },
+    )
+
+
 async def _apply_review_action(
     review_id: str,
     action: str,  # "approve" | "request_changes"
     comment: str,
     member: TeamMemberInfo,
     session: AsyncSession,
-) -> ReviewActionResult:
-    """Shared SCM-call + DB-update path for the two review action endpoints."""
-    from ai_driven.scm.factory import get_scm_client_from_settings
+) -> Any:
+    """Shared SCM-call + DB-update path for the two review action endpoints.
+
+    PR 3 refactor: instead of ``get_scm_client_from_settings`` (which
+    grabs the shared bot token) we load the *caller's* OAuth connection
+    from ``user_scm_connections`` and use that token. If the caller has
+    no connection — or it's expired / under-scoped — we return a 412
+    with the canonical ``{"error": {"code": ...}}`` envelope so the UI
+    can surface a "Connect in Settings" CTA.
+
+    Returns either a :class:`ReviewActionResult` (success) or a
+    :class:`JSONResponse` (412 precondition branches). FastAPI happily
+    passes ``JSONResponse`` through when the handler's return type is
+    permissive.
+    """
+    from ai_driven.auth.scm_tokens import decrypt_token
+    from ai_driven.db.postgres.models import UserScmConnection
+    from ai_driven.scm.exceptions import SCMError, SCMNotFoundError
+    from ai_driven.scm.factory import get_scm_client
+    from ai_driven.scm.oauth_helpers import has_scope
 
     review, repo_full_name, pr_number, scm_type = await _resolve_review_scm_target(
         review_id, session,
@@ -2244,18 +2284,156 @@ async def _apply_review_action(
     ):
         raise HTTPException(status_code=404, detail="Review not found")
 
-    scm = get_scm_client_from_settings(scm_type)
+    if action not in ("approve", "request_changes"):
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+
+    # ---- Load caller's OAuth connection for this provider. -----------------
+    try:
+        member_uuid = uuid.UUID(member.member_id)
+    except (ValueError, TypeError):
+        # Debug principal or malformed member id — no per-user connection
+        # is possible. Fall through to SCM_NOT_CONNECTED so the UI can
+        # surface "connect your account" rather than a 500.
+        member_uuid = None
+
+    conn = None
+    if member_uuid is not None:
+        conn_result = await session.execute(
+            select(UserScmConnection).where(
+                UserScmConnection.team_member_id == member_uuid,
+                UserScmConnection.provider == scm_type,
+            )
+        )
+        conn = conn_result.scalar_one_or_none()
+
+    if conn is None:
+        return _scm_error_response(
+            status=412,
+            code="SCM_NOT_CONNECTED",
+            message=f"Connect your {scm_type} account in Settings to use this action.",
+            details=[{
+                "provider": scm_type,
+                "connectUrl": f"/api/auth/scm/{scm_type}/authorize?scope=public_repo",
+            }],
+        )
+
+    # ---- Expiry handling. --------------------------------------------------
+    # NOTE(refresh-path): PR 1's brief defines ``RefreshOutcome`` but a
+    # full provider-side refresh-token exchange helper was not shipped.
+    # For PR 3 we stub the refresh path: if ``refresh_token_enc`` is set
+    # we would *want* to call the provider, acquire a Redis NX lock, and
+    # persist the new token — but without the shared helper we surface
+    # ``SCM_RECONNECT_REQUIRED`` in both (missing refresh token) and
+    # (refresh token present but unimplemented) cases. The user-visible
+    # fallback is identical: click Reconnect in Settings. TODO(pr-4):
+    # implement real refresh using oauth_helpers.RefreshOutcome.
+    if conn.expires_at is not None and conn.expires_at < datetime.now(timezone.utc):
+        reason = (
+            "refresh_expired"
+            if conn.refresh_token_enc is not None
+            else "no_refresh_supported"
+        )
+        return _scm_error_response(
+            status=412,
+            code="SCM_RECONNECT_REQUIRED",
+            message="Your SCM token has expired — reconnect in Settings.",
+            details=[{
+                "provider": scm_type,
+                "reason": reason,
+                "connectUrl": f"/api/auth/scm/{scm_type}/authorize?scope={conn.scope.split()[0] if conn.scope else 'public_repo'}",
+            }],
+        )
+
+    # ---- Decrypt token (request-scoped; never logged, never stored). ------
+    try:
+        plaintext_token = decrypt_token(conn.access_token_enc)
+    except Exception as exc:
+        # Decrypt failure means key rotation went wrong OR the row was
+        # written with a key we no longer hold. Treat as reconnect-
+        # required so the user isn't stuck.
+        logger.warning(
+            "review_action_decrypt_failed provider=%s member=%s err=%s",
+            scm_type, member.member_id, type(exc).__name__,
+        )
+        return _scm_error_response(
+            status=412,
+            code="SCM_RECONNECT_REQUIRED",
+            message="Your SCM token could not be read — reconnect in Settings.",
+            details=[{
+                "provider": scm_type,
+                "reason": "decrypt_failed",
+                "connectUrl": f"/api/auth/scm/{scm_type}/authorize?scope=public_repo",
+            }],
+        )
+
+    # ---- Per-user SCM client. Note: ``get_scm_client`` (explicit-creds
+    # variant) takes ``{"token": ...}`` for GitHub. Bitbucket needs
+    # ``{"username", "app_password"}`` which the OAuth flow does NOT
+    # provide — surfaced as 412 for now. (Bitbucket OAuth-bearer-token
+    # support is a follow-up; PR 3's brief focuses on GitHub.)
+    if scm_type == "bitbucket":
+        # TODO(pr-4): wire a Bitbucket OAuth-bearer SCM client so we can
+        # call approve_pr with the per-user token. For now, fall through
+        # to SCM_RECONNECT_REQUIRED so users aren't silently served the
+        # bot token.
+        return _scm_error_response(
+            status=412,
+            code="SCM_RECONNECT_REQUIRED",
+            message="Bitbucket per-user actions are not yet supported — reconnect in Settings.",
+            details=[{
+                "provider": scm_type,
+                "reason": "bitbucket_oauth_action_unsupported",
+                "connectUrl": f"/api/auth/scm/{scm_type}/authorize",
+            }],
+        )
+
+    scm = get_scm_client(scm_type, {"token": plaintext_token})
+    # Drop the plaintext from the local scope as soon as the client has it.
+    # ``scm`` owns the reference now; when it's closed the token drops too.
+    del plaintext_token
+
     try:
         if action == "approve":
             await scm.approve_pr(repo_full_name, pr_number, comment)
             new_status = "approved"
-        elif action == "request_changes":
+        else:
             await scm.request_changes(repo_full_name, pr_number, comment)
             new_status = "changes_requested"
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+    except SCMNotFoundError as exc:
+        # GitHub returns 404 when the token's scope doesn't cover a
+        # private repo. If the caller only has public_repo scope, surface
+        # this as a scope-upgrade request so the UI can send them back
+        # through ?scope=repo. If they already have ``repo``, it's a
+        # genuine 404 (wrong repo/PR) — map to 502.
+        if scm_type == "github" and not has_scope(conn.scope, "repo"):
+            logger.info(
+                "review_action_scope_upgrade provider=%s scope=%s",
+                scm_type, conn.scope,
+            )
+            return _scm_error_response(
+                status=412,
+                code="SCM_SCOPE_UPGRADE_REQUIRED",
+                message="Private-repo action requires full repo access.",
+                details=[{
+                    "provider": scm_type,
+                    "currentScope": conn.scope,
+                    "scopeNeeded": "repo",
+                    "connectUrl": f"/api/auth/scm/{scm_type}/authorize?scope=repo",
+                }],
+            )
+        logger.warning("review_action_scm_not_found action=%s err=%s", action, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"SCM {action} failed: {str(exc)[:200]}",
+        )
     except HTTPException:
         raise
+    except SCMError as exc:
+        logger.warning("review_action_scm_failed action=%s err=%s", action, exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"SCM {action} failed: {str(exc)[:200]}",
+        )
     except Exception as exc:
         logger.warning("review_action_scm_failed action=%s err=%s", action, exc)
         raise HTTPException(
@@ -2273,22 +2451,33 @@ async def _apply_review_action(
         .where(ReviewModel.id == review.id)
         .values(status=new_status)
     )
+    # Record that this connection was just used — powers the "last used"
+    # column in Settings > Connections and supports stale-connection
+    # alerting later.
+    await session.execute(
+        sql_update(UserScmConnection)
+        .where(UserScmConnection.id == conn.id)
+        .values(last_used_at=datetime.now(timezone.utc))
+    )
     await session.commit()
 
     return ReviewActionResult(id=str(review.id), status=new_status)
 
 
-@router.post("/reviews/{review_id}/approve", response_model=ReviewActionResult)
+@router.post("/reviews/{review_id}/approve")
 async def approve_review(
     review_id: str,
     body: ReviewActionRequest | None = None,
     member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-) -> ReviewActionResult:
+) -> Any:
     """Submit an APPROVE review on the underlying PR and mark the Review row approved.
 
-    Cross-team 404 via linked Task.team_id. Returns 502 when the SCM call
-    fails (token expired, rate-limited, repo archived).
+    Cross-team 404 via linked Task.team_id. Uses the caller's per-user
+    SCM OAuth connection (PR 3) — returns 412 ``SCM_NOT_CONNECTED`` /
+    ``SCM_RECONNECT_REQUIRED`` / ``SCM_SCOPE_UPGRADE_REQUIRED`` when the
+    connection can't satisfy the action. Returns 502 when the SCM call
+    fails for any other reason.
     """
     comment = (body.comment if body else "") or ""
     return await _apply_review_action(
@@ -2296,16 +2485,16 @@ async def approve_review(
     )
 
 
-@router.post("/reviews/{review_id}/request-changes", response_model=ReviewActionResult)
+@router.post("/reviews/{review_id}/request-changes")
 async def request_changes_on_review(
     review_id: str,
     body: ReviewActionRequest | None = None,
     member: TeamMemberInfo = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-) -> ReviewActionResult:
+) -> Any:
     """Submit a REQUEST_CHANGES review on the underlying PR and mark the
     Review row ``changes_requested``. Same auth + error semantics as
-    approve_review.
+    :func:`approve_review`, including the PR 3 412 precondition branches.
     """
     comment = (body.comment if body else "") or ""
     return await _apply_review_action(
