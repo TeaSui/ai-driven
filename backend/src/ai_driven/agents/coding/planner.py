@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ai_driven.claude.client import ClaudeClient
+from ai_driven.claude.thinking import resolve_thinking_config
 from ai_driven.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,7 @@ class PlanningAgent:
         response = await self._claude.chat(
             messages=[{"role": "user", "content": prompt}],
             model=settings.claude_planning_model,
-            thinking={"type": "enabled", "budget_tokens": 16000},
+            thinking=resolve_thinking_config(settings.claude_planning_model, budget_tokens=16000),
         )
 
         return self._parse_plan(response.text)

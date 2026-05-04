@@ -15,6 +15,7 @@ from typing import Any
 from ai_driven.claude.client import ClaudeClient
 from ai_driven.claude.conversation import Conversation
 from ai_driven.claude.provider import MessageResponse
+from ai_driven.claude.thinking import resolve_thinking_config
 from ai_driven.claude.tools.registry import ToolRegistry
 from ai_driven.config import get_settings
 from ai_driven.observability.metrics import emit_agent_metrics
@@ -405,7 +406,8 @@ class BaseAgent(ABC):
 
         thinking = None
         if use_thinking:
-            thinking = {"type": "enabled", "budget_tokens": 16000}
+            target_model = model or settings.claude_default_model
+            thinking = resolve_thinking_config(target_model, budget_tokens=16000)
 
         start_time = time.monotonic()
         tool_call_count = 0
