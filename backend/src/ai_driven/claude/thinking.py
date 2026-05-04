@@ -23,10 +23,10 @@ _BEDROCK_PREFIX = "global.anthropic."
 _ADAPTIVE_REQUIRED = frozenset({"claude-opus-4-7"})
 
 # Models that still support the manual `enabled`-type form.
-_LEGACY_MANUAL = frozenset({"claude-sonnet-4-6", "claude-opus-4-6"})
+_LEGACY_MANUAL = frozenset({"claude-sonnet-4-6", "claude-opus-4-6", "claude-opus-4-6-v1"})
 
 # Models that don't support thinking at all.
-_NO_THINKING = frozenset({"claude-haiku-4-5", "claude-haiku-4-5-20251001"})
+_NO_THINKING = frozenset({"claude-haiku-4-5", "claude-haiku-4-5-20251001", "claude-haiku-4-5-20251001-v1:0"})
 
 
 def resolve_thinking_config(model: str, *, budget_tokens: int) -> dict[str, Any] | None:
@@ -51,6 +51,8 @@ def resolve_thinking_config(model: str, *, budget_tokens: int) -> dict[str, Any]
         return None
     if normalized in _LEGACY_MANUAL:
         return {"type": "enabled", "budget_tokens": budget_tokens}
-    # Opus 4.7 and any model we don't recognize: default to adaptive.
-    # Forward-compatible — new models almost certainly use adaptive too.
+    if normalized in _ADAPTIVE_REQUIRED:
+        return {"type": "adaptive"}
+    # Unknown model: default to adaptive. Forward-compatible — new models
+    # almost certainly use adaptive too.
     return {"type": "adaptive"}

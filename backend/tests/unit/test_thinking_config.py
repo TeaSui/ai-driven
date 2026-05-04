@@ -59,3 +59,19 @@ def test_budget_tokens_zero_returns_none() -> None:
     from ai_driven.claude.thinking import resolve_thinking_config
 
     assert resolve_thinking_config("claude-sonnet-4-6", budget_tokens=0) is None
+
+
+@pytest.mark.parametrize(
+    "bedrock_id,expected",
+    [
+        ("global.anthropic.claude-opus-4-7",                {"type": "adaptive"}),
+        ("global.anthropic.claude-opus-4-6-v1",             {"type": "enabled", "budget_tokens": 16000}),
+        ("global.anthropic.claude-sonnet-4-6",              {"type": "enabled", "budget_tokens": 16000}),
+        ("global.anthropic.claude-haiku-4-5-20251001-v1:0", None),
+    ],
+)
+def test_real_bedrock_model_ids(bedrock_id: str, expected) -> None:
+    """Covers the actual Bedrock IDs produced by provider.py's mapping table."""
+    from ai_driven.claude.thinking import resolve_thinking_config
+
+    assert resolve_thinking_config(bedrock_id, budget_tokens=16000) == expected
