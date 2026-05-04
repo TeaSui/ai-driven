@@ -73,7 +73,7 @@ from ai_driven.api._shared import CamelModel, to_camel as _to_camel  # noqa: F40
 
 class ChatMessage(CamelModel):
     message: str
-    agentType: str = "coding"  # coding | review | workflow | devops
+    agentType: str = "coding"  # coding | review | devops
     context: dict[str, Any] = {}
 
 
@@ -93,7 +93,6 @@ async def _process_task_inline(task_id: str, agent_type: str, message: str, cont
     from ai_driven.agents.coding.agent import CodingAgent
     from ai_driven.agents.devops.agent import DevOpsAgent
     from ai_driven.agents.reviewer.agent import ReviewAgent
-    from ai_driven.agents.workflow.agent import WorkflowAgent
     from ai_driven.db.postgres.repository import TaskRepository
     from ai_driven.db.postgres.session import async_session_factory
 
@@ -105,7 +104,6 @@ async def _process_task_inline(task_id: str, agent_type: str, message: str, cont
     agent_map: dict[str, type] = {
         "coding": CodingAgent,
         "review": ReviewAgent,
-        "workflow": WorkflowAgent,
         "devops": DevOpsAgent,
     }
 

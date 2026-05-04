@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { X, Code2, GitPullRequest, AlertTriangle, GitCommit, Loader2 } from 'lucide-react'
+import { X, Code2, GitPullRequest, AlertTriangle, Loader2 } from 'lucide-react'
 import { Btn } from '@/components/ui/btn'
 import { sendMessage, getRepos, type Repo } from '@/lib/api'
 
-type AgentType = 'coding' | 'review' | 'devops' | 'workflow'
+type AgentType = 'coding' | 'review' | 'devops'
 
 interface AgentOption {
   id: AgentType
@@ -37,13 +37,6 @@ const AGENTS: AgentOption[] = [
     icon: <AlertTriangle size={16} />,
     description: 'Investigate incidents, triage alerts, and suggest fixes',
     fields: ['message'],
-  },
-  {
-    id: 'workflow',
-    label: 'Workflow Agent',
-    icon: <GitCommit size={16} />,
-    description: 'Orchestrate multi-step pipelines across agents',
-    fields: ['repo', 'jiraKey', 'message'],
   },
 ]
 
@@ -301,8 +294,7 @@ export function NewRunModal({ open, onClose }: NewRunModalProps) {
               placeholder={
                 agent === 'coding' ? 'Implement the Jira ticket, following existing patterns...'
                 : agent === 'review' ? 'Review this PR for security, bugs, and code quality...'
-                : agent === 'devops' ? 'Investigate the alert and suggest remediation...'
-                : 'Run the full pipeline for this ticket...'
+                : 'Investigate the alert and suggest remediation...'
               }
               value={message}
               onChange={e => setMessage(e.target.value)}

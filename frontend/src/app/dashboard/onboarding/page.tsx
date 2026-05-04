@@ -2,14 +2,14 @@
 
 import React, { Suspense, useState, useEffect, useCallback, useId, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Code2, GitPullRequest, AlertTriangle, GitCommit, Check, Loader2, ArrowLeft, ArrowRight, X } from 'lucide-react'
+import { Code2, GitPullRequest, AlertTriangle, Check, Loader2, ArrowLeft, ArrowRight, X } from 'lucide-react'
 import { Btn } from '@/components/ui/btn'
 import { createRepo, sendMessage } from '@/lib/api'
 import { setOnboardedFlag } from '@/hooks/use-onboarding'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type AgentType = 'coding' | 'review' | 'workflow' | 'devops'
+type AgentType = 'coding' | 'review' | 'devops'
 
 type ScmType = 'github' | 'bitbucket'
 
@@ -36,12 +36,6 @@ const AGENTS: AgentDef[] = [
     label: 'Code Review',
     icon: <GitPullRequest size={16} />,
     description: 'Reviews open PRs for security issues, bugs, and style — posts inline comments.',
-  },
-  {
-    id: 'workflow',
-    label: 'Workflow Agent',
-    icon: <GitCommit size={16} />,
-    description: 'Orchestrates multi-step pipelines across agents for end-to-end automation.',
   },
   {
     id: 'devops',
@@ -558,9 +552,7 @@ function StepFirstTask({ repoFullName, defaultAgent, onComplete }: StepFirstTask
                 ? 'Implement the login rate-limiting feature from PROJ-42, following the existing auth middleware pattern...'
                 : agentType === 'review'
                   ? 'Review PR #88 for security issues and code quality in the payment module...'
-                  : agentType === 'devops'
-                    ? 'Investigate the high p99 latency alert on the orders service and suggest remediation...'
-                    : 'Run the full CI/CD pipeline for the upcoming v2.0 release...'
+                  : 'Investigate the high p99 latency alert on the orders service and suggest remediation...'
             }
             value={taskDescription}
             onChange={e => {

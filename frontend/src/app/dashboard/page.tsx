@@ -6,7 +6,6 @@ import {
   Code2,
   GitPullRequest,
   AlertTriangle,
-  GitCommit,
   Bot,
   Clock,
 } from 'lucide-react'
@@ -187,7 +186,6 @@ function buildAgentDefs(tasks?: Task[]): AgentDef[] {
   const codingActive = running('coding')
   const reviewDone = completed('review')
   const devopsActive = running('devops')
-  const workflowActive = running('workflow')
   return [
     {
       name: 'Coding',
@@ -210,13 +208,6 @@ function buildAgentDefs(tasks?: Task[]): AgentDef[] {
       detail: devopsActive > 0 ? `${devopsActive} active` : 'No active incidents',
       tone: devopsActive > 0 ? 'warn' : undefined,
       pulse: devopsActive > 0,
-    },
-    {
-      name: 'Workflow',
-      icon: <GitCommit size={14} />,
-      status: workflowActive > 0 ? 'Orchestrating' : 'Idle',
-      detail: workflowActive > 0 ? `${workflowActive} pipeline${workflowActive > 1 ? 's' : ''}` : 'No active pipelines',
-      tone: workflowActive > 0 ? 'info' : undefined,
     },
   ]
 }
@@ -274,7 +265,7 @@ function AgentsRow({ tasks }: { tasks?: Task[] }) {
       style={{
         padding: '20px 32px 12px',
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(3, 1fr)',
         gap: 12,
       }}
     >
