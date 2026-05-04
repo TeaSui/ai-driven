@@ -145,7 +145,7 @@ class TestCreatePlan:
         client.chat = AsyncMock(return_value=response)
         return client
 
-    async def test_create_plan_calls_claude_with_thinking(self, mock_claude: AsyncMock) -> None:
+    async def test_create_plan_calls_claude_with_adaptive_thinking_on_opus_4_7(self, mock_claude: AsyncMock) -> None:
         agent = PlanningAgent(claude_client=mock_claude)
 
         with patch("ai_driven.agents.coding.planner.get_settings") as mock_settings:
@@ -164,8 +164,9 @@ class TestCreatePlan:
         mock_claude.chat.assert_awaited_once()
         call_kwargs = mock_claude.chat.call_args
         assert call_kwargs.kwargs["model"] == "claude-opus-4-7"
-        assert call_kwargs.kwargs["thinking"]["type"] == "enabled"
-        assert call_kwargs.kwargs["thinking"]["budget_tokens"] == 16000
+        # Opus 4.7 requires adaptive thinking — manual enabled+budget returns 400.
+        # See backend/src/ai_driven/claude/thinking.py::resolve_thinking_config.
+        assert call_kwargs.kwargs["thinking"] == {"type": "adaptive"}
 
         assert plan.summary == "Implement feature"
         assert len(plan.files_to_create) == 1
