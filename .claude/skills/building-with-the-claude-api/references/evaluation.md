@@ -2,6 +2,8 @@
 
 Systematic prompt evaluation: dataset generation, running evals, model-based grading, and code-based grading.
 
+> See also: [additional-notes.md § S3](additional-notes.md#s3--evaluationmd--depth-additions) — why naive testing fails; rubric-design checklist; output-format instrumentation via prefill; result-shape narrative.
+
 ## Contents
 
 - [Why evaluate](#why-evaluate)
@@ -207,9 +209,4 @@ score = 0.3 * model_score + 0.7 * syntax_score
 
 ## Sources
 
-- `docs/building-with-the-claude-api/9-prompt-evaluation.md`
-- `docs/building-with-the-claude-api/10-a-typical-eval-workflow.md`
-- `docs/building-with-the-claude-api/11-generating-test-datasets.md`
-- `docs/building-with-the-claude-api/12-running-the-eval.md`
-- `docs/building-with-the-claude-api/13-model-based-grading.md`
-- `docs/building-with-the-claude-api/14-code-based-grading.md`
+Distilled from the prior 62-lesson curriculum (lessons 9–14). The source lessons have been retired; this reference is self-contained. See [additional-notes.md § S3](additional-notes.md#s3--evaluationmd--depth-additions) for depth addenda.

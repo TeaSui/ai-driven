@@ -2,6 +2,8 @@
 
 Retrieval-Augmented Generation: chunking, embeddings, BM25 lexical search, and multi-index hybrid retrieval.
 
+> See also: [additional-notes.md § S4](additional-notes.md#s4--ragmd--depth-additions) — why cosine similarity works (embedding normalization); when to reach for semantic chunking; BM25 4-step walkthrough; worked RRF example; Voyage setup.
+
 ## Contents
 
 - [When to use RAG](#when-to-use-rag)
@@ -236,10 +238,4 @@ For citation-grade answers, see [advanced-features.md#citations](advanced-featur
 
 ## Sources
 
-- `docs/building-with-the-claude-api/26-implementing-the-RAG-flow.md`
-- `docs/building-with-the-claude-api/32-introducing-retrieval-augmented-generation.md`
-- `docs/building-with-the-claude-api/33-text-chunking-strategies.md`
-- `docs/building-with-the-claude-api/34-text-embeddings.md`
-- `docs/building-with-the-claude-api/35-the-full-RAG-flow.md`
-- `docs/building-with-the-claude-api/36-BM25-lexical-search.md`
-- `docs/building-with-the-claude-api/37-a-multi-index-RAG-pipeline.md`
+Distilled from the prior 62-lesson curriculum (lessons 32–37 plus 35a). The source lessons have been retired; this reference is self-contained. Embedding model details live alongside `../docs/2. Model capabilities/13. Embeddings.md`. See [additional-notes.md § S4](additional-notes.md#s4--ragmd--depth-additions) for depth addenda (normalization, BM25 walkthrough, RRF worked example, Voyage setup).

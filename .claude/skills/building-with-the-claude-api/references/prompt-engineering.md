@@ -141,8 +141,4 @@ Guidance:
 
 ## Sources
 
-- `docs/building-with-the-claude-api/15-prompt-engineering.md`
-- `docs/building-with-the-claude-api/16-being-clear-and-direct.md`
-- `docs/building-with-the-claude-api/17-being-specific.md`
-- `docs/building-with-the-claude-api/18-structure-with-xml-tags.md`
-- `docs/building-with-the-claude-api/19-prompt-example.md`
+Distilled from the prior 62-lesson curriculum (lessons 15–19). The source lessons have been retired; this reference is self-contained.

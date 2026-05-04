@@ -192,6 +192,7 @@ async def authorize(
             "response_type": "code",
             "scope": bb_scope,
             "state": state,
+            "redirect_uri": redirect_uri,
         }
         url = f"{_BITBUCKET_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
 
@@ -332,7 +333,15 @@ async def callback(
         else:
             token_json = await _bitbucket_exchange_code(code, redirect_uri)
     except httpx.HTTPError as ex:
-        logger.warning("oauth_token_exchange_failed provider=%s err=%s", provider, ex)
+        body = ""
+        if isinstance(ex, httpx.HTTPStatusError):
+            body = ex.response.text[:500]
+        logger.warning(
+            "oauth_token_exchange_failed provider=%s err=%s body=%s",
+            provider,
+            ex,
+            body,
+        )
         return _redirect_error("OAUTH_TOKEN_EXCHANGE_FAILED")
 
     access_token = token_json.get("access_token")

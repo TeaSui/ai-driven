@@ -156,10 +156,4 @@ Ask in order; first **yes** wins:
 
 ## Sources
 
-- `docs/building-with-the-claude-api/56-agents-and-workflows.md`
-- `docs/building-with-the-claude-api/57-parallelization-workflows.md`
-- `docs/building-with-the-claude-api/58-chaining-workflows.md`
-- `docs/building-with-the-claude-api/59-routing-workflows.md`
-- `docs/building-with-the-claude-api/60-agents-and-tools.md`
-- `docs/building-with-the-claude-api/61-environment-inspection.md`
-- `docs/building-with-the-claude-api/62-workflows-vs-agents.md`
+Distilled from the prior 62-lesson curriculum (lessons 56–62). The source lessons have been retired; this reference is self-contained.

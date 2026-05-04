@@ -1,305 +1,276 @@
 # Tool Use
 
-Custom tools, schemas, `tool_use` / `tool_result` blocks, multi-turn tool loops, fine-grained streaming, and built-in tools (text-editor, web-search).
+Custom tools, schemas, tool_use / tool_result lifecycle, multi-turn loops, parallel calls, `strict: true`, the Tool Runner SDK, prompt caching with tools, and troubleshooting. For **built-in tools** (web_search, code_execution, bash, memory, text_editor, computer_use, advisor), see [built-in-tools.md](built-in-tools.md). For **scaling tools** (tool search, programmatic tool calling, fine-grained streaming), see [tool-infrastructure.md](tool-infrastructure.md).
 
 ## Contents
 
 - [Mental model](#mental-model)
-- [Tool functions](#tool-functions)
 - [Tool schemas](#tool-schemas)
-- [Handling tool_use blocks in responses](#handling-tool_use-blocks-in-responses)
-- [Sending tool_result blocks back](#sending-tool_result-blocks-back)
-- [Multi-turn tool loops](#multi-turn-tool-loops)
-- [Multiple tools](#multiple-tools)
-- [Fine-grained tool streaming](#fine-grained-tool-streaming)
-- [Built-in: text editor tool](#built-in-text-editor-tool)
-- [Built-in: web search tool](#built-in-web-search-tool)
-- [Gotchas](#gotchas)
+- [Handling tool_use](#handling-tool_use)
+- [Sending tool_result back](#sending-tool_result-back)
+- [Multi-turn loop (manual)](#multi-turn-loop-manual)
+- [Tool Runner SDK](#tool-runner-sdk)
+- [Parallel tool use](#parallel-tool-use)
+- [Strict tool use](#strict-tool-use)
+- [Tool choice](#tool-choice)
+- [Prompt caching with tools](#prompt-caching-with-tools)
+- [Troubleshooting](#troubleshooting)
 - [Sources](#sources)
 
 ## Mental model
 
-Tool use is a four-step dance:
-1. You send a request with a `tools=[...]` list of schemas.
-2. Claude may respond with a `tool_use` block naming a tool and its input.
-3. **You** execute the tool locally and send back a `tool_result` block (Claude never runs your code).
+Four-step dance:
+1. Send `tools=[...]` schemas.
+2. Claude may respond with `tool_use` block (`stop_reason: "tool_use"`).
+3. **You** execute the tool locally and return a `tool_result` block. Claude never runs your code.
 4. Claude incorporates the result and either calls another tool or produces a final text answer.
 
-The loop ends when `response.stop_reason != "tool_use"`.
+Loop ends when `stop_reason != "tool_use"`.
 
-## Tool functions
+Tools split by execution location:
+- **Client tools** — you execute: user-defined + Anthropic-schema (`bash`, `text_editor`, `computer`, `memory`).
+- **Server tools** — Anthropic executes: `web_search`, `web_fetch`, `code_execution`, `advisor`, `tool_search`.
 
-Write normal Python functions. Handle validation explicitly — Claude will occasionally pass empty strings or malformed args.
-
-```python
-from datetime import datetime
-
-def get_current_datetime(date_format="%Y-%m-%d %H:%M:%S"):
-    if not date_format:
-        raise ValueError("date_format cannot be empty")
-    return datetime.now().strftime(date_format)
-```
-
-The function's job is to accept the `input` dict Claude provides and return something JSON-serializable (string, dict, list). You'll `json.dumps` it before sending as a `tool_result`.
+See [built-in-tools.md](built-in-tools.md) for both categories' built-ins.
 
 ## Tool schemas
 
-A schema tells Claude what the tool does, what it takes, and when to use it. Use JSON Schema for `input_schema`.
+Required: `name` (regex `^[a-zA-Z0-9_-]{1,64}$`), `description`, `input_schema` (JSON Schema).
+Optional: `input_examples`, `cache_control`, `strict`, `defer_loading`, `allowed_callers`.
 
 ```python
-get_current_datetime_schema = {
-    "name": "get_current_datetime",
-    "description": "Returns the current date and time, formatted using a strftime string.",
+tools = [{
+    "name": "get_stock_price",
+    "description": (
+        "Returns the current trade price in USD for a ticker on NYSE/NASDAQ. "
+        "Use when the user asks about a stock's current or recent price. "
+        "Does NOT return company fundamentals, historical data, or news."
+    ),
     "input_schema": {
         "type": "object",
-        "properties": {
-            "date_format": {
-                "type": "string",
-                "description": "Python strftime format string, e.g. '%Y-%m-%d'.",
-            }
-        },
-        "required": ["date_format"],
+        "properties": {"ticker": {"type": "string", "description": "e.g. AAPL"}},
+        "required": ["ticker"],
     },
-}
+    "input_examples": [{"ticker": "AAPL"}, {"ticker": "MSFT"}],
+}]
 ```
 
-Tips:
-- Name tools with verbs: `get_`, `create_`, `list_`, `search_`.
-- The **description is the trigger**. Say exactly when to use the tool and what it returns. This is what Claude reads to decide.
-- Mark genuinely required params in `required`. Optional params belong in `properties` but not in `required`.
-- For typed Python support, `from anthropic.types import ToolParam` — it typechecks the schema dict.
+The **description is the selector**. 3-4+ sentences covering what / when / params / caveats beats a one-liner. Consolidate related ops via an `action` discriminator rather than shipping many near-duplicate tools.
 
-## Handling tool_use blocks in responses
-
-When Claude calls a tool, `stop_reason == "tool_use"` and `response.content` contains at least one block of `type == "tool_use"`. The response may also include `text` blocks (reasoning before the tool call).
+## Handling tool_use
 
 ```python
 response = client.messages.create(
-    model=model,
-    max_tokens=1000,
-    messages=messages,
-    tools=[get_current_datetime_schema],
+    model="claude-opus-4-7", max_tokens=1024, messages=messages, tools=tools,
 )
-
 if response.stop_reason == "tool_use":
-    # Preserve the entire content list — don't lose text blocks or tool_use IDs
+    # CRITICAL: append the full content list, not response.content[0].text
     messages.append({"role": "assistant", "content": response.content})
 ```
 
-**Critical:** append `response.content` (the list), not `response.content[0].text`. You need the `tool_use` block with its `id` preserved in history so the follow-up `tool_result` can reference it.
+The assistant message may also contain `text` blocks (reasoning) before the `tool_use`. Iterate `response.content` and branch on `block.type`.
 
-## Sending tool_result blocks back
-
-For each `tool_use` block, produce a matching `tool_result` block. The `tool_use_id` on the result must equal the `id` on the `tool_use`.
+## Sending tool_result back
 
 ```python
 import json
 
 tool_results = []
 for block in response.content:
-    if block.type == "tool_use":
-        try:
-            output = run_tool(block.name, block.input)
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(output),
-                "is_error": False,
-            })
-        except Exception as e:
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": f"Error: {e}",
-                "is_error": True,
-            })
+    if block.type != "tool_use":
+        continue
+    try:
+        output = run_tool(block.name, block.input)
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": json.dumps(output),
+        })
+    except Exception as e:
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": f"Error: {e}. Retry with a valid ticker.",
+            "is_error": True,
+        })
 
 messages.append({"role": "user", "content": tool_results})
 ```
 
-`tool_result` blocks go in a **user** message — they are the user's reply to Claude's tool-call request.
+**Invariants:**
+- `tool_use_id` must equal the `tool_use.id` from the assistant message exactly.
+- `tool_result` blocks go in a **user** message.
+- `tool_result` blocks come FIRST in the `content` array. Any `text` block BEFORE `tool_result` returns 400: `"tool_use ids were found without tool_result blocks immediately after"`.
+- Each `tool_use` must have a matching `tool_result` in the very next user message.
+- `is_error: true` errors are recoverable — write instructive messages (`"Rate limited, retry in 60s"`, not `"failed"`).
+- `content` can be a string OR a list of text/image/document blocks (for multimodal tool results).
 
-## Multi-turn tool loops
-
-Wrap the request/tool/result cycle in a loop until Claude stops calling tools:
+## Multi-turn loop (manual)
 
 ```python
-def run_tool(tool_name, tool_input):
-    if tool_name == "get_current_datetime":
-        return get_current_datetime(**tool_input)
-    elif tool_name == "add_duration_to_datetime":
-        return add_duration_to_datetime(**tool_input)
-    elif tool_name == "set_reminder":
-        return set_reminder(**tool_input)
-    raise ValueError(f"Unknown tool: {tool_name}")
-
-def run_tools(response):
-    results = []
-    for block in response.content:
-        if block.type != "tool_use":
-            continue
-        try:
-            output = run_tool(block.name, block.input)
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": json.dumps(output),
-                "is_error": False,
-            })
-        except Exception as e:
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": f"Error: {e}",
-                "is_error": True,
-            })
-    return results
-
-def run_conversation(messages, tools):
-    while True:
+def run_conversation(messages, tools, max_iterations=10):
+    for _ in range(max_iterations):
         response = client.messages.create(
-            model=model,
-            max_tokens=1000,
-            messages=messages,
-            tools=tools,
+            model="claude-opus-4-7", max_tokens=2048, messages=messages, tools=tools,
         )
         messages.append({"role": "assistant", "content": response.content})
 
+        if response.stop_reason == "pause_turn":
+            continue  # server-tool iteration limit — resend as-is
         if response.stop_reason != "tool_use":
-            return response  # Final text answer
+            return response  # end_turn, max_tokens, refusal, etc.
 
-        tool_results = run_tools(response)
+        tool_results = [execute_tool_block(b) for b in response.content if b.type == "tool_use"]
         messages.append({"role": "user", "content": tool_results})
+    raise RuntimeError("Agentic loop exceeded max iterations")
 ```
 
-Safety rails you may want:
-- Max-iteration cap (e.g., 10) to prevent runaway loops.
-- Timeout per tool call.
-- Structured logging of every `tool_use` / `tool_result` pair for debugging.
+Bound iterations. Log every tool_use/tool_result pair for debugging.
 
-## Multiple tools
+## Tool Runner SDK
 
-Pass multiple schemas in the `tools=[...]` list. Route to the right function by `block.name`:
+Beta SDK helper that drives the loop for you. Use unless you need human-in-the-loop approval, custom logging, or conditional execution.
 
 ```python
-response = client.messages.create(
-    model=model,
-    max_tokens=1000,
-    messages=messages,
-    tools=[
-        get_current_datetime_schema,
-        add_duration_to_datetime_schema,
-        set_reminder_schema,
-    ],
+from anthropic import Anthropic, beta_tool
+client = Anthropic()
+
+@beta_tool
+def get_weather(location: str, unit: str = "fahrenheit") -> str:
+    """Get current weather.
+    Args:
+        location: City and state, e.g. "San Francisco, CA"
+        unit: "celsius" or "fahrenheit"
+    """
+    import json
+    return json.dumps({"temperature": "20C", "condition": "Sunny"})
+
+runner = client.beta.messages.tool_runner(
+    model="claude-opus-4-7", max_tokens=2048,
+    tools=[get_weather],
+    messages=[{"role": "user", "content": "Weather in Paris?"}],
 )
+final = runner.until_done()
+# Or iterate: for msg in runner: ...
 ```
 
-Claude can emit multiple `tool_use` blocks in a single response (parallel tool calls) when the tasks are independent. Execute them all before replying with the batched `tool_result` blocks.
+Gotchas:
+- Tools must return a **string or content block / list**. `json.dumps` dicts; `str()` numbers.
+- Use `@beta_async_tool` + `async def` with `AsyncAnthropic`.
+- Tool exceptions are caught and returned to Claude with `is_error=True`. Set `ANTHROPIC_LOG=debug` to see stack traces.
+- Use `runner.generate_tool_call_response()` to intercept / modify results (e.g., add `cache_control`) before Claude sees them.
+- Streaming via `stream=True` yields a `BetaMessageStream` per iteration.
 
-## Fine-grained tool streaming
+## Parallel tool use
 
-When streaming with tools, the API buffers tool-argument JSON until a top-level key-value pair is complete and schema-valid, then releases a burst. This creates visible stalls.
-
-Default streaming:
+Claude may emit multiple `tool_use` blocks in one assistant turn. Execute all and batch **all** results into ONE user message:
 
 ```python
-with client.messages.stream(...) as stream:
-    for chunk in stream:
-        if chunk.type == "input_json":
-            print(chunk.partial_json, end="")  # incremental
-            current_args = chunk.snapshot  # cumulative
+tool_uses = [b for b in response.content if b.type == "tool_use"]
+tool_results = [
+    {"type": "tool_result", "tool_use_id": tu.id, "content": run(tu)}
+    for tu in tool_uses
+]
+messages += [
+    {"role": "assistant", "content": response.content},
+    {"role": "user", "content": tool_results},  # SINGLE message
+]
 ```
 
-If you need raw, unvalidated chunks for a snappier UI:
+Splitting results across separate user messages teaches Claude to stop parallelizing — it adapts fast. Encourage more parallelism in your system prompt:
 
-```python
-# Fine-grained tool calling — JSON validation disabled
-run_conversation(messages, tools=[save_article_schema], fine_grained=True)
+```text
+<use_parallel_tool_calls>
+For maximum efficiency, invoke all relevant tools simultaneously rather than sequentially
+when the calls are independent.
+</use_parallel_tool_calls>
 ```
 
-With `fine_grained=True`:
-- Chunks arrive as fast as Claude generates them.
-- **No JSON validation** — you must handle malformed JSON yourself.
-- `json.loads(chunk.snapshot)` can raise; wrap it in try/except and tolerate partial states.
+Disable parallelism with `tool_choice={"type": "auto", "disable_parallel_tool_use": True}` (invalidates message cache — set early, not mid-conversation).
 
-Use it only when streaming latency genuinely hurts UX.
+## Strict tool use
 
-## Built-in: text editor tool
-
-Claude-maintained tool for inspecting and editing files. You provide the **execution**; Claude provides the schema.
-
-Model-specific tool type:
-- Claude 3.7 Sonnet / 3.5 Haiku+: `{"type": "text_editor_20250124", "name": "str_replace_editor"}`
-- Claude 3.5 Sonnet: `{"type": "text_editor_20241022", "name": "str_replace_editor"}`
-
-```python
-tools = [{"type": "text_editor_20250124", "name": "str_replace_editor"}]
-
-response = client.messages.create(
-    model=model,
-    max_tokens=1000,
-    messages=messages,
-    tools=tools,
-)
-```
-
-Operations Claude can request via `tool_use.input.command`:
-- `view` — read a file or directory
-- `create` — create a new file
-- `str_replace` — replace a string in a file
-- `insert` — insert at a line
-- `undo_edit` — revert the last edit
-
-You implement each command against the local filesystem and return the result as a `tool_result`.
-
-## Built-in: web search tool
-
-Server-side tool — **Claude runs the web search**, you don't implement anything. You just enable it.
+`"strict": true` on a tool applies grammar-constrained sampling — the tool name is always valid and the input **always** matches your schema (no coerced types, no missing required fields, no invented keys).
 
 ```python
 tools = [{
-    "type": "web_search_20250305",
-    "name": "web_search",
-    "max_uses": 5,                          # cap searches per request
-    "allowed_domains": ["anthropic.com"],   # optional allowlist
-    # "blocked_domains": ["spam.example"],  # or blocklist (not both)
+    "name": "search_flights",
+    "description": "Search flights by destination and date.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "destination":    {"type": "string"},
+            "departure_date": {"type": "string", "format": "date"},
+            "passengers":     {"type": "integer", "enum": [1,2,3,4,5,6,7,8,9]},
+        },
+        "required": ["destination", "departure_date"],
+        "additionalProperties": False,
+    },
 }]
-
-response = client.messages.create(
-    model=model,
-    max_tokens=2000,
-    messages=[{"role": "user", "content": "What did Anthropic release this week?"}],
-    tools=tools,
-)
 ```
 
-Response `content` will include `server_tool_use` blocks (Claude's search queries) and `web_search_tool_result` blocks (results). Claude iterates automatically.
+Rules:
+- Must set `additionalProperties: false` and list required fields.
+- `pattern` JSON Schema keyword is **not supported** under strict.
+- Pair with `tool_choice: {"type": "any"}` to guarantee BOTH that a tool fires AND the input conforms.
+- HIPAA-eligible; never put PHI in schema property names / enum / const — schemas are cached separately for up to 24h.
 
-Pricing: billed per search invocation; use `max_uses` to cap cost.
+Incompatible with: [programmatic tool calling](tool-infrastructure.md#programmatic-tool-calling), `disable_parallel_tool_use`.
 
-## Gotchas
+## Tool choice
 
-- **`tool_use_id` mismatch = hard error.** The `tool_result.tool_use_id` must exactly match the `tool_use.id` from the prior assistant message.
-- **Append full `response.content`, not `.text`.** You'll lose the `tool_use` block and the next round will fail with "tool_use_id not found."
-- **Claude never executes your code.** It emits a JSON request — you run the function locally.
-- **Tool descriptions drive selection.** A vague description causes tool-confusion. Be concrete: what the tool does, what it returns, and when to use it.
-- **Always include both `is_error=True` and a textual error message** in the `tool_result` when a tool throws. Claude can recover (retry with different args) if told what failed.
-- **Parallel tool calls** — multiple `tool_use` blocks in one response — execute them all before the next turn.
-- **Fine-grained streaming disables validation.** Handle malformed JSON; don't assume every snapshot parses.
-- **Built-in `text_editor` tool type is model-specific.** Pick the right date suffix (`_20250124` vs `_20241022`) for your model.
-- **`web_search` results count toward input tokens on subsequent turns** — the search results become part of the conversation history.
+```python
+tool_choice = {"type": "auto"}                # default; Claude picks or answers directly
+tool_choice = {"type": "any"}                 # MUST call some tool
+tool_choice = {"type": "tool", "name": "x"}   # force a specific tool
+tool_choice = {"type": "none"}                # prohibit tools this turn
+```
+
+- `any` / `tool` prefill the assistant with the tool call, suppressing natural-language preamble.
+- Extended thinking is **incompatible** with `any` / `tool` — only `auto` / `none`.
+- Changing `tool_choice` invalidates message cache.
+
+## Prompt caching with tools
+
+Place `cache_control: {"type": "ephemeral"}` on the LAST tool to cache the whole tool-definitions prefix. Processing order is `tools → system → messages` — changes at one level invalidate it **and everything after**.
+
+```python
+tools = [
+    {"name": "get_weather", "description": "...", "input_schema": {...}},
+    {"name": "get_time",    "description": "...", "input_schema": {...},
+     "cache_control": {"type": "ephemeral"}},  # caches BOTH tools
+]
+```
+
+Invalidation reference:
+- Any tool-definition edit → invalidates everything.
+- Toggling web_search / citations → invalidates system + messages.
+- Changing `tool_choice` / `disable_parallel_tool_use` → invalidates messages only.
+- Toggling images / thinking params → invalidates messages.
+
+Use `defer_loading: true` + Tool Search tool to add tools mid-conversation without breaking the prefix cache (see [tool-infrastructure.md](tool-infrastructure.md#tool-search)).
+
+See [context-management.md#prompt-caching](context-management.md#prompt-caching) for breakpoint limits, TTLs, and usage metrics.
+
+## Troubleshooting
+
+| Symptom | Cause / Fix |
+|---|---|
+| 400: `"tool_use ids were found without tool_result blocks immediately after"` | `tool_result` not FIRST in next user message, or missing. Put all `tool_result` blocks first; text may follow. |
+| `"tool_use_id not found"` | You appended `response.content[0].text` instead of the full list. Preserve `response.content` in history. |
+| Claude invents tool params | Add `"strict": true`. Tighten `input_schema` — set `additionalProperties: false`, use `enum` where possible. |
+| Claude picks the wrong tool | Sharpen descriptions by WHEN not just WHAT. Check name collisions. Add `input_examples`. |
+| Claude stops calling tools in parallel | You split results across multiple user messages. Batch into one. |
+| Cache misses on tool changes | Avoid mid-conversation tool edits; use `defer_loading` + tool search. Keep `tool_choice` stable or put breakpoint before its variation. |
+| `"string patterns are not supported with strict"` | Drop `pattern` from schema OR drop `strict`. |
+| Opus 4.6+ — JSON escape weirdness | Parse with `json.loads()`, never raw-string match on serialized input. |
+| `"All tools have defer_loading: true"` | The tool_search tool itself must not have `defer_loading`; at least one loadable tool required. |
 
 ## Sources
 
-- `docs/building-with-the-claude-api/20-introducing-tool-use.md`
-- `docs/building-with-the-claude-api/21-project-overview.md`
-- `docs/building-with-the-claude-api/22-tool-functions.md`
-- `docs/building-with-the-claude-api/23-tool-schemas.md`
-- `docs/building-with-the-claude-api/24-handling-message-blocks.md`
-- `docs/building-with-the-claude-api/25-sending-tool-results.md`
-- `docs/building-with-the-claude-api/26-multi-turn-conversations-with-tools.md`
-- `docs/building-with-the-claude-api/27-implementing-multiple-turns.md`
-- `docs/building-with-the-claude-api/28-using-multiple-tools.md`
-- `docs/building-with-the-claude-api/29-fine-grained-tool-calling.md`
-- `docs/building-with-the-claude-api/30-the-text-edit-tool.md`
-- `docs/building-with-the-claude-api/31-the-web-search-tool.md`
+- `../docs/3. Tool/1-6` (concepts through parallel)
+- `../docs/3. Tool/7. Tool Runner (SDK).md`
+- `../docs/3. Tool/8. Strict tool use.md`
+- `../docs/3. Tool/9. Tool use with prompt caching.md`
+- `../docs/3. Tool/11. Troubleshooting tool use.md`
