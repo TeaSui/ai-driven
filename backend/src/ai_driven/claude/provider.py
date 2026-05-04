@@ -728,13 +728,6 @@ class MockProvider(ClaudeProvider):
             ("github.post_pr_comment", {"repo_full_name": "org/repo", "pr_number": 42, "body": "**[Medium]** `src/handler.py:45` — Missing null check on `user_input.email`. Could raise AttributeError if the field is optional.", "file_path": "src/handler.py", "line": 45}),
             ("github.approve_pr", {"repo_full_name": "org/repo", "pr_number": 42, "body": "Approved with minor suggestions. Good implementation overall."}),
         ],
-        "workflow": [
-            ("workflow.dispatch_coding", {"jira_key": "PROJ-456", "repo_full_name": "org/backend", "title": "Implement feature from PROJ-456"}),
-            ("workflow.check_task_status", {"task_id": "coding-task-001"}),
-            ("workflow.dispatch_review", {"repo_full_name": "org/backend", "pr_number": 87, "pr_title": "PROJ-456: Implement new feature"}),
-            ("workflow.check_task_status", {"task_id": "review-task-001"}),
-            ("slack.notify_team", {"message": "Pipeline complete for PROJ-456: PR #87 approved and ready to merge.", "channel": "#engineering"}),
-        ],
         "devops": [
             ("datadog.query_metrics", {"query": "avg:system.cpu.user{service:api-gateway}", "from_ts": 1700000000, "to_ts": 1700003600}),
             ("datadog.query_logs", {"query": "service:api-gateway status:error", "from_ts": "2024-01-15T10:00:00Z", "to_ts": "2024-01-15T10:30:00Z", "limit": 50}),
@@ -761,9 +754,6 @@ class MockProvider(ClaudeProvider):
         "github.post_pr_comment": '{"id": "review-comment-456", "created": true}',
         "github.approve_pr": '{"approved": true, "pr_number": 42}',
         "github.request_changes": '{"requested": true, "pr_number": 42}',
-        "workflow.dispatch_coding": '{"task_id": "coding-task-001", "status": "queued", "agent_type": "coding"}',
-        "workflow.dispatch_review": '{"task_id": "review-task-001", "status": "queued", "agent_type": "review"}',
-        "workflow.check_task_status": '{"task_id": "coding-task-001", "status": "completed", "iterations": 6, "tool_calls": 8}',
         "github.merge_pr": '{"merged": true, "sha": "b4e92d1", "pr_number": 87}',
         "slack.notify_team": '{"sent": true, "channel": "#engineering"}',
         "datadog.query_metrics": '{"series": [{"metric": "system.cpu.user", "pointlist": [[1700000000, 78.5], [1700000060, 82.1], [1700000120, 91.3]], "avg": 83.9, "max": 95.2}]}',
@@ -813,19 +803,6 @@ class MockProvider(ClaudeProvider):
             "- Proper error handling at API boundaries\n\n"
             "**Verdict:** Approved with minor suggestions. No blocking issues.\n"
         ),
-        "workflow": (
-            "## Workflow Execution Report\n\n"
-            "**Pipeline:** Jira → Code → Review → Deploy\n\n"
-            "### Steps Completed\n"
-            "1. ✅ **Coding agent** dispatched — created PR #87\n"
-            "2. ✅ **Review agent** dispatched — approved PR #87\n"
-            "3. ✅ **Team notified** via #engineering channel\n\n"
-            "### Metrics\n"
-            "- Total pipeline time: 4m 32s\n"
-            "- Files changed: 5 (+142 −23 lines)\n"
-            "- Test coverage: 94%\n\n"
-            "Workflow completed successfully. PR is ready for human review.\n"
-        ),
         "devops": (
             "## Incident Triage Complete\n\n"
             "**Alert:** High API latency (p99 > 2000ms) on `api-gateway`\n"
@@ -854,8 +831,6 @@ class MockProvider(ClaudeProvider):
             return "coding"
         elif "review" in first_line:
             return "review"
-        elif "workflow" in first_line or "orchestrat" in first_line:
-            return "workflow"
         elif "devops" in first_line or "sre" in first_line:
             return "devops"
         return "default"

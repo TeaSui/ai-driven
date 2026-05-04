@@ -112,19 +112,15 @@ coding prompt by default.
 | QA verdict=block | `qa_failed` | Admin override: `rerun_qa` (cheap, single invocation) or `force_pass` |
 | Specialist returns `verdict=error` (Bedrock flake) | Treated as `pass` when `AI_DRIVEN_ORCHESTRATOR_TREAT_ERRORS_AS_PASS=true` (default) | Counter `orchestrator.specialist.fallback_activated{role}` |
 
-## Legacy Workflow Agent Path
+## Legacy Workflow Agent Path — removed
 
-The Workflow Agent still exists and registers its `dispatch_coding_agent`
-/ `dispatch_review_agent` / `merge_pull_request` / `notify_team` /
-`check_task_status` tools. It is **no longer the primary intake** — new
-tickets flow through the orchestrator queue. Workflow Agent invocations
-remain supported for:
-
-- Explicit `agent_type="workflow"` tasks submitted by older integrations.
-- Operator-driven orchestration of multi-PR changes where the LLM's
-  tool-use loop is preferred over the fixed tier plan.
-
-When invoked, the Workflow Agent polls child task status via
-`check_task_status` (default 60 attempts × 10s = 10 min timeout per
-sub-task) and composes the same PR → merge → notify sequence. It does
-NOT go through the Orchestrator Wrapper or post-coding QA.
+The legacy `WorkflowAgent` (with `dispatch_coding_agent`,
+`dispatch_review_agent`, `merge_pull_request`, `notify_team`,
+`check_task_status` tools) was removed after its responsibilities were
+fully absorbed by the Orchestrator Wrapper (specialist fan-out +
+gating) and the post-coding QA wrapper (PR-diff validation). The SQS
+consumer factory never routed `agent_type="workflow"` messages, so the
+path was only reachable via the debug/inline chat route; it is deleted
+in full as of the `WorkflowAgent` removal PRs. Historical
+`tasks.agent_type='workflow'` rows are backfilled to `'coding'` by
+migration `b3c4d5e6f7a8`.

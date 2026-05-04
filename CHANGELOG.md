@@ -5,6 +5,24 @@ All notable changes to ai-driven are recorded here. Format loosely follows
 grouped by shipping phase rather than semver since the project is
 pre-1.0.
 
+## [Unreleased]
+
+### Removed
+- **Legacy `WorkflowAgent` path.** The pre-orchestrator dispatch agent
+  (`agents/workflow/{agent,state_machine,triggers}.py`, its prompt, and
+  ~1,880 LOC of tests) was never routed through the SQS consumer
+  factory and was only reachable via the debug/inline chat path. Its
+  responsibilities are fully owned by the orchestrator wrapper + the
+  post-coding QA wrapper. Surface removal shipped in PR 1
+  (frontend `AgentType` union, NewRunModal tile, onboarding tile,
+  dashboard card, `chat/router.py` inline agent_map); full deletion
+  shipped in PR 2 (source tree, tests, mock provider branches, tool
+  registry fallback, admin `_AGENT_COMPLETED_STAGE['workflow']` entry,
+  `ActiveAgentsResponse.workflow` field). Alembic migration
+  `b3c4d5e6f7a8` rewrites historical `tasks.agent_type='workflow'` rows
+  to `'coding'` so the admin timeline projection stays truthful; the
+  rewrite is lossy for analytics and downgrade is a no-op.
+
 ## [Phase 2] - 2026-05-01
 
 Orchestrator moves from Phase 1 telemetry-only to active gating: it can

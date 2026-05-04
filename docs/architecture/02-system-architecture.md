@@ -23,7 +23,6 @@ flowchart TD
         CODING["Coding Agent\n14 core tools + conditional RAG + MCP"]
         REVIEW["Review Agent\n12 tools + shared RAG"]
         DEVOPS["DevOps Agent\n7 tools"]
-        WORKFLOW["Workflow Agent\n5 tools (legacy intake path)"]
     end
 
     subgraph Orchestration["Orchestration Layer"]
@@ -101,15 +100,10 @@ flowchart TD
     BASE --> CODING
     BASE --> REVIEW
     BASE --> DEVOPS
-    BASE --> WORKFLOW
-
-    WORKFLOW -->|"dispatch (legacy)"| CODING
-    WORKFLOW -->|"dispatch (legacy)"| REVIEW
 
     CODING --> CB
     REVIEW --> CB
     DEVOPS --> CB
-    WORKFLOW --> CB
     ORCH --> CB
     QAPOST --> CB
 
@@ -128,9 +122,6 @@ flowchart TD
     CODING --> MCP_JIRA
     CODING --> MCP_CTX
     DEVOPS --> MCP_DD
-    WORKFLOW --> MCP_GH
-    WORKFLOW --> MCP_JIRA
-    WORKFLOW --> MCP_SLACK
 
     BASE -->|"PUBLISH events"| REDIS
     REDIS -->|"SUBSCRIBE"| WS
@@ -163,7 +154,6 @@ flowchart TD
 | **Coding** | 14 core + conditional RAG + MCP | Implements the change, opens PR |
 | **Review** | 12 + shared RAG | Reviews PR diff, posts inline comments |
 | **DevOps** | 7 | Incident triage, Slack notify, Jira update |
-| **Workflow** | 5 | Legacy dispatch path (still functional, not the default intake) |
 | **Orchestrator** | 0 SDK tools (direct specialist invocation) | Classifies ticket, fans out specialists, gates coding |
 | **QA (post-coding)** | 3 | Validates PR diff against AC + security rules |
 | **BusinessAnalyst / Security / TechLead / UxDesigner / ApiTest** | 0 (pure LLM envelope) | Domain-specific advisory verdicts written to `task_artifacts` |
@@ -186,7 +176,6 @@ flowchart TD
 | **Primary task submission** | UI/Webhook → POST /api/chat/send → PostgreSQL → SQS `orchestrator` queue |
 | **Specialist fan-out** | Orchestrator worker → tier plan → specialist LLM calls → `task_artifacts` rows → (all pass) re-enqueue coding-task to `task` queue |
 | **Post-coding QA** | Coding completes with PR → enqueue to `qa` queue → QaPostCodingWrapper → QA specialist → verdict=pass ⇒ `completed`, verdict=block ⇒ `qa_failed` |
-| **Legacy Workflow path** | Workflow Agent uses `dispatch_coding_agent` / `dispatch_review_agent` — still supported but not the primary intake |
 | **Real-time streaming** | Agent → Redis PUBLISH → WebSocket SUBSCRIBE → Browser |
 | **Tool execution** | Agent → Tool Registry → External API (GitHub/Jira/DataDog) |
 | **RAG search** | Agent → Voyage embed query → pgvector cosine + ts_rank → RRF merge |

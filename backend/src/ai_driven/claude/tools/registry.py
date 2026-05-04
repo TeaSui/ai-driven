@@ -216,10 +216,6 @@ _MOCK_TOOL_RESULTS: dict[str, Any] = {
     "slack.notify_team": {"ok": True, "channel": "#engineering", "ts": "mock-ts-1"},
     "slack.notify_oncall": {"ok": True, "channel": "#oncall", "ts": "mock-ts-2"},
     "slack.post_message": {"ok": True, "ts": "mock-ts-3"},
-    # Workflow orchestration
-    "workflow.dispatch_coding": {"task_id": "coding-task-mock-001", "status": "queued", "agent_type": "coding"},
-    "workflow.dispatch_review": {"task_id": "review-task-mock-001", "status": "queued", "agent_type": "review"},
-    "workflow.check_task_status": {"task_id": "mock", "status": "completed"},
     # RAG
     "semantic_search_code": {
         "results": [

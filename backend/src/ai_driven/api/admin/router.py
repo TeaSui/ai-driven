@@ -192,7 +192,6 @@ class BudgetInfo(BaseModel):
 class ActiveAgentsResponse(CamelModel):
     coding: int = 0
     review: int = 0
-    workflow: int = 0
     devops: int = 0
 
 
@@ -565,7 +564,6 @@ async def get_dashboard_summary(
     active_agents = ActiveAgentsResponse(
         coding=active_counts.get("coding", 0),
         review=active_counts.get("review", 0),
-        workflow=active_counts.get("workflow", 0),
         devops=active_counts.get("devops", 0),
     )
 
@@ -1566,13 +1564,12 @@ _STATUS_TO_STAGE: dict[str, str] = {
     "qa_failed": "review",    # PR exists; QA blocked the merge
 }
 
-# Per-agent stage override: coding agent "completed" means PR opened (review stage),
-# workflow agent "completed" means full pipeline done (monitor stage).
+# Per-agent stage override: coding agent "completed" means PR opened (review stage).
+# Legacy 'workflow' rows were backfilled to 'coding' by migration b3c4d5e6f7a8.
 _AGENT_COMPLETED_STAGE: dict[str, str] = {
     "coding": "review",
     "review": "review",
     "devops": "monitor",
-    "workflow": "monitor",
 }
 
 _STATUS_TO_STAGE_STATUS: dict[str, str] = {
