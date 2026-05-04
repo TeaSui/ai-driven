@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
+from ai_driven.claude.errors import ClaudeRefusalError
 from ai_driven.claude.provider import (
     ClaudeProvider,
     ContentBlock,
@@ -144,7 +145,20 @@ class ClaudeClient:
                 on_response(response)
 
             if not response.has_tool_use:
-                logger.info("agent_loop_complete", extra={"iterations": iter_num, "stop_reason": response.stop_reason})
+                logger.info(
+                    "agent_loop_complete",
+                    extra={"iterations": iter_num, "stop_reason": response.stop_reason},
+                )
+                if response.stop_reason == "refusal":
+                    # Per Anthropic: the streaming safety classifier blocked output.
+                    # Retrying with the same context only triggers another refusal —
+                    # surface as typed exception so the caller resets / routes to fallback.
+                    raise ClaudeRefusalError(
+                        response.text or "(no text)",
+                        model=model,
+                        refused_iteration=iter_num,
+                        conversation_length=len(messages),
+                    )
                 return response
 
             # Append assistant message with full content (preserves tool_use blocks)
