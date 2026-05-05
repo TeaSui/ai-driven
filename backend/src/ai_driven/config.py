@@ -98,8 +98,10 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = Field(default="", validation_alias="AWS_SECRET_ACCESS_KEY")
     aws_session_token: str = Field(default="", validation_alias="AWS_SESSION_TOKEN")
 
-    # Sandbox
-    sandbox_mode: str = "mock"  # "mock" for local dev, "docker" for production
+    # Sandbox — only "docker" is supported. Legacy "mock" has been removed;
+    # override via AI_DRIVEN_SANDBOX_MODE is accepted for forward-compat but
+    # any value other than "docker" currently raises at factory time.
+    sandbox_mode: str = "docker"
 
     # RAG
     rag_enabled: bool = False
@@ -109,8 +111,8 @@ class Settings(BaseSettings):
     voyage_api_key: str = ""
 
     # Evaluation
-    # Default ON — in debug mode the Haiku grader is satisfied by MockProvider,
-    # in prod it's gated by the presence of a real Claude provider anyway.
+    # Default ON — requires a real Claude provider (direct Anthropic or
+    # Bedrock). Set to False if you want to disable Haiku grading entirely.
     evaluation_enabled: bool = True
 
     # Bedrock — use cross-region inference profile IDs (`global.` prefix).

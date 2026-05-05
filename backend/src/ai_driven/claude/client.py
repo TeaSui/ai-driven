@@ -287,10 +287,6 @@ class ClaudeClient:
                             if result is not None:
                                 await result
 
-                # MockProvider: message_stop with MessageResponse data
-                elif chunk_type == "message_stop" and isinstance(data, MessageResponse):
-                    final_response = data
-
             if final_response is not None:
                 return final_response
 

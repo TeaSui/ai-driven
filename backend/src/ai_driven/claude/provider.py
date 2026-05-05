@@ -648,12 +648,11 @@ class ResilientProvider(ClaudeProvider):
             return await self._with_fallback(**kwargs)
 
     async def _with_fallback(self, **kwargs: Any) -> MessageResponse:
-        """Fall back to a cheaper model if the primary fails.
+        """Fall back to a cheaper model tier if the primary model fails.
 
-        Final safety net (debug mode only): if every model tier fails, return
-        a MockProvider response so the agent loop stays alive and the UI shows
-        a visible pipeline. Without this, an Anthropic/Bedrock outage (or a
-        customer hitting their quota) would halt every workflow mid-run.
+        If every tier fails, the exception propagates — no MockProvider
+        safety net. Workflows that can't reach Claude MUST fail loudly so
+        false-positive success states don't get persisted.
         """
         settings = get_settings()
         original_model = kwargs.get("model", "")
@@ -664,308 +663,12 @@ class ResilientProvider(ClaudeProvider):
             kwargs["model"] = settings.claude_fast_model
             logger.info("Falling back from %s to %s", original_model, kwargs["model"])
 
-        try:
-            return await self._primary.create_message(**kwargs)
-        except Exception as e:
-            if settings.debug:
-                logger.warning(
-                    "Every Claude model tier failed (%s: %s); falling back to "
-                    "MockProvider so the workflow stays alive in debug mode",
-                    type(e).__name__, str(e)[:120],
-                )
-                return await MockProvider().create_message(**kwargs)
-            raise
+        return await self._primary.create_message(**kwargs)
 
     async def create_message_stream(self, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        try:
-            async for event in self._primary.create_message_stream(**kwargs):
-                yield event
-        except Exception as e:
-            settings = get_settings()
-            if settings.debug:
-                logger.warning(
-                    "Streaming failed (%s: %s); falling back to MockProvider stream",
-                    type(e).__name__, str(e)[:120],
-                )
-                async for event in MockProvider().create_message_stream(**kwargs):
-                    yield event
-            else:
-                raise
+        async for event in self._primary.create_message_stream(**kwargs):
+            yield event
 
-
-class MockProvider(ClaudeProvider):
-    """Mock provider for local development — returns scripted tool_use sequences.
-
-    Simulates realistic multi-iteration agent loops by returning ToolUseBlock
-    responses for intermediate steps and a final TextBlock for the last step.
-    The iteration is determined by counting tool_result messages in the conversation.
-    """
-
-    # Per-agent scripted tool call sequences.
-    # Each entry is (tool_name, tool_input_dict).
-    # After all tool steps are exhausted the provider returns a final TextBlock.
-    # Per-agent scripted tool call sequences.
-    # Input dicts MUST match the handler function signatures exactly.
-    _TOOL_SCRIPTS: dict[str, list[tuple[str, dict[str, Any]]]] = {
-        "coding": [
-            ("jira.get_issue", {"issue_key": "GTX-4829"}),
-            ("repo.list_files", {"repo_full_name": "org/ledger-core", "path": "src/", "ref": "main"}),
-            ("repo.read_file", {"repo_full_name": "org/ledger-core", "path": "src/api/endpoints.py"}),
-            ("code.search", {"repo_full_name": "org/ledger-core", "query": "BalanceCache"}),
-            ("repo.read_file", {"repo_full_name": "org/ledger-core", "path": "src/services/cache.py"}),
-            ("file.write", {"repo_full_name": "org/ledger-core", "path": "src/services/cache.py", "content": "# Fixed race condition with singleflight pattern\nimport asyncio\n\nclass BalanceCache:\n    def __init__(self):\n        self._cache = {}\n        self._locks = {}\n\n    async def get(self, account_id: str):\n        if account_id not in self._locks:\n            self._locks[account_id] = asyncio.Lock()\n        async with self._locks[account_id]:\n            if account_id in self._cache:\n                return self._cache[account_id]\n            balance = await self._load(account_id)\n            self._cache[account_id] = balance\n            return balance\n", "commit_message": "fix(ledger): guard BalanceCache.get() with async lock", "branch": "fix/GTX-4829-balance-cache-race"}),
-            ("sandbox.execute", {"command": "python -m pytest tests/ -v --tb=short"}),
-            ("git.create_branch", {"repo_full_name": "org/ledger-core", "branch_name": "fix/GTX-4829-balance-cache-race"}),
-            ("github.create_pr", {"repo_full_name": "org/ledger-core", "title": "fix(ledger): guard BalanceCache.get() with async lock", "body": "Fixes race condition in balance cache.\n\n- Added per-account async locks\n- All 12 tests passing\n- Closes GTX-4829", "source_branch": "fix/GTX-4829-balance-cache-race"}),
-            ("jira.update_status", {"issue_key": "GTX-4829", "transition_name": "In Review"}),
-        ],
-        "review": [
-            ("github.get_pr_diff", {"repo_full_name": "org/repo", "pr_number": 42}),
-            ("repo.read_file", {"repo_full_name": "org/repo", "path": "src/api/endpoints.py"}),
-            ("repo.list_files", {"repo_full_name": "org/repo", "path": "src/services/"}),
-            ("repo.read_file", {"repo_full_name": "org/repo", "path": "src/services/handler.py"}),
-            ("code.search", {"repo_full_name": "org/repo", "query": "validate_input"}),
-            ("github.post_pr_comment", {"repo_full_name": "org/repo", "pr_number": 42, "body": "**[Medium]** `src/handler.py:45` — Missing null check on `user_input.email`. Could raise AttributeError if the field is optional.", "file_path": "src/handler.py", "line": 45}),
-            ("github.approve_pr", {"repo_full_name": "org/repo", "pr_number": 42, "body": "Approved with minor suggestions. Good implementation overall."}),
-        ],
-        "devops": [
-            ("datadog.query_metrics", {"query": "avg:system.cpu.user{service:api-gateway}", "from_ts": 1700000000, "to_ts": 1700003600}),
-            ("datadog.query_logs", {"query": "service:api-gateway status:error", "from_ts": "2024-01-15T10:00:00Z", "to_ts": "2024-01-15T10:30:00Z", "limit": 50}),
-            ("deploy.get_recent", {"repo_full_name": "org/api-gateway", "limit": 5}),
-            ("datadog.get_service_health", {"service_name": "api-gateway"}),
-            ("jira.create_incident", {"project_key": "INC", "title": "High API latency after v2.3.1 deploy", "description": "Root cause: unoptimized query on events table (full scan, 2.1M rows). Correlated with deploy v2.3.1.", "priority": "High"}),
-            ("slack.notify_oncall", {"message": "P2 Incident: High API latency on api-gateway. RCA: full table scan on events table after v2.3.1 deploy. Incident ticket: INC-789"}),
-        ],
-    }
-
-    # Scripted tool results returned by the mock tool registry
-    _TOOL_RESULTS: dict[str, dict[str, str]] = {
-        "jira.get_issue": '{"key": "GTX-4829", "summary": "Fix race condition in ledger balance cache", "status": "To Do", "assignee": "ai-agent", "description": "Intermittent failures when two concurrent transfers read the same account balance. The cache layer does check-then-set without locking.", "acceptance_criteria": ["Race condition is fixed", "Unit tests cover concurrent access"]}',
-        "repo.list_files": '{"files": ["src/api/endpoints.py", "src/api/__init__.py", "src/services/cache.py", "src/services/handler.py", "src/models/schema.py", "src/models/balance.py", "tests/test_cache.py", "tests/test_endpoints.py"]}',
-        "repo.read_file": '{"content": "class BalanceCache:\\n    def __init__(self):\\n        self._cache = {}\\n\\n    async def get(self, account_id):\\n        if account_id in self._cache:\\n            return self._cache[account_id]\\n        balance = await self._load(account_id)\\n        self._cache[account_id] = balance\\n        return balance\\n", "lines": 42}',
-        "code.search": '{"matches": [{"file": "src/services/cache.py", "line": 8, "text": "class BalanceCache:"}, {"file": "src/services/cache.py", "line": 15, "text": "    async def get(self, account_id):"}]}',
-        "file.write": '{"success": true, "path": "src/services/cache.py", "bytes_written": 487}',
-        "sandbox.execute": '{"exit_code": 0, "stdout": "===== 12 passed in 1.84s =====\\nAll tests passed.", "stderr": ""}',
-        "git.create_branch": '{"branch": "fix/GTX-4829-balance-cache-race", "sha": "a3f21c8"}',
-        "github.create_pr": '{"pr_number": 2419, "pr_url": "https://github.com/org/repo/pull/2419", "title": "fix(ledger): guard BalanceCache.get() with async lock", "state": "open"}',
-        "jira.update_status": '{"key": "GTX-4829", "status": "In Review", "updated": true}',
-        "jira.add_comment": '{"id": "comment-123", "body": "AI agent has created PR #2419 to fix this issue."}',
-        "github.get_pr_diff": '{"files_changed": 3, "additions": 42, "deletions": 17, "diff": "diff --git a/src/services/cache.py...\\n+    async with self._locks[account_id]:\\n-        if account_id in self._cache:"}',
-        "github.post_pr_comment": '{"id": "review-comment-456", "created": true}',
-        "github.approve_pr": '{"approved": true, "pr_number": 42}',
-        "github.request_changes": '{"requested": true, "pr_number": 42}',
-        "github.merge_pr": '{"merged": true, "sha": "b4e92d1", "pr_number": 87}',
-        "slack.notify_team": '{"sent": true, "channel": "#engineering"}',
-        "datadog.query_metrics": '{"series": [{"metric": "system.cpu.user", "pointlist": [[1700000000, 78.5], [1700000060, 82.1], [1700000120, 91.3]], "avg": 83.9, "max": 95.2}]}',
-        "datadog.query_logs": '{"logs": [{"timestamp": "2024-01-15T10:23:45Z", "message": "Timeout waiting for database connection", "service": "api-gateway"}, {"timestamp": "2024-01-15T10:24:01Z", "message": "Query execution exceeded 30s threshold", "service": "api-gateway"}], "total": 47}',
-        "deploy.get_recent": '{"deployments": [{"version": "v2.3.1", "deployed_at": "2024-01-15T10:00:00Z", "status": "success", "deployer": "ci-bot"}, {"version": "v2.3.0", "deployed_at": "2024-01-14T16:30:00Z", "status": "success"}]}',
-        "datadog.get_service_health": '{"service": "api-gateway", "status": "degraded", "p99_latency_ms": 2340, "error_rate": 0.034, "uptime": "99.2%"}',
-        "jira.create_incident": '{"key": "INC-789", "url": "https://jira.example.com/browse/INC-789", "status": "Open"}',
-        "slack.notify_oncall": '{"notified": true, "oncall_user": "jane.doe", "channel": "#incidents"}',
-        "deploy.suggest_rollback": '{"recommended": true, "target_version": "v2.3.0", "reason": "Deploy v2.3.1 correlated with latency spike"}',
-        "code.semantic_search": '{"results": [{"file": "src/services/cache.py", "chunk": "class BalanceCache...", "score": 0.92}]}',
-    }
-
-    # Final text responses per agent type (returned after all tool steps)
-    _FINAL_RESPONSES: dict[str, str] = {
-        "default": (
-            "I've analyzed your request and completed all steps:\n\n"
-            "1. **Reviewed requirements** — Identified key objectives from the input.\n"
-            "2. **Implemented changes** — Applied modifications following existing code conventions.\n"
-            "3. **Verified** — All tests passing.\n\n"
-            "The task is complete."
-        ),
-        "coding": (
-            "## Implementation Complete\n\n"
-            "I've fixed the race condition in the balance cache (GTX-4829).\n\n"
-            "**Root cause:** `BalanceCache.get()` performed check-then-set without locking. "
-            "Under concurrent load, two callers could both miss the cache and write stale reads.\n\n"
-            "**Fix:** Added per-account `asyncio.Lock` to serialize concurrent reads for the same account.\n\n"
-            "**Changes:**\n"
-            "- `src/services/cache.py` — Wrapped `get()` in per-account async lock (+18 −8 lines)\n"
-            "- `tests/test_cache.py` — Added `test_concurrent_reads` race condition test\n\n"
-            "**Results:**\n"
-            "- All 12 tests passing\n"
-            "- PR #2419 created: `fix/GTX-4829-balance-cache-race → main`\n"
-            "- Jira GTX-4829 moved to \"In Review\"\n"
-        ),
-        "review": (
-            "## Code Review Complete\n\n"
-            "I've reviewed PR #42 and found the implementation to be solid overall.\n\n"
-            "### Findings\n"
-            "1. **[Medium]** `src/handler.py:45` — Missing null check on `user_input.email`. "
-            "Could raise `AttributeError` if the field is optional.\n"
-            "2. **[Low]** `src/models.py:12` — Consider `Annotated[str, Field(max_length=255)]` "
-            "for consistency.\n\n"
-            "### Strengths\n"
-            "- Clean separation of concerns between API and service layers\n"
-            "- Good test coverage (92%) with edge cases\n"
-            "- Proper error handling at API boundaries\n\n"
-            "**Verdict:** Approved with minor suggestions. No blocking issues.\n"
-        ),
-        "devops": (
-            "## Incident Triage Complete\n\n"
-            "**Alert:** High API latency (p99 > 2000ms) on `api-gateway`\n"
-            "**Severity:** P2\n\n"
-            "### Root Cause Analysis\n"
-            "1. **Correlated with deployment** — Latency spike began 12 min after `v2.3.1` deploy\n"
-            "2. **Database connection pool** — PostgreSQL connections at 95% capacity\n"
-            "3. **Query analysis** — New endpoint `GET /api/reports` running unoptimized query "
-            "(full table scan on `events` table, 2.1M rows)\n\n"
-            "### Actions Taken\n"
-            "- Created incident ticket INC-789\n"
-            "- Notified on-call engineer (jane.doe)\n\n"
-            "### Recommended Fix\n"
-            "1. **Immediate:** Add index on `events.created_at`\n"
-            "2. **Short-term:** Implement query pagination (limit 100)\n"
-            "3. **Long-term:** Add read replica for reporting queries\n"
-        ),
-    }
-
-    def _detect_agent_type(self, system: str | None) -> str:
-        """Detect agent type from system prompt first line."""
-        if not system:
-            return "default"
-        first_line = system.split("\n")[0].lower()
-        if "coding" in first_line:
-            return "coding"
-        elif "review" in first_line:
-            return "review"
-        elif "devops" in first_line or "sre" in first_line:
-            return "devops"
-        return "default"
-
-    def _count_tool_results(self, messages: list[dict[str, Any]]) -> int:
-        """Count completed tool result rounds to determine current iteration."""
-        count = 0
-        for msg in messages:
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
-                        count += 1
-        return count
-
-    async def create_message(
-        self,
-        *,
-        model: str,
-        max_tokens: int,
-        messages: list[dict[str, Any]],
-        system: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        temperature: float = 1.0,
-        thinking: dict[str, Any] | None = None,
-        stop_sequences: list[str] | None = None,
-    ) -> MessageResponse:
-        import asyncio
-
-        # Simulate API latency (shorter for tool steps)
-        await asyncio.sleep(0.3)
-
-        agent_type = self._detect_agent_type(system)
-        script = self._TOOL_SCRIPTS.get(agent_type, [])
-        tool_result_count = self._count_tool_results(messages)
-
-        # Determine which step we're on based on completed tool results
-        step_index = tool_result_count
-        if step_index < len(script) and tools:
-            # Return a tool_use response for the current scripted step
-            tool_name, tool_input = script[step_index]
-            tool_id = f"toolu_mock_{agent_type}_{step_index:03d}"
-
-            # Add a thinking text before the tool call for realism
-            thinking_texts = {
-                0: f"Let me start by gathering information about this task.",
-                1: f"Good, now let me look at the relevant files.",
-                2: f"I can see the structure. Let me examine the key file.",
-                3: f"I see the issue. Let me search for related code.",
-                4: f"Found the relevant code. Let me implement the fix.",
-                5: f"Changes applied. Let me verify everything works.",
-                6: f"Tests are passing. Let me proceed to the next step.",
-                7: f"Almost done. Let me finalize the changes.",
-                8: f"Creating the deliverable now.",
-                9: f"Wrapping up the remaining steps.",
-            }
-            think_text = thinking_texts.get(step_index, f"Proceeding with step {step_index + 1}.")
-
-            content: list[ContentBlock] = [
-                TextBlock(text=think_text),
-                ToolUseBlock(id=tool_id, name=tool_name, input=tool_input),
-            ]
-            raw_content = [
-                {"type": "text", "text": think_text},
-                {"type": "tool_use", "id": tool_id, "name": tool_name, "input": tool_input},
-            ]
-
-            # Vary token counts per step for realism
-            input_tokens = 1200 + step_index * 180
-            output_tokens = 150 + step_index * 40
-
-            return MessageResponse(
-                content=content,
-                stop_reason="tool_use",
-                usage=TokenUsage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_read_input_tokens=max(0, input_tokens - 400) if step_index > 0 else 0,
-                    cache_creation_input_tokens=400 if step_index == 0 else 0,
-                ),
-                model=model,
-                raw_content=raw_content,
-            )
-
-        # All tool steps complete — return final text response
-        response_text = self._FINAL_RESPONSES.get(agent_type, self._FINAL_RESPONSES["default"])
-
-        return MessageResponse(
-            content=[TextBlock(text=response_text)],
-            stop_reason="end_turn",
-            usage=TokenUsage(
-                input_tokens=1800 + len(script) * 200,
-                output_tokens=520,
-                cache_read_input_tokens=1400 if script else 0,
-            ),
-            model=model,
-            raw_content=[{"type": "text", "text": response_text}],
-        )
-
-    async def create_message_stream(
-        self,
-        *,
-        model: str,
-        max_tokens: int,
-        messages: list[dict[str, Any]],
-        system: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        temperature: float = 1.0,
-        thinking: dict[str, Any] | None = None,
-        stop_sequences: list[str] | None = None,
-    ) -> AsyncIterator[dict[str, Any]]:
-        import asyncio
-        # Mock provider ignores thinking/stop_sequences — just accept them
-        # so the abstract contract is honored and callers don't have to
-        # branch on provider type.
-        _ = (thinking, stop_sequences)
-
-        response = await self.create_message(
-            model=model, max_tokens=max_tokens, messages=messages,
-            system=system, tools=tools, temperature=temperature,
-        )
-        # Simulate streaming text deltas for MockProvider
-        for block in response.content:
-            if hasattr(block, "text") and block.text:
-                words = block.text.split(" ")
-                for i, word in enumerate(words):
-                    delta = word if i == 0 else f" {word}"
-                    yield {
-                        "type": "content_block_delta",
-                        "delta": {"type": "text_delta", "text": delta},
-                    }
-                    await asyncio.sleep(0.01)  # Simulate token generation
-        yield {"type": "_final_message", "data": response}
 
 
 def create_provider(
@@ -974,39 +677,16 @@ def create_provider(
 ) -> ClaudeProvider:
     """Factory function to create the configured Claude provider.
 
-    In debug mode, falls back to MockProvider when no real API credentials
-    are available so the full pipeline works locally without external calls.
+    Always returns a real provider (Anthropic-direct or Bedrock). If the
+    underlying credentials are missing or invalid, the FIRST real API call
+    will raise — that is intentional. We do not synthesize mock responses
+    in any environment. A visible failure is always preferable to a silent
+    one, especially in debug runs where a false-positive pipeline can leak
+    fictional data into Jira / GitHub.
     """
     settings = get_settings()
     if provider_type is None:
         provider_type = settings.claude_provider
-
-    # In debug mode with no API key, use mock provider for local dev
-    if settings.debug:
-        if provider_type == ClaudeProviderType.ANTHROPIC and (
-            not settings.anthropic_api_key
-            or settings.anthropic_api_key.startswith("sk-placeholder")
-        ):
-            logger.info("Debug mode: no API key configured — using MockProvider")
-            return MockProvider()
-        if provider_type == ClaudeProviderType.BEDROCK:
-            # Settings-level creds (from .env.local) win — they bypass both
-            # the ~/.aws/credentials default profile and the default chain.
-            if settings.aws_access_key_id and settings.aws_secret_access_key:
-                logger.info("Debug mode: using Bedrock with settings creds")
-            else:
-                # No settings creds → probe the default boto chain. Fall back
-                # to Mock if it returns nothing or the LocalStack 'test' key.
-                try:
-                    import botocore.session
-                    session = botocore.session.get_session()
-                    creds = session.get_credentials()
-                    if not creds or not creds.access_key or creds.access_key == "test":
-                        logger.info("Debug mode: no real AWS credentials — using MockProvider")
-                        return MockProvider()
-                except Exception:
-                    logger.info("Debug mode: AWS credentials check failed — using MockProvider")
-                    return MockProvider()
 
     providers = {
         ClaudeProviderType.ANTHROPIC: AnthropicProvider,

@@ -1,8 +1,8 @@
 """Sandbox execution -- runs Claude Code CLI in an isolated Docker container.
 
-Two modes (configured via ``AI_DRIVEN_SANDBOX_MODE``):
-- **mock**: Returns simulated results for local development without Docker.
-- **docker**: Runs the real Claude Code CLI in an isolated container.
+Docker is required; there is no mock mode. ``AI_DRIVEN_SANDBOX_MODE`` is
+kept for forward-compatibility with future backends (e.g. Firecracker) but
+currently only ``docker`` is accepted.
 """
 
 from __future__ import annotations
@@ -57,52 +57,6 @@ class BaseSandboxExecutor(ABC):
     ) -> SandboxResult:
         """Run a single shell command in the sandbox."""
         ...
-
-
-class MockSandboxExecutor(BaseSandboxExecutor):
-    """Mock sandbox for local development — no Docker required.
-
-    Returns realistic simulated results so the full agent loop can
-    be exercised locally without building the sandbox Docker image.
-    """
-
-    async def execute(
-        self,
-        repo_url: str,
-        branch: str,
-        task_prompt: str,
-        *,
-        clone_token: str | None = None,
-        timeout: int = 600,
-    ) -> SandboxResult:
-        logger.info(
-            "[MockSandbox] Simulating execution: repo=%s branch=%s prompt=%.80s...",
-            repo_url,
-            branch,
-            task_prompt,
-        )
-        return SandboxResult(
-            success=True,
-            stdout=f"[mock] Claude Code CLI executed successfully.\nPrompt: {task_prompt[:200]}",
-            stderr="",
-            exit_code=0,
-            diff="--- a/src/example.py\n+++ b/src/example.py\n@@ -1,3 +1,5 @@\n+# AI-generated implementation\n+\n def main():\n     pass\n",
-            changed_files=["src/example.py"],
-        )
-
-    async def run_command(
-        self,
-        command: str,
-        working_dir: str = ".",
-        timeout_seconds: int = 120,
-    ) -> SandboxResult:
-        logger.info("[MockSandbox] Simulating command: %s (in %s)", command, working_dir)
-        return SandboxResult(
-            success=True,
-            stdout=f"[mock] Command executed: {command}",
-            stderr="",
-            exit_code=0,
-        )
 
 
 class SandboxExecutor(BaseSandboxExecutor):
@@ -318,10 +272,18 @@ class SandboxExecutor(BaseSandboxExecutor):
 
 
 def create_sandbox() -> BaseSandboxExecutor:
-    """Factory: return mock or Docker sandbox based on config."""
+    """Factory: return the Docker sandbox.
+
+    The only supported mode is ``docker``. Any other value in
+    ``AI_DRIVEN_SANDBOX_MODE`` raises — we do not silently substitute a
+    mock, because that was how fictional pipeline data used to appear in
+    real workflows.
+    """
     settings = get_settings()
-    if settings.sandbox_mode == "docker":
-        logger.info("Using Docker sandbox executor")
-        return SandboxExecutor()
-    logger.info("Using mock sandbox executor (local dev)")
-    return MockSandboxExecutor()
+    if settings.sandbox_mode != "docker":
+        raise RuntimeError(
+            f"AI_DRIVEN_SANDBOX_MODE={settings.sandbox_mode!r} is not supported. "
+            "Only 'docker' is valid. Mock sandbox has been removed."
+        )
+    logger.info("Using Docker sandbox executor")
+    return SandboxExecutor()
