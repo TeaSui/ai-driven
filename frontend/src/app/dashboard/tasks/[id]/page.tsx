@@ -153,6 +153,11 @@ function FileTab({
 const FILE_WRITE_TOOLS = new Set([
   'file.write', 'file_write', 'repo.write_file', 'repo_write_file', 'write_file',
 ])
+// Batch variants carry `files: [{path, content}, ...]` instead of a single
+// path/content pair. Handled separately below.
+const FILE_WRITE_BATCH_TOOLS = new Set([
+  'file.write_batch', 'file_write_batch', 'write_batch',
+])
 const SHELL_TOOLS = new Set([
   'sandbox.execute', 'sandbox_execute', 'shell.run', 'shell_run', 'sandbox.run_tests',
 ])
@@ -231,6 +236,21 @@ function extractWorkArtifacts(events: AgentEvent[]): {
         message: (merged.commit_message || merged.message) as string | undefined,
         branch: merged.branch as string | undefined,
       })
+    } else if (FILE_WRITE_BATCH_TOOLS.has(toolName)) {
+      // Shape: { files: [{path, content}, ...], branch, commit_message }
+      const files = (merged.files as Array<Record<string, unknown>> | undefined) ?? []
+      const commonBranch = merged.branch as string | undefined
+      const commonMessage = (merged.commit_message || merged.message) as string | undefined
+      for (const f of files) {
+        const p = (f?.path as string) || ''
+        if (!p) continue
+        edits.push({
+          path: p,
+          content: (f?.content as string) || '',
+          message: commonMessage,
+          branch: commonBranch,
+        })
+      }
     } else if (SHELL_TOOLS.has(toolName)) {
       runs.push({
         command: (merged.command || merged.args || toolName) as string,
