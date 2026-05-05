@@ -1,8 +1,8 @@
-"""T24 unit tests for auth/middleware.require_admin.
+"""Unit tests for auth/middleware.require_admin.
 
-Exercises the three auth paths (session token, X-API-Key, debug) and
+Exercises the two accepted auth paths (session token, X-API-Key) and
 the role guard (owner/admin pass; member/viewer get 403; no auth gets
-401).
+401). The debug-mode sentinel bypass has been removed.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 
 @pytest.fixture
-def _fake_request(monkeypatch):
+def _fake_request():
     def _build(state_kwargs: dict) -> SimpleNamespace:
         # FastAPI's Request exposes .state but mocking a real Request is
         # heavy. All we need is ``request.state.<attr>`` lookup.
@@ -36,11 +36,7 @@ async def test_require_admin_session_owner_passes(_fake_request):
         "team_role": "owner",
         "member_id": "22222222-2222-2222-2222-222222222222",
     })
-    # Avoid the debug bypass branch (requires settings.debug=True AND
-    # team_id == sentinel). Our team_id is non-sentinel.
-    with patch("ai_driven.auth.middleware.get_settings") as gs:
-        gs.return_value = SimpleNamespace(debug=False)
-        info = await require_admin(req)
+    info = await require_admin(req)
 
     assert isinstance(info, TeamMemberInfo)
     assert info.role == "owner"
@@ -56,9 +52,7 @@ async def test_require_admin_session_admin_passes(_fake_request):
         "team_role": "admin",
         "member_id": "22222222-2222-2222-2222-222222222222",
     })
-    with patch("ai_driven.auth.middleware.get_settings") as gs:
-        gs.return_value = SimpleNamespace(debug=False)
-        info = await require_admin(req)
+    info = await require_admin(req)
     assert info.role == "admin"
 
 
@@ -71,10 +65,8 @@ async def test_require_admin_member_gets_403(_fake_request):
         "team_role": "member",
         "member_id": "22222222-2222-2222-2222-222222222222",
     })
-    with patch("ai_driven.auth.middleware.get_settings") as gs:
-        gs.return_value = SimpleNamespace(debug=False)
-        with pytest.raises(HTTPException) as excinfo:
-            await require_admin(req)
+    with pytest.raises(HTTPException) as excinfo:
+        await require_admin(req)
     assert excinfo.value.status_code == 403
 
 
@@ -87,10 +79,8 @@ async def test_require_admin_viewer_gets_403(_fake_request):
         "team_role": "viewer",
         "member_id": "22222222-2222-2222-2222-222222222222",
     })
-    with patch("ai_driven.auth.middleware.get_settings") as gs:
-        gs.return_value = SimpleNamespace(debug=False)
-        with pytest.raises(HTTPException) as excinfo:
-            await require_admin(req)
+    with pytest.raises(HTTPException) as excinfo:
+        await require_admin(req)
     assert excinfo.value.status_code == 403
 
 
@@ -125,9 +115,7 @@ async def test_require_admin_apikey_team_level_owner_passes(_fake_request):
     fake_factory.return_value.__aenter__ = AsyncMock(return_value=session)
     fake_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("ai_driven.auth.middleware.get_settings") as gs, \
-         patch("ai_driven.db.postgres.session.async_session_factory", fake_factory):
-        gs.return_value = SimpleNamespace(debug=False)
+    with patch("ai_driven.db.postgres.session.async_session_factory", fake_factory):
         info = await require_admin(req)
     assert info.role == "owner"
     assert info.member_id == SYSTEM_MEMBER_ID
@@ -159,9 +147,7 @@ async def test_require_admin_apikey_member_with_member_role_403(_fake_request):
     fake_factory.return_value.__aenter__ = AsyncMock(return_value=session)
     fake_factory.return_value.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("ai_driven.auth.middleware.get_settings") as gs, \
-         patch("ai_driven.db.postgres.session.async_session_factory", fake_factory):
-        gs.return_value = SimpleNamespace(debug=False)
+    with patch("ai_driven.db.postgres.session.async_session_factory", fake_factory):
         with pytest.raises(HTTPException) as excinfo:
             await require_admin(req)
     assert excinfo.value.status_code == 403

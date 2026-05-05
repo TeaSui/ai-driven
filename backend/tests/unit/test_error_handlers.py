@@ -70,19 +70,16 @@ def _create_test_app(*, debug: bool = False) -> FastAPI:
     return app
 
 
-def _mock_settings(debug: bool = False) -> MagicMock:
+def _mock_settings(*, local: bool = False) -> MagicMock:
     """Mock settings for error-handler tests.
 
     The handler gates stack-trace exposure on ``settings.environment.value
-    != "production"``. We still accept a ``debug`` kwarg so existing test
-    call sites don't need to change; it maps to local/production envs.
+    != "production"``. ``local=True`` mimics local-dev behaviour (stack
+    traces exposed); ``local=False`` mimics production (sanitized).
     """
     settings = MagicMock()
-    # Keep for backwards compat — not read by the handler anymore.
-    settings.debug = debug
-    # New gate: "local" shows stack traces; "production" hides them.
     settings.environment = MagicMock()
-    settings.environment.value = "local" if debug else "production"
+    settings.environment.value = "local" if local else "production"
     return settings
 
 
@@ -153,7 +150,7 @@ class TestGenericExceptionHandler:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch(
                 "ai_driven.config.get_settings",
-                return_value=_mock_settings(debug=False),
+                return_value=_mock_settings(local=False),
             ):
                 resp = await client.get("/raise-unhandled")
 
@@ -172,7 +169,7 @@ class TestGenericExceptionHandler:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch(
                 "ai_driven.config.get_settings",
-                return_value=_mock_settings(debug=True),
+                return_value=_mock_settings(local=True),
             ):
                 resp = await client.get("/raise-unhandled")
 
@@ -188,13 +185,13 @@ class TestGenericExceptionHandler:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch(
                 "ai_driven.config.get_settings",
-                return_value=_mock_settings(debug=True),
+                return_value=_mock_settings(local=True),
             ):
                 resp = await client.get("/raise-sql-error")
 
         assert resp.status_code == 500
         body = resp.json()
-        # Even in debug mode, SQL should be hidden
+        # Even in local env where stack traces are exposed, SQL should be hidden
         assert "SELECT" not in body["error"]["message"]
         assert body["error"]["message"] == "An unexpected error occurred"
 
@@ -205,7 +202,7 @@ class TestGenericExceptionHandler:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch(
                 "ai_driven.config.get_settings",
-                return_value=_mock_settings(debug=True),
+                return_value=_mock_settings(local=True),
             ):
                 resp = await client.get("/raise-path-error")
 
@@ -221,7 +218,7 @@ class TestGenericExceptionHandler:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             with patch(
                 "ai_driven.config.get_settings",
-                return_value=_mock_settings(debug=True),
+                return_value=_mock_settings(local=True),
             ):
                 resp = await client.get("/raise-unhandled")
 

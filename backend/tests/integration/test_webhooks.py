@@ -45,7 +45,6 @@ def test_settings():
     """Settings with test defaults, avoiding DB/SQS initialization."""
     return Settings(
         environment="local",
-        debug=True,
         github_webhook_secret="test-secret",
         postgres_password="test",
         sqs_task_queue_url="https://sqs.us-east-1.amazonaws.com/123/test-tasks",
@@ -93,7 +92,7 @@ def mock_dependencies(test_repo_id, test_team_id):
         "producer_jira": patch("ai_driven.api.webhooks.jira.TaskProducer", return_value=mock_producer),
         "producer_dd": patch("ai_driven.api.webhooks.datadog.TaskProducer", return_value=mock_producer),
         "settings": patch("ai_driven.api.webhooks.github.get_settings", return_value=Settings(
-            environment="local", debug=True, github_webhook_secret="test-secret", postgres_password="test",
+            environment="local", github_webhook_secret="test-secret", postgres_password="test",
         )),
     }
 
@@ -124,7 +123,7 @@ async def client(mock_dependencies):
         patch("ai_driven.observability.logging.setup_logging"),
         patch("ai_driven.observability.tracing.setup_tracing"),
         patch("ai_driven.config.get_settings", return_value=Settings(
-            environment="local", debug=True, github_webhook_secret="test-secret", postgres_password="test",
+            environment="local", github_webhook_secret="test-secret", postgres_password="test",
         )),
     ):
         from ai_driven.main import create_app
