@@ -279,14 +279,14 @@ Tips:
 
 ## Sources
 
-- `../docs/2. Model capabilities/1. Building with extended thinking.md`
-- `../docs/2. Model capabilities/2. Adaptive thinking.md`
-- `../docs/2. Model capabilities/3. Effort.md`
-- `../docs/2. Model capabilities/4. Task budgets.md`
-- `../docs/2. Model capabilities/5. Fast mode (beta: research preview).md`
-- `../docs/2. Model capabilities/6. Structured outputs.md`
-- `../docs/2. Model capabilities/7. Citations.md`
-- `../docs/2. Model capabilities/9. Batch processing.md`
-- `../docs/2. Model capabilities/10. Search results.md`
-- `../docs/2. Model capabilities/12. Multilingual support.md`
-- `../docs/2. Model capabilities/13. Embeddings.md`
+- `../docs/model-capabilities/extended-thinking.md`
+- `../docs/model-capabilities/adaptive-thinking.md`
+- `../docs/model-capabilities/effort.md`
+- `../docs/model-capabilities/task-budgets.md`
+- `../docs/model-capabilities/fast-mode.md`
+- `../docs/model-capabilities/structured-outputs.md`
+- `../docs/model-capabilities/citations.md`
+- `../docs/model-capabilities/batch-processing.md`
+- `../docs/model-capabilities/search-results.md`
+- `../docs/model-capabilities/multilingual-support.md`
+- `../docs/model-capabilities/embeddings.md`

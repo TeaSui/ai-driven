@@ -234,6 +234,6 @@ Starts a dev server on a local port and opens a browser harness. Test Tools → 
 
 ## Sources
 
-- `../docs/8. MCP/1. Remote MCP servers.md`
-- `../docs/8. MCP/2. MCP connector.md`
+- `../docs/mcp/remote-mcp-servers.md`
+- `../docs/mcp/mcp-connector.md`
 - MCP SDK reference (official modelcontextprotocol docs — FastMCP patterns)

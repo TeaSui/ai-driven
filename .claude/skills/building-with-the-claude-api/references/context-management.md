@@ -171,8 +171,8 @@ Gotchas:
 
 ## Sources
 
-- `../docs/5. Context management/1. Context windows.md`
-- `../docs/5. Context management/2. Compaction.md`
-- `../docs/5. Context management/3. Context editing.md`
-- `../docs/5. Context management/4. Prompt caching.md`
-- `../docs/5. Context management/5. Token counting.md`
+- `../docs/context-management/context-windows.md`
+- `../docs/context-management/compaction.md`
+- `../docs/context-management/context-editing.md`
+- `../docs/context-management/prompt-caching.md`
+- `../docs/context-management/token-counting.md`

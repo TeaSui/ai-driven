@@ -133,8 +133,8 @@ Process:
 
 ## Sources
 
-- `../docs/7. Skill/1. Agent Skills.md`
-- `../docs/7. Skill/2. Get started with Agent Skills in the API.md`
-- `../docs/7. Skill/3. Skill authoring best practices.md`
-- `../docs/7. Skill/4. Skills for enterprise.md`
-- `../docs/7. Skill/5. Using Agent Skills with the API.md`
+- `../docs/skills/agent-skills-overview.md`
+- `../docs/skills/get-started.md`
+- `../docs/skills/authoring-best-practices.md`
+- `../docs/skills/skills-for-enterprise.md`
+- `../docs/skills/using-skills-with-the-api.md`

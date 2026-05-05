@@ -269,8 +269,8 @@ See [context-management.md#prompt-caching](context-management.md#prompt-caching)
 
 ## Sources
 
-- `../docs/3. Tool/1-6` (concepts through parallel)
-- `../docs/3. Tool/7. Tool Runner (SDK).md`
-- `../docs/3. Tool/8. Strict tool use.md`
-- `../docs/3. Tool/9. Tool use with prompt caching.md`
-- `../docs/3. Tool/11. Troubleshooting tool use.md`
+- `../docs/tools/tool-use-overview.md` through `../docs/tools/parallel-tool-use.md` (concepts through parallel)
+- `../docs/tools/tool-runner-sdk.md`
+- `../docs/tools/strict-tool-use.md`
+- `../docs/tools/tool-use-with-prompt-caching.md`
+- `../docs/tools/troubleshooting-tool-use.md`

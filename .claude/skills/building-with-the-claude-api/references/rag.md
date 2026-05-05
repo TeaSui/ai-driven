@@ -238,4 +238,4 @@ For citation-grade answers, see [advanced-features.md#citations](advanced-featur
 
 ## Sources
 
-Distilled from the prior 62-lesson curriculum (lessons 32–37 plus 35a). The source lessons have been retired; this reference is self-contained. Embedding model details live alongside `../docs/2. Model capabilities/13. Embeddings.md`. See [additional-notes.md § S4](additional-notes.md#s4--ragmd--depth-additions) for depth addenda (normalization, BM25 walkthrough, RRF worked example, Voyage setup).
+Distilled from the prior 62-lesson curriculum (lessons 32–37 plus 35a). The source lessons have been retired; this reference is self-contained. Embedding model details live alongside `../docs/model-capabilities/embeddings.md`. See [additional-notes.md § S4](additional-notes.md#s4--ragmd--depth-additions) for depth addenda (normalization, BM25 walkthrough, RRF worked example, Voyage setup).

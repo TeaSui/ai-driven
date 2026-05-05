@@ -117,6 +117,6 @@ Gotchas:
 
 ## Sources
 
-- `../docs/6. Working with files/1. Files API.md`
-- `../docs/6. Working with files/2. PDF support.md`
-- `../docs/6. Working with files/3. Images and Vision.md`
+- `../docs/files/files-api.md`
+- `../docs/files/pdf-support.md`
+- `../docs/files/images-and-vision.md`

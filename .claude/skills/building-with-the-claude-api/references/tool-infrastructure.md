@@ -144,9 +144,9 @@ Avoid:
 
 ## Sources
 
-- `../docs/4. Tool infrastructure /1. Tool reference.md`
-- `../docs/4. Tool infrastructure /2. Manage tool context.md`
-- `../docs/4. Tool infrastructure /3. Tool combinations.md`
-- `../docs/4. Tool infrastructure /4. Tool search tool.md`
-- `../docs/4. Tool infrastructure /5. Programmatic tool calling.md`
-- `../docs/4. Tool infrastructure /6. Fine-grained tool streaming.md`
+- `../docs/tool-infrastructure/tool-reference.md`
+- `../docs/tool-infrastructure/manage-tool-context.md`
+- `../docs/tool-infrastructure/tool-combinations.md`
+- `../docs/tool-infrastructure/tool-search-tool.md`
+- `../docs/tool-infrastructure/programmatic-tool-calling.md`
+- `../docs/tool-infrastructure/fine-grained-tool-streaming.md`

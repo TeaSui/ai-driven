@@ -81,7 +81,7 @@ ORDER BY revenue_date;
 ### Pattern: Recursive CTE (Hierarchies)
 
 ```sql
--- Organization hierarchy (PostgreSQL and MySQL 8+)
+-- 1. Organization hierarchy (PostgreSQL and MySQL 8+)
 WITH RECURSIVE org_tree AS (
     -- Base: top-level managers
     SELECT id, name, manager_id, 1 AS depth, ARRAY[id] AS path

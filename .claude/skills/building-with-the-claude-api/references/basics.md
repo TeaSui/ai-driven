@@ -220,8 +220,8 @@ The assistant prefix forces JSON syntax; `stop_sequences` halts before the closi
 
 ## Sources
 
-- `../docs/1. Building with Claude/2. Using the Messages API.md`
-- `../docs/1. Building with Claude/3. Handling stop reasons.md`
-- `../docs/2. Model capabilities/8. Streaming Messages.md`
-- `../docs/2. Model capabilities/6. Structured outputs.md`
-- `../docs/2. Model capabilities/11. Streaming refusals.md`
+- `../docs/messages-api/using-the-messages-api.md`
+- `../docs/messages-api/handling-stop-reasons.md`
+- `../docs/model-capabilities/streaming-messages.md`
+- `../docs/model-capabilities/structured-outputs.md`
+- `../docs/model-capabilities/streaming-refusals.md`

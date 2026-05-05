@@ -263,12 +263,12 @@ Never include a standalone `code_execution` tool alongside `_20260209` web tools
 
 ## Sources
 
-- `../docs/3. Tool/10. Server tools.md`
-- `../docs/3. Tool/12. Web search tool.md`
-- `../docs/3. Tool/13. Web fetch tool.md`
-- `../docs/3. Tool/14. Code execution tool.md`
-- `../docs/3. Tool/15. Advisor tool.md`
-- `../docs/3. Tool/16. Memory tool.md`
-- `../docs/3. Tool/17. Bash tool.md`
-- `../docs/3. Tool/18. Computer use tool.md`
-- `../docs/3. Tool/19. Text editor tool.md`
+- `../docs/tools/server-tools.md`
+- `../docs/tools/web-search-tool.md`
+- `../docs/tools/web-fetch-tool.md`
+- `../docs/tools/code-execution-tool.md`
+- `../docs/tools/advisor-tool.md`
+- `../docs/tools/memory-tool.md`
+- `../docs/tools/bash-tool.md`
+- `../docs/tools/computer-use-tool.md`
+- `../docs/tools/text-editor-tool.md`
