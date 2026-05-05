@@ -128,7 +128,23 @@ export interface InsightsData {
 
 import { authFetch } from './auth'
 
-const f = (url: string) => authFetch(url).then(r => r.json())
+// Shared GET helper used by ~a dozen endpoints. Surface HTTP errors and
+// non-JSON bodies as a real Error instead of letting r.json() throw an
+// opaque "Unexpected token 'I', \"Internal S\"..." when the backend returns
+// a plain-text 5xx. One extra buffer hop (r.text()) is worth the clarity.
+const f = async (url: string) => {
+  const r = await authFetch(url)
+  const text = await r.text()
+  if (!r.ok) {
+    const body = text ? `: ${text.slice(0, 200)}` : ''
+    throw new Error(`${r.status} ${r.statusText}${body}`)
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(`Invalid JSON from ${url}: ${text.slice(0, 200)}`)
+  }
+}
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   return f('/api/admin/dashboard')
