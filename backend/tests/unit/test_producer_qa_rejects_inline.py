@@ -1,9 +1,9 @@
-"""T22 blocker-fix 1: QA must never fall through to the inline path.
+"""Producer.enqueue_task raises when no SQS queue URL is configured.
 
-Producer.enqueue_task explicitly raises RuntimeError when the agent_type
-is 'qa' AND the debug/inline fallback would be taken (debug mode OR
-missing sqs_qa_queue_url). The inline path only knows the legacy agent
-types and would crash on a QA payload otherwise.
+The inline/debug fallback path has been removed — ``TaskProducer`` MUST
+resolve a real queue URL for every agent type. A missing URL surfaces
+as a loud ``RuntimeError`` at dispatch time instead of silently routing
+through a legacy inline processor.
 """
 from __future__ import annotations
 
@@ -22,53 +22,35 @@ def _clear_cache():
 
 
 @pytest.mark.asyncio
-async def test_enqueue_qa_raises_in_debug_mode(monkeypatch):
-    monkeypatch.setenv("AI_DRIVEN_DEBUG", "true")
-    # Provide a queue URL so the fail path can ONLY be the debug branch.
-    monkeypatch.setenv("AI_DRIVEN_SQS_QA_QUEUE_URL",
-                        "https://sqs/local/ai-driven-qa-tasks")
-    get_settings.cache_clear()
-
-    producer = TaskProducer()
-    with pytest.raises(RuntimeError, match="QA worker cannot run inline"):
-        await producer.enqueue_task(
-            task_id="t1", agent_type="qa", payload={},
-        )
-
-
-@pytest.mark.asyncio
 async def test_enqueue_qa_raises_when_queue_url_missing(monkeypatch):
-    monkeypatch.setenv("AI_DRIVEN_DEBUG", "false")
+    """QA with no queue URL configured → RuntimeError, no silent fallback."""
     monkeypatch.setenv("AI_DRIVEN_SQS_QA_QUEUE_URL", "")
     get_settings.cache_clear()
 
     producer = TaskProducer()
-    with pytest.raises(RuntimeError, match="QA worker cannot run inline"):
+    with pytest.raises(RuntimeError, match="No SQS queue URL configured"):
         await producer.enqueue_task(
             task_id="t1", agent_type="qa", payload={},
         )
 
 
 @pytest.mark.asyncio
-async def test_enqueue_non_qa_agent_still_uses_inline_fallback(monkeypatch):
-    """Regression guard: the new raise branch must ONLY fire for qa."""
-    monkeypatch.setenv("AI_DRIVEN_DEBUG", "true")
-    monkeypatch.setenv("AI_DRIVEN_SQS_QA_QUEUE_URL", "")
+async def test_enqueue_coding_raises_when_queue_url_missing(monkeypatch):
+    """Same rule applies to every agent_type now, not just qa."""
+    # Clear every possible queue URL so the lookup yields empty.
+    for var in (
+        "AI_DRIVEN_SQS_TASK_QUEUE_URL",
+        "AI_DRIVEN_SQS_REVIEW_QUEUE_URL",
+        "AI_DRIVEN_SQS_DEVOPS_QUEUE_URL",
+        "AI_DRIVEN_SQS_ORCHESTRATOR_QUEUE_URL",
+        "AI_DRIVEN_SQS_QA_QUEUE_URL",
+    ):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("AI_DRIVEN_ORCHESTRATOR_MODE", "off")
     get_settings.cache_clear()
 
     producer = TaskProducer()
-    # Any non-qa agent must still fall through to the inline path without
-    # raising. We patch _process_task_inline to short-circuit; we only care
-    # that RuntimeError is NOT raised.
-    import ai_driven.api.chat.router as router_mod
-
-    called = {}
-
-    async def fake_inline(*args, **kwargs):
-        called["yes"] = True
-
-    monkeypatch.setattr(router_mod, "_process_task_inline", fake_inline)
-    result = await producer.enqueue_task(
-        task_id="t1", agent_type="coding", payload={"message": "hi"},
-    )
-    assert result.startswith("inline-")
+    with pytest.raises(RuntimeError, match="No SQS queue URL configured"):
+        await producer.enqueue_task(
+            task_id="t1", agent_type="coding", payload={"message": "hi"},
+        )

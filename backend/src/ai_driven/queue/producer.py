@@ -82,36 +82,17 @@ class TaskProducer:
 
         queue_url = self._queue_map.get(effective_queue_type)
 
-        # T22 blocker-fix 1: QA never runs inline. The debug/inline fallback
-        # below dispatches through `_process_task_inline` which only knows
-        # the legacy agent types (coding/review/devops). A QA payload hitting
-        # that path would crash. Fail loudly so a misconfigured env surfaces
-        # immediately instead of silently dropping QA runs.
-        if agent_type == "qa" and (settings.debug or not queue_url):
+        # A missing queue URL is a configuration error — fail loudly rather
+        # than silently routing through an inline fallback that used to
+        # exist for local dev. The caller is responsible for ensuring all
+        # relevant AI_DRIVEN_SQS_*_QUEUE_URL values are set in the
+        # environment before accepting traffic.
+        if not queue_url:
             raise RuntimeError(
-                "QA worker cannot run inline/debug — configure "
-                "AI_DRIVEN_SQS_QA_QUEUE_URL and disable debug mode."
+                f"No SQS queue URL configured for queue_type={effective_queue_type!r} "
+                f"(agent_type={agent_type!r}). Set the appropriate "
+                f"AI_DRIVEN_SQS_*_QUEUE_URL environment variable."
             )
-
-        # Local-dev / debug fallback: if SQS is unconfigured or the queue URL
-        # is missing, process inline instead of crashing the webhook.
-        if settings.debug or not queue_url:
-            import asyncio
-            from ai_driven.api.chat.router import _process_task_inline
-
-            message = payload.get("message") or payload.get("title") or ""
-            ctx = payload.get("context") or {}
-            trace_ctx = get_trace_context()
-            team_id = trace_ctx.get("team_id") or ""
-            asyncio.create_task(
-                _process_task_inline(task_id, agent_type, str(message), ctx, team_id=team_id)
-            )
-            logger.info(
-                "task_enqueued_inline_fallback",
-                extra={"task_id": task_id, "agent_type": agent_type,
-                       "reason": "debug" if settings.debug else "no_queue_url"},
-            )
-            return f"inline-{task_id}"
 
         # Propagate trace context so the worker can continue the same trace.
         # We ALSO stamp the current orchestrator_mode onto the message body so
@@ -142,25 +123,15 @@ class TaskProducer:
             },
         }
 
-        try:
-            response = self._sqs.send_message(
-                QueueUrl=queue_url,
-                MessageBody=json.dumps(message),
-                MessageGroupId=effective_queue_type,
-            )
-        except Exception as ex:
-            # Last-resort fallback so a transient SQS outage doesn't drop events.
-            logger.warning("SQS send failed (%s); processing inline as fallback", ex)
-            import asyncio
-            from ai_driven.api.chat.router import _process_task_inline
-            trace_ctx = get_trace_context()
-            team_id = trace_ctx.get("team_id") or ""
-            asyncio.create_task(
-                _process_task_inline(task_id, agent_type,
-                                     str(payload.get("message") or payload.get("title") or ""),
-                                     payload.get("context") or {}, team_id=team_id)
-            )
-            return f"inline-fallback-{task_id}"
+        # Let SQS send failures propagate — the caller logs and returns
+        # the error to the user. A silent inline fallback here used to
+        # hide transient outages; surfacing them makes the real failure
+        # mode obvious (and retry-able).
+        response = self._sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(message),
+            MessageGroupId=effective_queue_type,
+        )
 
         message_id = response["MessageId"]
         logger.info(

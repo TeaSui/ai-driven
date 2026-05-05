@@ -1,4 +1,4 @@
-.PHONY: install dev test test-all test-cov lint format run run-live worker frontend-dev docker-up docker-down clean
+.PHONY: install dev test test-all test-cov lint format run worker frontend-dev frontend-clean docker-up docker-down clean
 
 # Pinned to the repo-root venv so `python` / `pip` / `pytest` resolve even
 # when the user's shell PATH doesn't have the venv activated.
@@ -32,15 +32,11 @@ format:
 	cd backend && $(RUFF) format src/ tests/
 	cd backend && $(RUFF) check --fix src/ tests/
 
-# Debug-mode run (auth bypass + inline task processing). Use for frontend
-# UI iteration where you don't care about real auth flows.
+# Real-mode run (auth enforced, SQS-backed task dispatch, matches what
+# production sees). The debug auth-bypass mode has been removed — any
+# request without a valid X-API-Key or session cookie gets 401.
 run:
-	cd backend && set -a && . ./.env.local && set +a && AI_DRIVEN_DEBUG=true $(UVICORN) ai_driven.main:app --host 0.0.0.0 --port 8888 --reload
-
-# Live-mode run (auth enforced, orchestrator_mode respects .env.local).
-# Use this for real end-to-end flows — matches what production sees.
-run-live:
-	cd backend && set -a && . ./.env.local && set +a && $(UVICORN) ai_driven.main:app --host 127.0.0.1 --port 8888
+	cd backend && set -a && . ./.env.local && set +a && $(UVICORN) ai_driven.main:app --host 127.0.0.1 --port 8888 --reload
 
 worker:
 	cd backend && set -a && . ./.env.local && set +a && $(PY) -m ai_driven.worker

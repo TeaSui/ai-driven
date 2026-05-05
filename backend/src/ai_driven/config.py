@@ -25,11 +25,10 @@ class Settings(BaseSettings):
     # App
     app_name: str = "ai-driven"
     environment: Environment = Environment.LOCAL
-    debug: bool = False
     log_level: str = "INFO"
-    # Echo every SQL statement to stdout. Gated separately from `debug` so
-    # local dev can run without the verbosity. AI_DRIVEN_SQL_ECHO=true turns
-    # it on without pulling in any other debug-mode behaviour.
+    # Echo every SQL statement to stdout. Local-dev convenience; off by
+    # default. AI_DRIVEN_SQL_ECHO=true turns it on independently of
+    # environment or log level.
     sql_echo: bool = False
     task_timeout_seconds: int = 1200  # 20 minutes hard cap per task
 

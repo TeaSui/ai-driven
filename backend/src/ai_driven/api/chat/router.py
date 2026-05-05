@@ -84,219 +84,6 @@ class ChatResponse(CamelModel):
     message: str
 
 
-async def _process_task_inline(task_id: str, agent_type: str, message: str, context: dict[str, Any], team_id: str = "") -> None:
-    """Process a task inline in debug mode — no SQS worker needed.
-
-    Creates the appropriate agent, runs it with the task_id so events
-    are published to Redis, and updates the task status in PostgreSQL.
-    """
-    from ai_driven.agents.coding.agent import CodingAgent
-    from ai_driven.agents.devops.agent import DevOpsAgent
-    from ai_driven.agents.reviewer.agent import ReviewAgent
-    from ai_driven.db.postgres.repository import TaskRepository
-    from ai_driven.db.postgres.session import async_session_factory
-
-    # Bind trace context for inline processing (no SQS propagation in debug mode)
-    bind_task(task_id, agent_type=agent_type)
-    if team_id:
-        bind_team(team_id)
-
-    agent_map: dict[str, type] = {
-        "coding": CodingAgent,
-        "review": ReviewAgent,
-        "devops": DevOpsAgent,
-    }
-
-    AgentClass = agent_map.get(agent_type)
-    if not AgentClass:
-        logger.error("Unknown agent type for inline processing: %s", agent_type)
-        return
-
-    try:
-        # Update task status to running
-        async with async_session_factory() as session:
-            task_repo = TaskRepository(session)
-            await task_repo.update_status(uuid.UUID(task_id), "planning")
-            await session.commit()
-
-        # T20: debug-mode orchestrator coverage. In production the orchestrator
-        # runs as an SQS worker before the coding-task is enqueued. Debug mode
-        # bypasses SQS entirely, so we run orchestrate() inline here — BEFORE
-        # the CodingAgent — so specialist artifacts + classifier tier are
-        # persisted just like in production.
-        settings_inner = get_settings()
-        if agent_type == "coding" and settings_inner.orchestrator_mode != "off":
-            try:
-                from datetime import datetime, timezone
-
-                from ai_driven.agents.orchestrator.agent import OrchestratorAgent
-                from ai_driven.queue.consumer import _build_orchestrate_payload
-
-                orch_payload = _build_orchestrate_payload(
-                    {"message": message, **context}, task_id
-                )
-                orch_result = await OrchestratorAgent().orchestrate(orch_payload)
-                async with async_session_factory() as session:
-                    task_repo = TaskRepository(session)
-                    marker: dict[str, Any] = {
-                        "orchestrator_completed_at": datetime.now(
-                            timezone.utc
-                        ).isoformat(),
-                        "classifier_tier": orch_result.get("tier"),
-                    }
-                    if orch_result.get("halted_on"):
-                        marker["orchestrator_halted_on"] = orch_result["halted_on"]
-                    await task_repo.update_output_data(uuid.UUID(task_id), marker)
-                    await session.commit()
-            except Exception:
-                logger.exception(
-                    "inline_orchestrator_run_failed (non-fatal; continuing with coding)"
-                )
-
-        # Create Jira client if configured
-        jira_client = None
-        if settings_inner.jira_base_url and settings_inner.jira_api_token:
-            from ai_driven.jira.client import JiraClient
-            jira_client = JiraClient()
-
-        # Create SCM client based on the registered repo's scm_type (not the
-        # first-non-empty credential). Without this, a Bitbucket-registered
-        # repo would silently get GitHubClient whenever GITHUB_TOKEN is set.
-        scm_client = None
-        repo_full_name = context.get("repo_full_name", "")
-        scm_type = "github"
-        if repo_full_name:
-            try:
-                from ai_driven.db.postgres.models import Repository as RepoRow
-                from ai_driven.db.postgres.session import async_session_factory
-                from sqlalchemy import select as _select
-                async with async_session_factory() as _s:
-                    _res = await _s.execute(
-                        _select(RepoRow.scm_type).where(
-                            RepoRow.full_name == repo_full_name
-                        )
-                    )
-                    scm_type = _res.scalar_one_or_none() or "github"
-            except Exception:
-                scm_type = "github"
-        if scm_type == "bitbucket" and settings_inner.bitbucket_username:
-            from ai_driven.scm.bitbucket_client import BitbucketClient
-            scm_client = BitbucketClient(
-                username=settings_inner.bitbucket_username,
-                app_password=settings_inner.bitbucket_app_password,
-            )
-        elif settings_inner.github_token:
-            from ai_driven.scm.github_client import GitHubClient
-            scm_client = GitHubClient(token=settings_inner.github_token)
-
-        kwargs: dict[str, Any] = {}
-        if agent_type in ("coding", "devops"):
-            kwargs["jira_client"] = jira_client
-        if agent_type in ("coding", "review"):
-            kwargs["scm_client"] = scm_client
-
-        agent = AgentClass(**kwargs)
-        task_input = {"message": message, **context}
-        if repo_full_name:
-            task_input["repo_full_name"] = repo_full_name
-            task_input["scm_type"] = scm_type
-
-        # Per-task timeout: 20 minutes hard cap
-        task_timeout = getattr(settings_inner, "task_timeout_seconds", 1200)
-        try:
-            result = await asyncio.wait_for(
-                agent.run(task_input=task_input, task_id=task_id),
-                timeout=task_timeout,
-            )
-        except asyncio.TimeoutError:
-            logger.error("Task %s timed out after %ds", task_id, task_timeout)
-            async with async_session_factory() as session:
-                task_repo = TaskRepository(session)
-                await task_repo.update_status(
-                    uuid.UUID(task_id), "failed",
-                    error_message=f"Task timed out after {task_timeout // 60} minutes",
-                )
-                await session.commit()
-            redis_client = aioredis.from_url(settings_inner.redis_url, decode_responses=True)
-            await redis_client.publish(
-                f"task:{task_id}:events",
-                json.dumps({"type": "error", "data": {"message": f"Task timed out ({task_timeout // 60}min hard cap)", "timeout": True}}),
-            )
-            if team_id:
-                await RateLimiter().decrement_concurrent(team_id)
-            return
-
-        # Update task status based on result
-        # Estimate cost: ~$3/M input + ~$15/M output for Sonnet
-        input_tokens = result.conversation.total_input_tokens
-        output_tokens = result.conversation.total_output_tokens
-        cost_usd = (input_tokens * 3.0 / 1_000_000) + (output_tokens * 15.0 / 1_000_000)
-
-        async with async_session_factory() as session:
-            task_repo = TaskRepository(session)
-            status = "completed" if result.success else "failed"
-            await task_repo.update_status(
-                uuid.UUID(task_id),
-                status,
-                output_data={
-                    "output": result.output[:5000],
-                    "tool_calls": result.tool_calls,
-                    "iterations": result.iterations,
-                    "error": result.error,
-                },
-                total_tokens=result.total_tokens,
-                total_cost_usd=round(cost_usd, 4),
-                iterations=result.iterations,
-            )
-            await session.commit()
-
-        logger.info(
-            "inline_task_completed",
-            extra={
-                "status": status,
-                "iterations": result.iterations,
-                "tool_calls": result.tool_calls,
-                "total_tokens": result.total_tokens,
-                "cost_usd": round(cost_usd, 4),
-            },
-        )
-
-        # Decrement concurrent count on task completion (success or agent failure)
-        if team_id:
-            await RateLimiter().decrement_concurrent(team_id)
-
-    except Exception:
-        logger.error("inline_task_processing_failed", exc_info=True)
-        # Publish error event to Redis so WebSocket clients see the failure
-        try:
-            settings = get_settings()
-            redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
-            await redis_client.publish(
-                f"task:{task_id}:events",
-                json.dumps({"type": "error", "data": {"message": "Agent processing failed"}}),
-            )
-        except Exception:
-            pass
-
-        # Update task status to failed
-        try:
-            async with async_session_factory() as session:
-                task_repo = TaskRepository(session)
-                await task_repo.update_status(uuid.UUID(task_id), "failed")
-                await session.commit()
-        except Exception:
-            pass
-
-        # Decrement concurrent count on unhandled failure
-        if team_id:
-            try:
-                await RateLimiter().decrement_concurrent(team_id)
-            except Exception:
-                pass
-    finally:
-        clear_trace()
-
-
 @router.post("/send", response_model=ChatResponse)
 async def send_message(
     request: Request, body: ChatMessage, team_id: str = Depends(get_team_id)
@@ -399,32 +186,22 @@ async def send_message(
     except Exception:
         logger.exception("Failed to persist task %s", task_id)
 
-    settings = get_settings()
-
     # T20 removed the in-process shadow orchestrator fan-out from the chat
-    # path. The orchestrator now runs as an SQS worker:
-    #   * production: TaskProducer.enqueue_task('coding', ...) routes to the
-    #     orchestrator queue when orchestrator_mode != 'off'. The orchestrator
-    #     worker enqueues the downstream coding-task.
-    #   * debug mode: _process_task_inline runs orchestrate() synchronously
-    #     before dispatching to CodingAgent (see that function).
+    # path. The orchestrator runs as an SQS worker:
+    # TaskProducer.enqueue_task('coding', ...) routes to the orchestrator
+    # queue when orchestrator_mode != 'off'. The orchestrator worker then
+    # enqueues the downstream coding-task.
+    try:
+        from ai_driven.queue.producer import TaskProducer
 
-    if settings.debug:
-        # In debug mode, process inline — no SQS worker needed
-        asyncio.create_task(_process_task_inline(task_id, body.agentType, body.message, body.context, team_id=team_id))
-    else:
-        # Production: enqueue to SQS for async processing by ECS worker
-        try:
-            from ai_driven.queue.producer import TaskProducer
-
-            producer = TaskProducer()
-            await producer.enqueue_task(
-                task_id=task_id,
-                agent_type=body.agentType,
-                payload={"message": body.message, **body.context},
-            )
-        except Exception:
-            logger.exception("Failed to enqueue task %s", task_id)
+        producer = TaskProducer()
+        await producer.enqueue_task(
+            task_id=task_id,
+            agent_type=body.agentType,
+            payload={"message": body.message, **body.context},
+        )
+    except Exception:
+        logger.exception("Failed to enqueue task %s", task_id)
 
     # Use existing sessionId from request or generate a new one
     session_id = body.context.get("session_id") or str(uuid.uuid4())
