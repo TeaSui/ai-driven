@@ -408,45 +408,32 @@ async def list_tasks(
     in place via ``request.state.team_id`` + ``list_for_team`` — no
     change to the query logic.
     """
-    from ai_driven.config import get_settings
-
     task_repo = TaskRepository(session)
     team_id_str = getattr(request.state, "team_id", None)
 
-    # In debug mode with the sentinel team ID, list all tasks
-    settings = get_settings()
-    if settings.debug and team_id_str == "00000000-0000-0000-0000-000000000000":
-        from sqlalchemy import select
-        from ai_driven.db.postgres.models import Task as TaskModel
+    # Resolve team — auth middleware has set either (a) team_id via the
+    # session-token path (browser /login) or (b) api_key_hash via the
+    # X-API-Key header path (agents, webhooks, scripts). Try session
+    # path first, then fall back to api_key_hash.
+    team_id_uuid: uuid.UUID | None = None
+    if team_id_str:
+        try:
+            team_id_uuid = uuid.UUID(team_id_str)
+        except ValueError:
+            team_id_uuid = None
 
-        result = await session.execute(
-            select(TaskModel).order_by(TaskModel.created_at.desc()).limit(limit).offset(offset)
-        )
-        tasks = list(result.scalars().all())
-    else:
-        # Resolve team — auth middleware has set either (a) team_id via the
-        # session-token path (browser /login) or (b) api_key_hash via the
-        # X-API-Key header path (agents, webhooks, scripts). Try session
-        # path first, then fall back to api_key_hash.
-        team_id_uuid: uuid.UUID | None = None
-        if team_id_str:
-            try:
-                team_id_uuid = uuid.UUID(team_id_str)
-            except ValueError:
-                team_id_uuid = None
+    if team_id_uuid is None:
+        api_key_hash = getattr(request.state, "api_key_hash", None)
+        if not api_key_hash:
+            return TaskListResponse(tasks=[], total=0)
 
-        if team_id_uuid is None:
-            api_key_hash = getattr(request.state, "api_key_hash", None)
-            if not api_key_hash:
-                return TaskListResponse(tasks=[], total=0)
+        team_repo = TeamRepository(session)
+        team = await team_repo.get_by_api_key_hash(api_key_hash)
+        if not team:
+            return TaskListResponse(tasks=[], total=0)
+        team_id_uuid = team.id
 
-            team_repo = TeamRepository(session)
-            team = await team_repo.get_by_api_key_hash(api_key_hash)
-            if not team:
-                return TaskListResponse(tasks=[], total=0)
-            team_id_uuid = team.id
-
-        tasks = await task_repo.list_for_team(team_id_uuid, limit=limit, offset=offset)
+    tasks = await task_repo.list_for_team(team_id_uuid, limit=limit, offset=offset)
 
     def _task_duration_ms(t: Any) -> int | None:
         if t.started_at and t.completed_at:
@@ -1256,25 +1243,20 @@ async def _get_team_from_request(
     We accept any of these. Only fail when NONE of them is present, which means
     middleware didn't authenticate the request at all.
     """
-    from ai_driven.config import get_settings
-
     team_repo = TeamRepository(session)
 
-    # Path 1 + 2: middleware has already resolved a team_id for us (debug or
-    # session-token). Trust it — middleware only sets team_id after a
-    # successful lookup in DB or Redis.
+    # Path 1: middleware has resolved a team_id from the session-token
+    # (browser /login). Trust it — middleware only sets team_id after a
+    # successful Redis lookup.
     team_id_str = getattr(request.state, "team_id", None)
-    settings = get_settings()
     if team_id_str:
-        # Skip the lookup in debug mode if the hash path didn't run, to match
-        # the previous behavior that bypassed DB checks for dev ergonomics.
         team = await team_repo.get_by_id(uuid.UUID(team_id_str))
         if team:
             return team
-        if settings.debug:
-            raise HTTPException(status_code=401, detail="Invalid team_id")
+        # team_id was set but no matching row in DB — stale session.
+        raise HTTPException(status_code=401, detail="Invalid team_id")
 
-    # Path 3: API-key header. Middleware has already hashed it.
+    # Path 2: API-key header. Middleware has already hashed it.
     api_key_hash = getattr(request.state, "api_key_hash", None)
     if not api_key_hash:
         raise HTTPException(status_code=401, detail="Missing API key")

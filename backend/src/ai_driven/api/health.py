@@ -24,7 +24,6 @@ class DependencyStatus(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     version: str
-    debug: bool = False
     dependencies: list[DependencyStatus] = []
 
 
@@ -85,5 +84,4 @@ async def health_check() -> HealthResponse:
     if any(d.status == "unhealthy" for d in deps):
         overall = "degraded"
 
-    settings = get_settings()
-    return HealthResponse(status=overall, version="0.1.0", debug=settings.debug, dependencies=deps)
+    return HealthResponse(status=overall, version="0.1.0", dependencies=deps)

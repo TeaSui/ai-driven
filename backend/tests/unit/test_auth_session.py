@@ -22,42 +22,15 @@ class TestVerifyCognitoJwtNotYetImplemented:
         assert "Cognito" in str(exc.value)
 
 
-class TestResolveIdentityDebugMode:
-    def test_debug_mode_returns_sentinel_session(self) -> None:
-        request = MagicMock()
-        request.headers.get.return_value = None
-        request.cookies.get.return_value = None
-
-        session = MagicMock()
-        fake_settings = MagicMock()
-        fake_settings.debug = True
-
-        with patch(
-            "ai_driven.config.get_settings", return_value=fake_settings
-        ):
-            result = asyncio.run(_resolve_identity(request, session))
-
-        assert isinstance(result, SessionResponse)
-        assert result.authSource == "debug"
-        assert result.teamName == "Debug Team"
-        assert result.role == "owner"
-
-
 class TestResolveIdentityNoAuth:
-    def test_raises_401_when_no_api_key_and_not_debug(self) -> None:
+    def test_raises_401_when_no_api_key_and_no_session(self) -> None:
         request = MagicMock()
         request.headers.get.return_value = None
         request.cookies.get.return_value = None
 
         session = MagicMock()
-        fake_settings = MagicMock()
-        fake_settings.debug = False
-
-        with patch(
-            "ai_driven.config.get_settings", return_value=fake_settings
-        ):
-            with pytest.raises(HTTPException) as exc:
-                asyncio.run(_resolve_identity(request, session))
+        with pytest.raises(HTTPException) as exc:
+            asyncio.run(_resolve_identity(request, session))
 
         assert exc.value.status_code == 401
 

@@ -24,26 +24,6 @@ from ai_driven.observability.logging import setup_logging
 from ai_driven.observability.tracing import setup_tracing
 
 
-async def _ensure_debug_team() -> None:
-    """Create the sentinel debug team if it doesn't exist (debug mode only)."""
-    import uuid
-    from ai_driven.db.postgres.session import async_session_factory
-    from ai_driven.db.postgres.models import Team
-
-    sentinel_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
-    async with async_session_factory() as session:
-        existing = await session.get(Team, sentinel_id)
-        if existing is None:
-            session.add(Team(
-                id=sentinel_id,
-                name="Debug Team",
-                api_key_hash="debug",
-                claude_provider="bedrock",
-                max_concurrent_tasks=5,
-            ))
-            await session.commit()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
@@ -58,46 +38,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from ai_driven.observability.log_scrub import ScrubOAuthCodeFilter
     _logging.getLogger("uvicorn.access").addFilter(ScrubOAuthCodeFilter())
     await init_db()
-    if settings.debug:
-        await _ensure_debug_team()
     yield
     await engine.dispose()
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-
-    # RULE-E3: Block debug mode in production — refuse to start
-    if settings.debug and settings.environment.value == "production":
-        import sys
-
-        logger = __import__("logging").getLogger(__name__)
-        logger.critical(
-            "FATAL: AI_DRIVEN_DEBUG=true in PRODUCTION environment. "
-            "Refusing to start — debug mode bypasses authentication."
-        )
-        sys.exit(1)
+    is_prod = settings.environment.value == "production"
 
     app = FastAPI(
         title="AI-Driven Development Platform",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url="/docs" if settings.debug else None,
+        # /docs and /redoc exposed outside production only.
+        docs_url=None if is_prod else "/docs",
         redoc_url=None,
     )
 
-    # CORS: debug = wildcard; non-debug = explicit localhost:3000 allow-list
-    # so the Next.js UI can hit the backend cross-origin (required for
-    # WebSocket connections that bypass Next's rewrites, which drop the
-    # WS upgrade). Tighten this list when deploying.
+    # CORS: explicit localhost:3000 allow-list for the Next.js UI to hit the
+    # backend cross-origin (required for WebSocket connections that bypass
+    # Next's rewrites, which drop the WS upgrade). Tighten further in prod
+    # once the UI is hosted somewhere with a stable origin.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=(
-            ["*"] if settings.debug else [
-                "http://localhost:3000",
-                "http://127.0.0.1:3000",
-            ]
-        ),
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

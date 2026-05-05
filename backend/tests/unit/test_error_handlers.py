@@ -71,8 +71,18 @@ def _create_test_app(*, debug: bool = False) -> FastAPI:
 
 
 def _mock_settings(debug: bool = False) -> MagicMock:
+    """Mock settings for error-handler tests.
+
+    The handler gates stack-trace exposure on ``settings.environment.value
+    != "production"``. We still accept a ``debug`` kwarg so existing test
+    call sites don't need to change; it maps to local/production envs.
+    """
     settings = MagicMock()
+    # Keep for backwards compat — not read by the handler anymore.
     settings.debug = debug
+    # New gate: "local" shows stack traces; "production" hides them.
+    settings.environment = MagicMock()
+    settings.environment.value = "local" if debug else "production"
     return settings
 
 

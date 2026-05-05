@@ -532,24 +532,17 @@ async def respond_to_task(
 async def _auth_from_ws(websocket: WebSocket, task_id: str) -> str | None:
     """Authenticate WebSocket via first-message pattern (RULE-S2).
 
-    Expects ``{"type": "auth", "token": "<api-key>"}`` within 5 seconds.
-    In debug mode, auth is optional — missing/invalid tokens are allowed.
-    Returns team_id if authorized, None otherwise (connection closed).
+    Expects ``{"type": "auth", "token": "<api-key-or-session-token>"}``
+    within 5 seconds. Returns team_id if authorized, None otherwise
+    (connection closed).
     """
-    settings = get_settings()
-    debug_team = "00000000-0000-0000-0000-000000000000"
-
     try:
         raw = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
         msg = json.loads(raw)
     except asyncio.TimeoutError:
-        if settings.debug:
-            return debug_team
         await websocket.close(code=4401, reason="Auth timeout")
         return None
     except (json.JSONDecodeError, TypeError):
-        if settings.debug:
-            return debug_team
         await websocket.close(code=4401, reason="Invalid auth message")
         return None
 
@@ -560,8 +553,6 @@ async def _auth_from_ws(websocket: WebSocket, task_id: str) -> str | None:
         cookie_token = websocket.cookies.get("session_token")
         if cookie_token:
             msg = {"type": "auth", "token": cookie_token}
-        elif settings.debug:
-            return debug_team
         else:
             await websocket.close(code=4401, reason="Missing auth")
             return None

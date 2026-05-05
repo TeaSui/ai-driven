@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     environment: Environment = Environment.LOCAL
     debug: bool = False
     log_level: str = "INFO"
+    # Echo every SQL statement to stdout. Gated separately from `debug` so
+    # local dev can run without the verbosity. AI_DRIVEN_SQL_ECHO=true turns
+    # it on without pulling in any other debug-mode behaviour.
+    sql_echo: bool = False
     task_timeout_seconds: int = 1200  # 20 minutes hard cap per task
 
     # API

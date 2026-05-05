@@ -18,10 +18,13 @@ def setup_logging(settings: Settings) -> None:
     is consistent and filterable in log aggregators.
     """
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    debug_mode = settings.debug
+    # Local / non-production environments keep IP addresses unmasked so
+    # developers can correlate requests across services; production always
+    # masks regardless of log level.
+    local_mode = settings.environment.value != "production"
 
     # Filters — applied to every handler
-    pii_filter = PIIMaskingFilter(debug_mode=debug_mode)
+    pii_filter = PIIMaskingFilter(debug_mode=local_mode)
     trace_filter = TraceContextFilter()
 
     # Use JSON formatter if python-json-logger is available

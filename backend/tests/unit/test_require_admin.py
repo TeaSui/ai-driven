@@ -105,21 +105,6 @@ async def test_require_admin_no_team_gets_401(_fake_request):
 
 
 @pytest.mark.asyncio
-async def test_require_admin_debug_sentinel_team_passes_as_admin(_fake_request):
-    """Local dev ergonomics: debug mode + sentinel team id = system admin."""
-    from ai_driven.auth.middleware import require_admin, SYSTEM_MEMBER_ID
-
-    req = _fake_request({
-        "team_id": "00000000-0000-0000-0000-000000000000",
-    })
-    with patch("ai_driven.auth.middleware.get_settings") as gs:
-        gs.return_value = SimpleNamespace(debug=True)
-        info = await require_admin(req)
-    assert info.role == "admin"
-    assert info.member_id == SYSTEM_MEMBER_ID
-
-
-@pytest.mark.asyncio
 async def test_require_admin_apikey_team_level_owner_passes(_fake_request):
     """X-API-Key path, team-level key (no matching member row) → treated
     as owner and audited under the system member."""

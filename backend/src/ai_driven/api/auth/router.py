@@ -95,8 +95,8 @@ async def _resolve_identity(
 
     Source precedence:
         1. (future) Cognito JWT in Authorization header
-        2. API key in X-API-Key header (current behavior)
-        3. Debug-mode sentinel when ``settings.debug`` is true
+        2. Session token (browser UI) via cookie or Bearer header
+        3. API key in X-API-Key header
 
     Returns ``SessionResponse`` or raises ``HTTPException`` with 401.
     """
@@ -175,18 +175,6 @@ async def _resolve_identity(
                 email=(member.email if member else f"team-{team.id}@example.invalid"),
                 authSource="api_key",
             )
-
-    # (3) Debug bypass. Only kicks in when settings.debug is true AND nothing
-    # else authenticated — keeps real prod traffic from silently landing here.
-    if settings.debug:
-        return SessionResponse(
-            userId="00000000-0000-0000-0000-000000000000",
-            teamId="00000000-0000-0000-0000-000000000000",
-            teamName="Debug Team",
-            role="owner",
-            email="debug@local",
-            authSource="debug",
-        )
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 

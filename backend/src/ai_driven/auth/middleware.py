@@ -95,18 +95,7 @@ async def _resolve_session(token: str) -> dict[str, Any] | None:
     Fail-closed on Redis outage — the caller returns 401 and the browser
     redirects to /login. Agents and scripts never see this path (they use
     X-API-Key), so the Redis hard-dependency is UI-only.
-
-    In debug mode, the ``debug-session`` sentinel (set by the Next.js
-    middleware when the backend reports ``debug=true`` on /health) resolves
-    to the sentinel debug team — mirrors the X-API-Key debug bypass.
     """
-    settings = get_settings()
-    if settings.debug and token == "debug-session":
-        return {
-            "team_id": "00000000-0000-0000-0000-000000000000",
-            "role": "owner",
-            "member_id": None,
-        }
     try:
         from ai_driven.auth import sessions as session_store
         sess = await session_store.load_session(token)
@@ -218,16 +207,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Skip auth for public paths and webhook endpoints (they use their own auth)
         if any(path.startswith(p) for p in PUBLIC_PATHS):
-            response = await call_next(request)
-            response.headers["X-Trace-Id"] = trace_id
-            clear_trace()
-            return response
-
-        # In local/debug mode, skip auth for API paths (Web UI dev without API key)
-        settings = get_settings()
-        if settings.debug and not request.headers.get("X-API-Key"):
-            request.state.team_id = "00000000-0000-0000-0000-000000000000"
-            bind_team("00000000-0000-0000-0000-000000000000")
             response = await call_next(request)
             response.headers["X-Trace-Id"] = trace_id
             clear_trace()
@@ -363,10 +342,6 @@ async def require_admin(request: Request) -> TeamMemberInfo:
          We look up the matching team_member row by api_key_hash; if the
          key is team-level (no member row), we use the seeded system
          member for owners, else 403.
-      3. Debug bypass: when settings.debug and the sentinel team is set,
-         we resolve to the system member with role='admin' so local dev
-         can exercise the override endpoint without creating a real
-         member.
 
     Returns ``TeamMemberInfo``. Raises:
       * 401 — no authenticated team on request.state
@@ -377,20 +352,6 @@ async def require_admin(request: Request) -> TeamMemberInfo:
     team_id = getattr(request.state, "team_id", None)
     if not team_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
-
-    settings = get_settings()
-
-    # Debug bypass: sentinel team id + debug mode = system admin.
-    # Keeps local dev ergonomics — the existing debug path in the
-    # middleware sets team_id without a member row, and we don't want
-    # to force developers to seed a team_member to exercise admin APIs.
-    if settings.debug and team_id == "00000000-0000-0000-0000-000000000000":
-        return TeamMemberInfo(
-            member_id=SYSTEM_MEMBER_ID,
-            team_id=team_id,
-            role="admin",
-            email="debug@local",
-        )
 
     # Session-token path: middleware populated team_role + member_id. We
     # require BOTH — a session without a bound member_id cannot satisfy

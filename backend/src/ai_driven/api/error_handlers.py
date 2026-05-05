@@ -87,11 +87,12 @@ def _sanitize_debug_message(exc: BaseException) -> str | None:
 
 
 def _is_debug_mode() -> bool:
-    """Check debug flag without import-time coupling to settings."""
+    """True when the app is running outside production — controls whether
+    stack traces appear in error responses."""
     try:
         from ai_driven.config import get_settings
 
-        return get_settings().debug
+        return get_settings().environment.value != "production"
     except Exception:
         return False
 

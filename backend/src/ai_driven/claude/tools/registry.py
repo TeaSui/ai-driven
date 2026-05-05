@@ -78,29 +78,21 @@ class ToolRegistry:
 
         logger.debug(f"Executing tool {name} with input: {input_data}")
 
-        # Strategy: always run the real handler. In production, errors
-        # propagate. In debug mode, errors are returned to the model as a
-        # structured error payload so the agent loop can adapt (retry with
-        # different args, skip the step) rather than crashing the run. We
-        # never synthesize canned success responses.
+        # Strategy: always run the real handler. If it raises, return the
+        # error to the model as a structured payload so the agent loop can
+        # adapt (retry with different args, skip the step) rather than
+        # crashing the whole run. Crashing loses the context that the agent
+        # needs to recover — a model that sees a tool_result with
+        # ``error=true`` can fall back, ask the user, or try a different
+        # tool. A process-killing exception just leaves the task stuck.
+        # We NEVER synthesize canned success responses.
         try:
             return await tool.handler(**input_data)
         except Exception as ex:
-            from ai_driven.config import get_settings
-
-            if not get_settings().debug:
-                raise
-
-            # In debug mode, return the real error to the model so it can
-            # adapt its approach. Previously this path had a canned-mock
-            # fallback for "no client configured" errors, which leaked
-            # fictional repo / ticket data (org/ledger-core, GTX-4829) into
-            # real agent runs. The mock catalog is gone; all errors now
-            # surface verbatim, including missing-client errors.
             error_msg = f"{type(ex).__name__}: {str(ex)[:200]}"
             logger.warning(
-                f"[debug] tool {name} failed ({error_msg}); "
-                f"returning error to model"
+                "tool %s failed (%s); returning error to model",
+                name, error_msg,
             )
             return {
                 "error": True,
