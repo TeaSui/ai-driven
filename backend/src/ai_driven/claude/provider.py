@@ -361,6 +361,8 @@ class BedrockProvider(ClaudeProvider):
         return out
 
     def __init__(self) -> None:
+        from botocore.config import Config
+
         settings = get_settings()
         # Prefer explicit settings creds when present so .env.local wins over
         # ~/.aws/credentials's [default] profile (which on some dev machines
@@ -371,6 +373,18 @@ class BedrockProvider(ClaudeProvider):
             boto_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
             if settings.aws_session_token:
                 boto_kwargs["aws_session_token"] = settings.aws_session_token
+
+        # Bedrock's default read_timeout is 60s, which is tight for agentic
+        # loops on Opus / Sonnet with large system prompts — a single
+        # iteration can take 2–5 minutes of real model time. We bump the
+        # read_timeout to 300s and keep a short connect_timeout so network
+        # reachability problems still fail fast. Two retries cover transient
+        # 5xx from Bedrock without silently masking a real outage.
+        boto_kwargs["config"] = Config(
+            read_timeout=300,
+            connect_timeout=10,
+            retries={"max_attempts": 2, "mode": "standard"},
+        )
         self._client = boto3.client("bedrock-runtime", **boto_kwargs)
 
     async def create_message(
