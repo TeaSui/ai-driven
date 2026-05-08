@@ -6,15 +6,17 @@ import asyncio
 import json
 import logging
 import signal
+from datetime import datetime, timezone
 from typing import Any
 
 import boto3
 
+from ai_driven.agents.base import AwaitingHumanInput
 from ai_driven.agents.coding.agent import CodingAgent
 from ai_driven.agents.devops.agent import DevOpsAgent
 from ai_driven.agents.reviewer.agent import ReviewAgent
 from ai_driven.config import get_settings
-from ai_driven.db.postgres.repository import TaskRepository
+from ai_driven.db.postgres.repository import SpecialistStateRepository, TaskRepository
 from ai_driven.db.postgres.session import async_session_factory
 from ai_driven.jira.client import JiraClient
 from ai_driven.observability.metrics import emit_agent_metrics
@@ -26,7 +28,7 @@ logger = logging.getLogger(__name__)
 class TaskConsumer:
     """Polls SQS queues and dispatches tasks to the appropriate agent."""
 
-    def __init__(self, max_concurrent: int = 3) -> None:
+    def __init__(self, max_concurrent: int = 10) -> None:
         settings = get_settings()
         self._sqs = boto3.client(
             "sqs",
@@ -47,21 +49,43 @@ class TaskConsumer:
         ]
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._running = True
+        self._inflight: set[asyncio.Task[Any]] = set()
 
     async def start(self) -> None:
-        """Start polling all configured queues with graceful shutdown."""
+        """Start polling all configured queues with graceful shutdown.
+
+        Each queue runs its own long-lived poll loop concurrently, and
+        each received message is processed as an independent asyncio
+        task gated by ``self._semaphore``. This lets multiple tasks
+        (e.g. two Jira tickets) progress in parallel instead of
+        serializing through a single blocking await.
+        """
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._shutdown)
 
-        logger.info("Starting task consumer with %d queues", len(self._queue_urls))
+        logger.info(
+            "Starting task consumer with %d queues (max_concurrent=%d)",
+            len(self._queue_urls),
+            self._semaphore._value,  # type: ignore[attr-defined]
+        )
 
-        while self._running:
-            for queue_url in self._queue_urls:
-                if not self._running:
-                    break
-                await self._poll_queue(queue_url)
-            await asyncio.sleep(1)
+        poll_tasks = [
+            asyncio.create_task(self._poll_queue_forever(url))
+            for url in self._queue_urls
+        ]
+        try:
+            await asyncio.gather(*poll_tasks)
+        finally:
+            # Wait for any in-flight message handlers to finish before
+            # returning so heartbeats can stop cleanly and status
+            # transitions get committed.
+            if self._inflight:
+                logger.info(
+                    "Waiting for %d in-flight tasks to finish",
+                    len(self._inflight),
+                )
+                await asyncio.gather(*self._inflight, return_exceptions=True)
 
         logger.info("Task consumer stopped")
 
@@ -69,25 +93,58 @@ class TaskConsumer:
         logger.info("Shutdown signal received, finishing current tasks...")
         self._running = False
 
+    async def _poll_queue_forever(self, queue_url: str) -> None:
+        """Long-running poll loop for a single queue."""
+        while self._running:
+            try:
+                await self._poll_queue(queue_url)
+            except Exception:
+                logger.exception("Poll loop error for %s", queue_url)
+                await asyncio.sleep(1)
+
     async def _poll_queue(self, queue_url: str) -> None:
-        """Poll a single SQS queue for messages."""
+        """Receive a batch of messages and dispatch them concurrently."""
         try:
             response = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: self._sqs.receive_message(
                     QueueUrl=queue_url,
-                    MaxNumberOfMessages=1,
+                    MaxNumberOfMessages=10,
                     WaitTimeSeconds=5,
                     VisibilityTimeout=900,
                 ),
             )
 
             for message in response.get("Messages", []):
-                async with self._semaphore:
-                    await self._process_message(message, queue_url)
+                # Gate concurrency with the semaphore but do NOT await
+                # the message handler — spawn it so the poll loop can
+                # continue fetching the next batch immediately.
+                await self._semaphore.acquire()
+                task = asyncio.create_task(
+                    self._run_message(message, queue_url)
+                )
+                self._inflight.add(task)
+                task.add_done_callback(self._on_message_done)
 
         except Exception as e:
             logger.error("Error polling queue %s: %s", queue_url, e)
+
+    def _on_message_done(self, task: asyncio.Task[Any]) -> None:
+        self._inflight.discard(task)
+        self._semaphore.release()
+        exc = task.exception() if not task.cancelled() else None
+        if exc is not None:
+            logger.exception("Unhandled exception in message task", exc_info=exc)
+
+    async def _run_message(self, message: dict[str, Any], queue_url: str) -> None:
+        """Thin wrapper around _process_message for asyncio.create_task.
+
+        _process_message already binds/clears its own trace context in a
+        try/finally, so nothing extra is needed here — the wrapper
+        exists only so the poll loop can spawn each handler as an
+        independent task without awaiting it.
+        """
+        await self._process_message(message, queue_url)
 
     async def _process_message(
         self, message: dict[str, Any], queue_url: str
@@ -122,11 +179,44 @@ class TaskConsumer:
         )
 
         try:
-            # Update task status to running
+            # Update task status to running + pick a prompt variant.
+            # Variant assignment is stamped on the task row so every
+            # downstream evaluation can be attributed. No variant for
+            # this agent_type => tasks.prompt_variant_id stays NULL and
+            # the agent uses its compiled-in default system prompt.
+            from ai_driven.evaluation.variant_picker import pick_variant
+            from ai_driven.db.postgres.models import Task as _TaskModel
+            from sqlalchemy import update as _sa_update
+            variant_id = None
+            variant_prompt: str | None = None
             async with async_session_factory() as session:
                 task_repo = TaskRepository(session)
                 await task_repo.update_status(task_id, "running")
+                # Only pick a variant for agent types that consume one.
+                # Today only CodingAgent reads self._variant_prompt; adding
+                # more agents is a one-line change inside those agents.
+                if agent_type == "coding":
+                    try:
+                        variant_id, variant_prompt = await pick_variant(
+                            session, agent_type
+                        )
+                        if variant_id is not None:
+                            await session.execute(
+                                _sa_update(_TaskModel)
+                                .where(_TaskModel.id == task_id)
+                                .values(prompt_variant_id=variant_id)
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "variant_pick_failed; falling back to default prompt",
+                            exc_info=True,
+                        )
                 await session.commit()
+            # Stash the picked prompt on the payload so the agent factory
+            # can inject it without another DB round-trip.
+            if variant_prompt:
+                payload = {**payload, "_variant_prompt": variant_prompt,
+                           "_variant_id": str(variant_id) if variant_id else None}
 
             # Create and run agent.
             # CRITICAL: pass task_id as a kwarg. Without it the agent's
@@ -165,7 +255,51 @@ class TaskConsumer:
                 # flip-safety.
                 run_kwargs["orchestrator_mode"] = stamped_orchestrator_mode
 
-            result = await agent.run(payload, **run_kwargs)
+            try:
+                result = await agent.run(payload, **run_kwargs)
+            except AwaitingHumanInput as hitl:
+                # A CodingAgent (or any non-orchestrator agent) paused
+                # on human.ask_clarification. Orchestrator-path HITL is
+                # handled inside _OrchestratorWrapper.run; this catch
+                # covers CodingAgent's own run_agent_loop path.
+                role_hint = getattr(agent, "hitl_role", "coding")
+                # Heartbeat cancel + message ack are shared with the
+                # normal terminal paths in the finally block below.
+                await _persist_hitl_pause(
+                    task_uuid=task_id,
+                    task_id_str=str(task_id),
+                    role=role_hint,
+                    questions=hitl.questions,
+                    round_id=hitl.round_id,
+                    messages=hitl.messages,
+                    tool_use_id=hitl.tool_use_id,
+                )
+                # Delete the SQS message — the /respond handler will
+                # enqueue a fresh specialist_resume message to continue.
+                await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    lambda: self._sqs.delete_message(
+                        QueueUrl=queue_url, ReceiptHandle=receipt_handle
+                    ),
+                )
+                heartbeat_task.cancel()
+                # Decrement the concurrency counter so the team's slot
+                # isn't leaked while we're paused.
+                team_id_for_decrement = (trace_ctx or {}).get("team_id") or ""
+                if team_id_for_decrement:
+                    try:
+                        from ai_driven.auth.rate_limiter import RateLimiter
+                        await RateLimiter().decrement_concurrent(
+                            team_id_for_decrement
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "decrement_concurrent_failed_hitl",
+                            extra={"team_id": team_id_for_decrement},
+                            exc_info=True,
+                        )
+                clear_trace()
+                return
 
             # Update task status.
             # BaseAgent.run now accumulates a cache-aware cost on the result
@@ -189,7 +323,12 @@ class TaskConsumer:
                 # states by re-reading the current status and skipping the
                 # transition if the wrapper already moved us to a terminal
                 # gate state.
-                GATE_COMMITTED_STATUSES = frozenset({"blocked", "qa_failed"})
+                # awaiting_input: HITL wrapper wrote it before returning.
+                # Overwriting to 'completed' would hide the pending
+                # clarification from the UI.
+                GATE_COMMITTED_STATUSES = frozenset(
+                    {"blocked", "qa_failed", "awaiting_input"}
+                )
                 current = await task_repo.get_by_id(task_id)
                 current_status = getattr(current, "status", None) if current else None
                 if current_status in GATE_COMMITTED_STATUSES:
@@ -453,6 +592,11 @@ class TaskConsumer:
             # artifacts. Wrapper owns idempotency + shared-session
             # persistence (artifact + output_data markers in ONE commit).
             "qa": lambda: _QaPostCodingWrapper(scm_client=scm_client),
+            # HITL resume — a specialist that paused on
+            # human.ask_clarification continues here after the user
+            # answered. The wrapper loads task_specialist_state and
+            # re-enters the tool loop via resume_with_answer().
+            "specialist_resume": lambda: _SpecialistResumeWrapper(),
         }
         factory = agents.get(agent_type)
         if not factory:
@@ -471,12 +615,29 @@ def _build_orchestrate_payload(payload: dict[str, Any], task_id: Any) -> dict[st
     the SQS worker wrapper and the debug-mode inline path so both routes
     build identical inputs.
     """
+    # Build the ticket dict the orchestrator hands to specialists. Prefer
+    # hydrated Jira fields (summary, description, labels) populated by
+    # api/chat/router.py::send_message and api/webhooks/jira.py so the
+    # BusinessAnalyst sees real acceptance criteria — not just the short
+    # "Implement the Jira ticket X" seed message.
     ticket = payload.get("context", {}).get("ticket") or payload.get("ticket") or {
         "key": payload.get("jira_key", ""),
-        "summary": payload.get("title") or payload.get("message", ""),
-        "description": payload.get("message", ""),
+        "summary": (
+            payload.get("summary")
+            or payload.get("title")
+            or payload.get("message", "")
+        ),
+        "description": (
+            payload.get("description")
+            or payload.get("message", "")
+        ),
         "labels": payload.get("labels", []),
         "acceptance_criteria": payload.get("acceptance_criteria", []),
+        "issue_type": payload.get("issue_type", ""),
+        # HITL gating — when a task originated from the Jira webhook
+        # there is no human listening so the BA must not pause; the
+        # field is surfaced to SpecialistBase._hitl_active.
+        "triggered_by": payload.get("triggered_by", ""),
     }
     repo = payload.get("context", {}).get("repo") or payload.get("repo") or {
         "full_name": payload.get("repo_full_name", ""),
@@ -484,6 +645,83 @@ def _build_orchestrate_payload(payload: dict[str, Any], task_id: Any) -> dict[st
         "default_branch": payload.get("default_branch", "main"),
     }
     return {"task_id": task_id, "ticket": ticket, "repo": repo}
+
+
+async def _persist_hitl_pause(
+    *,
+    task_uuid: Any,
+    task_id_str: str,
+    role: str,
+    questions: list[dict[str, Any]],
+    round_id: str,
+    messages: list[dict[str, Any]],
+    tool_use_id: str,
+) -> None:
+    """Snapshot a specialist's conversation + pending questions + flip
+    ``tasks.status = 'awaiting_input'`` + publish the UI event.
+
+    Called from the orchestrator wrapper when a specialist raises
+    :class:`AwaitingHumanInput`. Intentionally idempotent:
+    ``SpecialistStateRepository.upsert_pending`` does a read-modify-write
+    so SQS redelivery of the triggering message is harmless.
+    """
+    if task_uuid is None:
+        logger.warning("hitl_persist_skipped_no_task_uuid",
+                       extra={"task_id": task_id_str, "role": role})
+        return
+    try:
+        async with async_session_factory() as session:
+            state_repo = SpecialistStateRepository(session)
+            # tool_use_id is stored inside the pending_question payload
+            # so resume doesn't have to re-scan the saved conversation.
+            await state_repo.upsert_pending(
+                task_uuid,
+                role,
+                conversation=messages,
+                pending_question={
+                    "questions": questions,
+                    "round_id": round_id,
+                    "tool_use_id": tool_use_id,
+                    "asked_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            task_repo = TaskRepository(session)
+            await task_repo.update_status(task_uuid, "awaiting_input")
+            await task_repo.update_output_data(
+                task_uuid,
+                {"hitl_round_id": round_id, "hitl_role": role},
+            )
+            await session.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("hitl_persist_failed",
+                         extra={"task_id": task_id_str, "role": role})
+        raise
+
+    # Persist to the replayable event_log AND publish for live UI subscribers.
+    # Detail page (/dashboard/tasks/[id]) reads event_log via REST to render
+    # the ClarificationCard on refresh; the pub/sub channel only feeds the
+    # live WebSocket stream. Without the rpush, a user opening the task page
+    # after the pause would see no pending-question form.
+    event_payload = json.dumps({
+        "type": "specialist.clarification_requested",
+        "data": {
+            "role": role,
+            "round_id": round_id,
+            "questions": questions,
+        },
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        import redis.asyncio as aioredis
+        from ai_driven.config import get_settings as _get
+        client = aioredis.from_url(_get().redis_url, decode_responses=True)
+        try:
+            await client.rpush(f"task:{task_id_str}:event_log", event_payload)
+            await client.publish(f"task:{task_id_str}:events", event_payload)
+        finally:
+            await client.aclose()
+    except Exception:  # noqa: BLE001
+        logger.debug("hitl event publish failed (non-fatal)")
 
 
 def _should_halt_pipeline(
@@ -698,6 +936,32 @@ class _OrchestratorWrapper:
             orchestrate_input = _build_orchestrate_payload(payload, task_id_str)
             try:
                 result = await self._inner.orchestrate(orchestrate_input)
+            except AwaitingHumanInput as hitl:
+                # A specialist paused on human.ask_clarification. Persist
+                # full conversation + pending questions, transition task
+                # to 'awaiting_input', publish event, and return a
+                # synthetic success AgentResult so the outer _process_message
+                # ACKs the SQS message instead of treating it as failure.
+                # See docs/specs/hitl-v1.md §async continuation.
+                role_hint = getattr(self._inner, "_current_specialist_role", None) or "business_analyst"
+                await _persist_hitl_pause(
+                    task_uuid=task_uuid,
+                    task_id_str=task_id_str,
+                    role=role_hint,
+                    questions=hitl.questions,
+                    round_id=hitl.round_id,
+                    messages=hitl.messages,
+                    tool_use_id=hitl.tool_use_id,
+                )
+                conv = Conversation()
+                return AgentResult(
+                    success=True,
+                    output=json.dumps({"awaiting_input": True, "role": role_hint, "round_id": hitl.round_id}),
+                    conversation=conv,
+                    tool_calls=0,
+                    iterations=0,
+                    duration_seconds=0.0,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "orchestrator_run_failed",
@@ -1008,6 +1272,279 @@ async def _enqueue_qa_best_effort(
             # Don't swallow here? We already have qa_enqueued_at set +
             # the QA message in flight. Leaving status=completed is a
             # soft degradation, not a data-loss bug. Swallow.
+
+
+class _SpecialistResumeWrapper:
+    """Continue a specialist that paused on ``human.ask_clarification``.
+
+    Dispatched by ``TaskConsumer._create_agent`` on SQS messages with
+    ``agent_type='specialist_resume'``. Loads the stored conversation
+    from ``task_specialist_state``, appends the user's answer as a
+    ``tool_result``, and drives the specialist to a terminal verdict.
+
+    On success:
+      * artifact is upserted via ArtifactRepository (same path as a
+        regular specialist run).
+      * ``task_specialist_state`` row is cleared.
+      * the original coding-task payload is re-enqueued to the
+        orchestrator queue so downstream specialists + the coding stage
+        can run. Preloaded-artifacts logic in ``OrchestratorAgent.orchestrate``
+        skips re-running this specialist.
+
+    On ``AwaitingHumanInput`` (the specialist asked a follow-up):
+      * state is re-persisted with a new round_id.
+      * task stays at ``status='awaiting_input'``.
+    """
+
+    async def run(
+        self,
+        payload: dict[str, Any],
+        *,
+        task_id: str | None = None,
+        initial_cost: float = 0.0,
+        orchestrator_mode: str = "shadow",
+        **_: Any,
+    ) -> "AgentResult":
+        import uuid as _uuid
+        from ai_driven.agents.base import AgentResult
+        from ai_driven.agents.orchestrator.agent import _SPECIALIST_CLASSES
+        from ai_driven.agents.orchestrator.repository import ArtifactRepository
+        from ai_driven.agents.specialists.base import SpecialistContext
+        from ai_driven.claude.conversation import Conversation
+
+        role = payload["role"]
+        round_id = payload["round_id"]
+        task_uuid = _uuid.UUID(task_id) if task_id else None
+
+        # Load state
+        async with async_session_factory() as session:
+            state_repo = SpecialistStateRepository(session)
+            state = await state_repo.get(task_uuid, role) if task_uuid else None
+        if state is None:
+            logger.warning(
+                "specialist_resume_state_missing",
+                extra={"task_id": task_id, "role": role, "round_id": round_id},
+            )
+            conv = Conversation()
+            return AgentResult(
+                success=False,
+                output=json.dumps({"error": "specialist_state_missing"}),
+                conversation=conv,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+            )
+
+        answers = (state.last_answer or {}).get("answers") or {}
+        stored_round = (state.last_answer or {}).get("round_id")
+        if stored_round != round_id:
+            logger.warning(
+                "specialist_resume_round_mismatch",
+                extra={
+                    "task_id": task_id,
+                    "role": role,
+                    "sqs_round_id": round_id,
+                    "stored_round_id": stored_round,
+                },
+            )
+            # Silently no-op — a stale resume should not re-run.
+            conv = Conversation()
+            return AgentResult(
+                success=True,
+                output=json.dumps({"stale_resume": True}),
+                conversation=conv,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+            )
+
+        prior_messages = list(state.conversation or [])
+        # tool_use_id was stashed on the pending_question payload at
+        # pause time; after record_answer it moved into last_answer
+        # via the conversation dict. We tracked it as part of
+        # pending_question JSON — but record_answer cleared that. Read
+        # from the conversation's assistant block directly as a fallback.
+        tool_use_id = ""
+        # Walk last assistant content to find the trailing tool_use id.
+        for msg in reversed(prior_messages):
+            if msg.get("role") == "assistant":
+                content = msg.get("content") or []
+                if isinstance(content, list):
+                    for block in reversed(content):
+                        bt = block.get("type") if isinstance(block, dict) else getattr(block, "type", None)
+                        if bt == "tool_use":
+                            tool_use_id = block.get("id") if isinstance(block, dict) else getattr(block, "id", "")
+                            break
+                break
+
+        ticket = (payload.get("ticket") or {})
+        repo_info = (payload.get("repo") or {})
+        # Load team settings so HITL gating in the resumed run reflects
+        # the real per-team flag.
+        from ai_driven.db.postgres.models import Task, Team
+        from sqlalchemy import select
+        team_settings: dict = {}
+        try:
+            async with async_session_factory() as session:
+                row = await session.execute(
+                    select(Team.settings_json)
+                    .join(Task, Task.team_id == Team.id)
+                    .where(Task.id == task_uuid)
+                )
+                team_settings = dict(row.scalar_one_or_none() or {})
+        except Exception:  # noqa: BLE001
+            pass
+
+        settings = get_settings()
+
+        # ── CodingAgent resume path ────────────────────────────────
+        # When a paused CodingAgent is resumed, we DON'T re-enter the
+        # orchestrator — specialists already ran to completion before
+        # coding started. Instead rebuild the CodingAgent and call its
+        # resume_with_answer to continue the tool loop.
+        if role == "coding":
+            # Lazily import to avoid circular dep at module load.
+            from ai_driven.agents.coding.agent import CodingAgent as _CodingAgent
+            # Reuse the _create_agent factory so clients/sandbox match
+            # a fresh dispatch. We pass the original payload so repo,
+            # scm_type, etc. resolve correctly.
+            original_payload = payload.get("original_payload") or {}
+            coding_agent = await TaskConsumer._create_agent("coding", original_payload)
+            assert isinstance(coding_agent, _CodingAgent)
+            try:
+                response = await coding_agent.resume_with_answer(
+                    original_payload,
+                    task_id=str(task_uuid),
+                    prior_messages=prior_messages,
+                    tool_use_id=tool_use_id,
+                    answers=answers,
+                    rounds_used=int(state.rounds or 0),
+                    rounds_cap=int(settings.hitl_coding_max_rounds),
+                )
+            except AwaitingHumanInput as hitl:
+                await _persist_hitl_pause(
+                    task_uuid=task_uuid,
+                    task_id_str=str(task_uuid),
+                    role=role,
+                    questions=hitl.questions,
+                    round_id=hitl.round_id,
+                    messages=hitl.messages,
+                    tool_use_id=hitl.tool_use_id,
+                )
+                conv = Conversation()
+                return AgentResult(
+                    success=True,
+                    output=json.dumps({"awaiting_input": True, "role": role, "round_id": hitl.round_id}),
+                    conversation=conv, tool_calls=0, iterations=0, duration_seconds=0.0,
+                )
+
+            # Terminal response from CodingAgent. Clear state; let the
+            # outer _process_message terminal-status logic take over.
+            async with async_session_factory() as session:
+                state_repo2 = SpecialistStateRepository(session)
+                await state_repo2.clear(task_uuid, role)
+                await session.commit()
+            # Synthesize an AgentResult that looks like a normal coding
+            # run terminal so the outer handler writes status + enqueues
+            # post-coding QA.
+            conv = Conversation()
+            conv.total_input_tokens = int(getattr(response.usage, "input_tokens", 0) or 0)
+            conv.total_output_tokens = int(getattr(response.usage, "output_tokens", 0) or 0)
+            stop_reason = getattr(response, "stop_reason", None)
+            bad_stop = stop_reason in ("max_iterations", "max_tokens")
+            return AgentResult(
+                success=not bad_stop,
+                output=response.text or "",
+                conversation=conv,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+            )
+
+        # ── Specialist resume path ─────────────────────────────────
+        ctx = SpecialistContext(
+            task_id=str(task_uuid),
+            ticket=ticket,
+            repo=repo_info,
+            tier=payload.get("tier", "full_workflow"),
+            prior_artifacts={},
+            team_settings=team_settings,
+        )
+        klass = _SPECIALIST_CLASSES[role]
+        specialist = klass()
+        try:
+            artifact = await specialist.resume_with_answer(
+                ctx,
+                prior_messages=prior_messages,
+                tool_use_id=tool_use_id,
+                answers=answers,
+                rounds_used=int(state.rounds or 0),
+                rounds_cap=int(settings.hitl_max_rounds),
+            )
+        except AwaitingHumanInput as hitl:
+            # Follow-up question from the specialist. Persist a new
+            # pending round; task stays in awaiting_input.
+            await _persist_hitl_pause(
+                task_uuid=task_uuid,
+                task_id_str=str(task_uuid),
+                role=role,
+                questions=hitl.questions,
+                round_id=hitl.round_id,
+                messages=hitl.messages,
+                tool_use_id=hitl.tool_use_id,
+            )
+            conv = Conversation()
+            return AgentResult(
+                success=True,
+                output=json.dumps({"awaiting_input": True, "role": role, "round_id": hitl.round_id}),
+                conversation=conv,
+                tool_calls=0,
+                iterations=0,
+                duration_seconds=0.0,
+            )
+
+        # Terminal artifact — persist + clear state + re-enqueue the
+        # original payload to the orchestrator queue so downstream
+        # specialists run (and the coding stage ultimately fires).
+        async with async_session_factory() as session:
+            art_repo = ArtifactRepository(session)
+            await art_repo.upsert(task_uuid, artifact)
+            state_repo = SpecialistStateRepository(session)
+            await state_repo.clear(task_uuid, role)
+            task_repo = TaskRepository(session)
+            # Flip back to 'running' so the UI reflects progress while
+            # the re-enqueued orchestrator message is picked up. The
+            # replay writes the real terminal status.
+            await task_repo.update_status(task_uuid, "running")
+            await session.commit()
+
+        # Re-enqueue to the orchestrator queue so the full planner
+        # replays; preloaded-artifacts logic skips this role.
+        try:
+            from ai_driven.queue.producer import TaskProducer
+            original_payload = payload.get("original_payload") or {}
+            producer = TaskProducer()
+            await producer.enqueue_task(
+                task_id=str(task_uuid),
+                agent_type="coding",
+                payload=original_payload,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("specialist_resume_reenqueue_failed",
+                             extra={"task_id": str(task_uuid)})
+
+        conv = Conversation()
+        return AgentResult(
+            success=True,
+            output=json.dumps({
+                "resumed_role": role,
+                "verdict": artifact.verdict,
+            }),
+            conversation=conv,
+            tool_calls=0,
+            iterations=0,
+            duration_seconds=0.0,
+        )
 
 
 class _QaPostCodingWrapper:

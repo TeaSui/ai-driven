@@ -67,7 +67,7 @@ The text should be clear and easy to understand. If the audience is not legal ex
 The summary should present an unbiased and fair depiction of the legal arguments and positions.
 </section>
 
-See the guide on [establishing success criteria](/docs/en/test-and-evaluate/develop-tests) for more information.
+See the guide on [establishing success criteria](../evaluation/define-success-criteria.md) for more information.
 
 ---
 
@@ -207,7 +207,7 @@ Because the code outputs each section of the summary within tags, each section c
 
 ### Evaluate your prompt
 
-Prompting often requires testing and optimization for it to be production ready. To determine the readiness of your solution, evaluate the quality of your summaries using a systematic process combining quantitative and qualitative methods. Creating a [strong empirical evaluation](/docs/en/test-and-evaluate/develop-tests#building-evals-and-test-cases) based on your defined success criteria allows you to optimize your prompts. Here are some metrics you may wish to include within your empirical evaluation:
+Prompting often requires testing and optimization for it to be production ready. To determine the readiness of your solution, evaluate the quality of your summaries using a systematic process combining quantitative and qualitative methods. Creating a [strong empirical evaluation](../evaluation/define-success-criteria.md#building-evals-and-test-cases) based on your defined success criteria allows you to optimize your prompts. Here are some metrics you may wish to include within your empirical evaluation:
 
 <section title="ROUGE scores">
 This measures the overlap between the generated summary and an expert-created reference summary. This metric primarily focuses on recall and is useful for evaluating content coverage.
@@ -219,7 +219,7 @@ While originally developed for machine translation, this metric can be adapted f
 This metric involves creating vector representations (embeddings) of both the generated and reference summaries. The similarity between these embeddings is then calculated, often using cosine similarity. Higher similarity scores indicate that the generated summary captures the semantic meaning and context of the reference summary, even if the exact wording differs.
 </section>
 <section title="LLM-based grading">
-This method involves using an LLM such as Claude to evaluate the quality of generated summaries against a scoring rubric. The rubric can be tailored to your specific needs, assessing key factors like accuracy, completeness, and coherence. For guidance on implementing LLM-based grading, view these [tips](/docs/en/test-and-evaluate/develop-tests#tips-for-llm-based-grading).
+This method involves using an LLM such as Claude to evaluate the quality of generated summaries against a scoring rubric. The rubric can be tailored to your specific needs, assessing key factors like accuracy, completeness, and coherence. For guidance on implementing LLM-based grading, view these [tips](../evaluation/define-success-criteria.md#tips-for-llm-based-grading).
 </section>
 <section title="Human evaluation">
 In addition to creating the reference summaries, legal experts can also evaluate the quality of the generated summaries. While this is expensive and time-consuming at scale, this is often done on a few summaries as a sanity check before deploying to production.
@@ -233,13 +233,13 @@ Here are some additional considerations to keep in mind as you deploy your solut
 
 2. **Handle diverse document types:** This guide discusses how to extract text from PDFs. In the real-world, documents may come in a variety of formats (PDFs, Word documents, text files, etc.). Ensure your data extraction pipeline can convert all of the file formats you expect to receive.
 
-3. **Parallelize API calls to Claude:** Long documents with a large number of tokens may require up to a minute for Claude to generate a summary. For large document collections, you may want to send API calls to Claude in parallel so that the summaries can be completed in a reasonable timeframe. Refer to Anthropic’s [rate limits](/docs/en/api/rate-limits#rate-limits) to determine the maximum amount of API calls that can be performed in parallel.
+3. **Parallelize API calls to Claude:** Long documents with a large number of tokens may require up to a minute for Claude to generate a summary. For large document collections, you may want to send API calls to Claude in parallel so that the summaries can be completed in a reasonable timeframe. Refer to Anthropic’s [rate limits](../../admin/monitoring/rate-limits-api.md#rate-limits) to determine the maximum amount of API calls that can be performed in parallel.
 
 ---
 
 ## Improve performance
 
-In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](/docs/en/build-with-claude/prompt-engineering/overview). Here are some advanced strategies:
+In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](../prompt-engineering/overview.md). Here are some advanced strategies:
 
 ### Perform meta-summarization to summarize long documents
 

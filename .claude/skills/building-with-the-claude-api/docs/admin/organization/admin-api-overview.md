@@ -6,7 +6,7 @@
 **The Admin API is unavailable for individual accounts.** To collaborate with teammates and add members, set up your organization in **Console → Settings → Organization**.
 </Tip>
 
-The [Admin API](/docs/en/api/admin) allows you to programmatically manage your organization's resources, including organization members, workspaces, and API keys. This provides programmatic control over administrative tasks that would otherwise require manual configuration in the [Claude Console](/).
+The [Admin API](../index.md) allows you to programmatically manage your organization's resources, including organization members, workspaces, and API keys. This provides programmatic control over administrative tasks that would otherwise require manual configuration in the [Claude Console](/).
 
 <Check>
   **The Admin API requires special access**
@@ -46,7 +46,7 @@ There are five organization-level roles. See more details in the [API Console ro
 
 ### Organization Members
 
-You can list [organization members](/docs/en/api/admin-api/users/get-user), update member roles, and remove members.
+You can list [organization members](https://docs.claude.com/en/docs/api/admin-api/users/get-user), update member roles, and remove members.
 
 <CodeGroup>
 ```bash cURL
@@ -71,7 +71,7 @@ curl --request DELETE "https://api.anthropic.com/v1/organizations/users/{user_id
 
 ### Organization Invites
 
-You can invite users to organizations and manage those [invites](/docs/en/api/admin-api/invites/get-invite).
+You can invite users to organizations and manage those [invites](https://docs.claude.com/en/docs/api/admin-api/invites/get-invite).
 
 <CodeGroup>
 
@@ -100,11 +100,11 @@ curl --request DELETE "https://api.anthropic.com/v1/organizations/invites/{invit
 
 ### Workspaces
 
-For a comprehensive guide to workspaces, including Console and API examples, see [Workspaces](/docs/en/build-with-claude/workspaces).
+For a comprehensive guide to workspaces, including Console and API examples, see [Workspaces](workspaces.md).
 
 ### Workspace Members
 
-Manage [user access to specific workspaces](/docs/en/api/admin-api/workspace_members/get-workspace-member):
+Manage [user access to specific workspaces](https://docs.claude.com/en/docs/api/admin-api/workspace_members/get-workspace-member):
 
 <CodeGroup>
 
@@ -141,7 +141,7 @@ curl --request DELETE "https://api.anthropic.com/v1/organizations/workspaces/{wo
 
 ### API Keys
 
-Monitor and manage [API keys](/docs/en/api/admin-api/apikeys/get-api-key):
+Monitor and manage [API keys](https://docs.claude.com/en/docs/api/admin-api/apikeys/get-api-key):
 
 <CodeGroup>
 
@@ -185,19 +185,19 @@ curl "https://api.anthropic.com/v1/organizations/me" \
 
 This endpoint is useful for programmatically determining which organization an Admin API key belongs to.
 
-For complete parameter details and response schemas, see the [Organization Info API reference](/docs/en/api/admin-api/organization/get-me).
+For complete parameter details and response schemas, see the [Organization Info API reference](https://docs.claude.com/en/docs/api/admin-api/organization/get-me).
 
 ## Usage and cost reports
 
-Track your organization's usage and costs with the [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api).
+Track your organization's usage and costs with the [Usage and Cost API](../monitoring/usage-and-cost-api.md).
 
 ## Claude Code analytics
 
-Monitor developer productivity and Claude Code adoption with the [Claude Code Analytics API](/docs/en/build-with-claude/claude-code-analytics-api).
+Monitor developer productivity and Claude Code adoption with the [Claude Code Analytics API](../monitoring/claude-code-analytics-api.md).
 
 ## Rate limits
 
-Read the rate limits configured for your organization and its workspaces with the [Rate Limits API](/docs/en/build-with-claude/rate-limits-api).
+Read the rate limits configured for your organization and its workspaces with the [Rate Limits API](../monitoring/rate-limits-api.md).
 
 ## Best practices
 
@@ -241,4 +241,4 @@ Organization invites expire after 21 days. There is currently no way to modify t
 
 </section>
 
-For workspace-specific questions, see the [Workspaces FAQ](/docs/en/build-with-claude/workspaces#faq).
+For workspace-specific questions, see the [Workspaces FAQ](workspaces.md#faq).

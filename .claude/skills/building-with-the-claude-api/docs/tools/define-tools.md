@@ -13,7 +13,7 @@ Use the latest Claude Opus (4.7) model for complex tools and ambiguous queries; 
 Use Claude Haiku models for straightforward tools, but note they may infer missing parameters.
 
 <Tip>
-If using Claude with tool use and extended thinking, refer to the [extended thinking guide](/docs/en/build-with-claude/extended-thinking) for more information.
+If using Claude with tool use and extended thinking, refer to the [extended thinking guide](../model-capabilities/extended-thinking.md) for more information.
 </Tip>
 
 ## Specifying client tools
@@ -27,7 +27,7 @@ Client tools (both Anthropic-schema and user-defined) are specified in the `tool
 | `input_schema` | A [JSON Schema](https://json-schema.org/) object defining the expected parameters for the tool.     |
 | `input_examples` | (Optional) An array of example input objects to help Claude understand how to use the tool. See [Providing tool use examples](#providing-tool-use-examples). |
 
-For the full set of optional properties available on any tool definition, including `cache_control`, `strict`, `defer_loading`, and `allowed_callers`, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference#tool-definition-properties).
+For the full set of optional properties available on any tool definition, including `cache_control`, `strict`, `defer_loading`, and `allowed_callers`, see the [Tool reference](../tool-infrastructure/tool-reference.md#tool-definition-properties).
 
 <section title="Example simple tool definition">
 
@@ -82,7 +82,7 @@ To get the best performance out of Claude when using tools, follow these guideli
   - Any important caveats or limitations, such as what information the tool does not return if the tool name is unclear. The more context you can give Claude about your tools, the better it will be at deciding when and how to use them. Aim for at least 3-4 sentences per tool description, more if the tool is complex.
 - **Prioritize descriptions, but consider using `input_examples` for complex tools.** Clear descriptions are most important, but for tools with complex inputs, nested objects, or format-sensitive parameters, you can use the `input_examples` field to provide schema-validated examples. See [Providing tool use examples](#providing-tool-use-examples) for details.
 - **Consolidate related operations into fewer tools.** Rather than creating a separate tool for every action (`create_pr`, `review_pr`, `merge_pr`), group them into a single tool with an `action` parameter. Fewer, more capable tools reduce selection ambiguity and make your tool surface easier for Claude to navigate.
-- **Use meaningful namespacing in tool names.** When your tools span multiple services or resources, prefix names with the service (e.g., `github_list_prs`, `slack_send_message`). This makes tool selection unambiguous as your library grows, and is especially important when using [tool search](/docs/en/agents-and-tools/tool-use/tool-search-tool).
+- **Use meaningful namespacing in tool names.** When your tools span multiple services or resources, prefix names with the service (e.g., `github_list_prs`, `slack_send_message`). This makes tool selection unambiguous as your library grows, and is especially important when using [tool search](../tool-infrastructure/tool-search-tool.md).
 - **Design tool responses to return only high-signal information.** Return semantic, stable identifiers (e.g., slugs or UUIDs) rather than opaque internal references, and include only the fields Claude needs to reason about its next step. Bloated responses waste context and make it harder for Claude to extract what matters.
 
 <section title="Example of a good tool description">
@@ -561,7 +561,7 @@ When working with the tool_choice parameter, there are four possible options:
 - `none` prevents Claude from using any tools. This is the default value when no `tools` are provided.
 
 <Note>
-When using [prompt caching](/docs/en/build-with-claude/prompt-caching#what-invalidates-the-cache), changes to the `tool_choice` parameter will invalidate cached message blocks. Tool definitions and system prompts remain cached, but message content must be reprocessed.
+When using [prompt caching](../context-management/prompt-caching.md#what-invalidates-the-cache), changes to the `tool_choice` parameter will invalidate cached message blocks. Tool definitions and system prompts remain cached, but message content must be reprocessed.
 </Note>
 
 This diagram illustrates how each option works:
@@ -573,7 +573,7 @@ This diagram illustrates how each option works:
 Note that when you have `tool_choice` as `any` or `tool`, the API prefills the assistant message to force a tool to be used. This means that the models will not emit a natural language response or explanation before `tool_use` content blocks, even if explicitly asked to do so.
 
 <Note>
-When using [extended thinking](/docs/en/build-with-claude/extended-thinking) with tool use, `tool_choice: {"type": "any"}` and `tool_choice: {"type": "tool", "name": "..."}` are not supported and will result in an error. Only `tool_choice: {"type": "auto"}` (the default) and `tool_choice: {"type": "none"}` are compatible with extended thinking.
+When using [extended thinking](../model-capabilities/extended-thinking.md) with tool use, `tool_choice: {"type": "any"}` and `tool_choice: {"type": "tool", "name": "..."}` are not supported and will result in an error. Only `tool_choice: {"type": "auto"}` (the default) and `tool_choice: {"type": "none"}` are compatible with extended thinking.
 </Note>
 
 <Note>
@@ -585,7 +585,7 @@ Testing has shown that this should not reduce performance. If you would like the
 <Tip>
 **Guaranteed tool calls with strict tools**
 
-Combine `tool_choice: {"type": "any"}` with [strict tool use](/docs/en/agents-and-tools/tool-use/strict-tool-use) to guarantee both that one of your tools will be called AND that the tool inputs strictly follow your schema. Set `strict: true` on your tool definitions to enable schema validation.
+Combine `tool_choice: {"type": "any"}` with [strict tool use](strict-tool-use.md) to guarantee both that one of your tools will be called AND that the tool inputs strictly follow your schema. Set `strict: true` on your tool definitions to enable schema validation.
 </Tip>
 
 ### Model responses with tools

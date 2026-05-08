@@ -404,36 +404,42 @@ async def list_tasks(
 ) -> TaskListResponse:
     """List tasks for the authenticated team (or all tasks in debug mode).
 
-    Tier-1 Item A: gated by ``require_admin``. Team-scoping was already
-    in place via ``request.state.team_id`` + ``list_for_team`` — no
-    change to the query logic.
+    Tier-1 Item A: gated by ``require_admin``. Team-scoping is applied
+    via ``request.state.team_id`` + ``list_for_team``, EXCEPT when the
+    caller is the debug principal (admin sentinel team) — that
+    principal sees every team's tasks so the Coding Agent list view
+    matches the god-view counts exposed by ``/dashboard/summary``.
     """
     task_repo = TaskRepository(session)
-    team_id_str = getattr(request.state, "team_id", None)
 
-    # Resolve team — auth middleware has set either (a) team_id via the
-    # session-token path (browser /login) or (b) api_key_hash via the
-    # X-API-Key header path (agents, webhooks, scripts). Try session
-    # path first, then fall back to api_key_hash.
-    team_id_uuid: uuid.UUID | None = None
-    if team_id_str:
-        try:
-            team_id_uuid = uuid.UUID(team_id_str)
-        except ValueError:
-            team_id_uuid = None
+    if _is_debug_principal(member):
+        tasks = await task_repo.list_all(limit=limit, offset=offset)
+    else:
+        team_id_str = getattr(request.state, "team_id", None)
 
-    if team_id_uuid is None:
-        api_key_hash = getattr(request.state, "api_key_hash", None)
-        if not api_key_hash:
-            return TaskListResponse(tasks=[], total=0)
+        # Resolve team — auth middleware has set either (a) team_id via the
+        # session-token path (browser /login) or (b) api_key_hash via the
+        # X-API-Key header path (agents, webhooks, scripts). Try session
+        # path first, then fall back to api_key_hash.
+        team_id_uuid: uuid.UUID | None = None
+        if team_id_str:
+            try:
+                team_id_uuid = uuid.UUID(team_id_str)
+            except ValueError:
+                team_id_uuid = None
 
-        team_repo = TeamRepository(session)
-        team = await team_repo.get_by_api_key_hash(api_key_hash)
-        if not team:
-            return TaskListResponse(tasks=[], total=0)
-        team_id_uuid = team.id
+        if team_id_uuid is None:
+            api_key_hash = getattr(request.state, "api_key_hash", None)
+            if not api_key_hash:
+                return TaskListResponse(tasks=[], total=0)
 
-    tasks = await task_repo.list_for_team(team_id_uuid, limit=limit, offset=offset)
+            team_repo = TeamRepository(session)
+            team = await team_repo.get_by_api_key_hash(api_key_hash)
+            if not team:
+                return TaskListResponse(tasks=[], total=0)
+            team_id_uuid = team.id
+
+        tasks = await task_repo.list_for_team(team_id_uuid, limit=limit, offset=offset)
 
     def _task_duration_ms(t: Any) -> int | None:
         if t.started_at and t.completed_at:
@@ -709,6 +715,117 @@ async def get_task(
         "jiraUrl": _build_jira_url(task.jira_key),
         "conversationLog": [],
     }
+
+
+@router.get("/tasks/{task_id}/pending-clarification")
+async def get_pending_clarification(
+    task_id: str,
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Return the open HITL round for a task, or {"pending": null}.
+
+    Lets the Coding Agent list view render an inline answer form without
+    drilling into the task detail page. Shape mirrors the event payload
+    emitted on ``specialist.clarification_requested`` so the frontend
+    extractor ``extractPendingQuestion`` can consume either source.
+    """
+    try:
+        parsed_id = uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid task ID format")
+
+    task_repo = TaskRepository(session)
+    task = await task_repo.get_by_id(parsed_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not _is_debug_principal(member) and str(task.team_id) != member.team_id:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    from ai_driven.db.postgres.models import TaskSpecialistState
+    res = await session.execute(
+        select(TaskSpecialistState).where(
+            TaskSpecialistState.task_id == parsed_id,
+            TaskSpecialistState.pending_question.isnot(None),
+        )
+    )
+    row = res.scalar_one_or_none()
+    if row is None:
+        return {"pending": None}
+    pq = row.pending_question or {}
+    return {
+        "pending": {
+            "role": row.role,
+            "round_id": pq.get("round_id"),
+            "questions": pq.get("questions", []),
+            "asked_at": pq.get("asked_at"),
+            "rounds": row.rounds,
+        }
+    }
+
+
+@router.get("/prompt-variants")
+async def list_prompt_variants(
+    member: TeamMemberInfo = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict[str, Any]]:
+    """Return every prompt variant with its aggregated scores.
+
+    Each row:
+
+    ::
+
+        {
+          "id": "...", "agent_type": "coding", "name": "control",
+          "weight": 80, "is_control": true,
+          "description": "...",
+          "created_at": "...",
+          "dimensions": {
+            "correctness": {"n": 12, "avg": 7.3, "stddev": 1.1},
+            "completeness": {...}, ...
+          }
+        }
+
+    The ``dimensions`` sub-dict is built from
+    ``agent_prompt_variant_stats``. Empty when no samples yet.
+    """
+    from ai_driven.db.postgres.models import AgentPromptVariant, AgentPromptVariantStat
+    variants = (await session.execute(
+        select(AgentPromptVariant).order_by(
+            AgentPromptVariant.agent_type, AgentPromptVariant.name,
+        )
+    )).scalars().all()
+    stats = (await session.execute(select(AgentPromptVariantStat))).scalars().all()
+    stats_by_variant: dict[str, dict[str, dict[str, Any]]] = {}
+    for s in stats:
+        stats_by_variant.setdefault(str(s.variant_id), {})[s.dimension] = {
+            "n": int(s.n_samples),
+            "avg": float(s.avg_score),
+            "stddev": float(s.stddev_score or 0),
+        }
+    return [
+        {
+            "id": str(v.id),
+            "agentType": v.agent_type,
+            "name": v.name,
+            "description": v.description,
+            "weight": int(v.weight or 0),
+            "isControl": bool(v.is_control),
+            "createdAt": v.created_at.isoformat() if v.created_at else None,
+            "createdBy": v.created_by,
+            "dimensions": stats_by_variant.get(str(v.id), {}),
+        }
+        for v in variants
+    ]
+
+
+@router.post("/prompt-variants/refresh-stats")
+async def refresh_prompt_variant_stats(
+    member: TeamMemberInfo = Depends(require_admin),
+) -> dict[str, Any]:
+    """Recompute per-variant stats from task_evaluations. Admin-only."""
+    from ai_driven.evaluation.variant_stats import refresh_stats
+    return await refresh_stats()
 
 
 @router.get("/tasks/{task_id}/evaluations")

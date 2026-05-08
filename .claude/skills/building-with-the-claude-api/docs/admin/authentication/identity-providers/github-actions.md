@@ -10,7 +10,7 @@ The token's `sub` claim encodes the repository and trigger context. For a push t
 
 ## Prerequisites
 
-- Familiarity with [WIF concepts](/docs/en/build-with-claude/workload-identity-federation#concepts): service accounts, federation issuers, and federation rules.
+- Familiarity with [WIF concepts](../workload-identity-federation.md#concepts): service accounts, federation issuers, and federation rules.
 - A GitHub repository where you can edit workflow files and grant the `id-token: write` permission.
 - Permission to create service accounts, federation issuers, and federation rules in the Claude Console for your Anthropic organization.
 - Your Anthropic organization ID. You can find it in the Claude Console under **Settings → Organization**.
@@ -68,7 +68,7 @@ See [GitHub's OIDC subject claim reference](https://docs.github.com/en/actions/d
 
 ## Configure Anthropic
 
-Follow the [setup walkthrough](/docs/en/build-with-claude/workload-identity-federation#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these GitHub Actions-specific values.
+Follow the [setup walkthrough](../workload-identity-federation.md#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these GitHub Actions-specific values.
 
 **Federation issuer:** GitHub publishes its OIDC discovery document and JWKS publicly, so use discovery mode. Anthropic refreshes the keys automatically when GitHub rotates them.
 
@@ -328,7 +328,7 @@ Each GitHub-issued identity token expires roughly five minutes after issuance. T
 
 ## Verify the setup
 
-A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](/docs/en/api/authentication/wif-reference#troubleshoot-a-failed-exchange); the most common GitHub Actions-side cause is the `sub` claim format not matching (its trailing segment varies between `ref:...`, `environment:...`, and `pull_request` events).
+A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](../wif-reference.md#troubleshoot-a-failed-exchange); the most common GitHub Actions-side cause is the `sub` claim format not matching (its trailing segment varies between `ref:...`, `environment:...`, and `pull_request` events).
 
 ## Restrict which workflows can authenticate
 
@@ -345,5 +345,5 @@ Lock the rule's `match` block to the narrowest scope that fits your use case:
 
 ## Next steps
 
-- [Workload Identity Federation](/docs/en/build-with-claude/workload-identity-federation): full setup walkthrough, environment variables, and credential precedence.
-- [Authentication](/docs/en/api/authentication/overview): how federation compares to API keys.
+- [Workload Identity Federation](../workload-identity-federation.md): full setup walkthrough, environment variables, and credential precedence.
+- [Authentication](../overview.md): how federation compares to API keys.

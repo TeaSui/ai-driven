@@ -32,7 +32,7 @@ Multiagent sessions work best when there are multiple well-scoped, specialized t
 
 ## Declare callable agents
 
-When [defining your agent](/docs/en/managed-agents/agent-setup), list additional IDs of agents it is permitted to call:
+When [defining your agent](agent-setup.md), list additional IDs of agents it is permitted to call:
 
 <CodeGroup defaultLanguage="CLI">
 ```bash curl
@@ -579,13 +579,13 @@ These events surface multiagent activity on the top-level session stream.
 
 ## Tool permissions and custom tools in threads
 
-When a `callable_agent` thread needs something from your client ([permission](/docs/en/managed-agents/events-and-streaming#tool-confirmation) to run an `always_ask` tool, or the [result of a custom tool](/docs/en/managed-agents/events-and-streaming#handling-custom-tool-calls)) the request surfaces on the **session stream** with a `session_thread_id` field. Include the same `session_thread_id` when you post your response so the platform routes it back to the waiting thread.
+When a `callable_agent` thread needs something from your client ([permission](session-event-stream.md#tool-confirmation) to run an `always_ask` tool, or the [result of a custom tool](session-event-stream.md#handling-custom-tool-calls)) the request surfaces on the **session stream** with a `session_thread_id` field. Include the same `session_thread_id` when you post your response so the platform routes it back to the waiting thread.
 
 - **`session_thread_id` is present:** the event originated in a subagent thread. Echo it on your reply.
 - **`session_thread_id` is absent:** the event came from the primary thread. Reply without the field.
 - Match on `tool_use_id` to pair requests with responses.
 
-The example below extends the [tool confirmation handler](/docs/en/managed-agents/events-and-streaming#tool-confirmation) to route replies. The same pattern applies to `user.custom_tool_result`.
+The example below extends the [tool confirmation handler](session-event-stream.md#tool-confirmation) to route replies. The same pattern applies to `user.custom_tool_result`.
 
 <CodeGroup>
 ```bash curl

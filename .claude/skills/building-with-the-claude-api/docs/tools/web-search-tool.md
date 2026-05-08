@@ -10,9 +10,9 @@ The latest web search tool version (`web_search_20260209`) supports **dynamic fi
 For [Claude Mythos Preview](https://anthropic.com/glasswing), web search is supported on the Claude API, Microsoft Foundry, and Google Vertex AI. Web search is not available for Mythos Preview on Amazon Bedrock.
 </Note>
 
-For Zero Data Retention eligibility and the `allowed_callers` workaround, see [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#zdr-and-allowed-callers).
+For Zero Data Retention eligibility and the `allowed_callers` workaround, see [Server tools](server-tools.md#zdr-and-allowed-callers).
 
-For model support, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference).
+For model support, see the [Tool reference](../tool-infrastructure/tool-reference.md).
 
 ## How web search works
 
@@ -35,7 +35,7 @@ Dynamic filtering is particularly effective for:
 - Response grounding and verification
 
 <Note>
-Dynamic filtering requires the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool) to be enabled. The improved web search tool is available on the Claude API and Microsoft Azure. On Google Vertex AI, the basic web search tool (without dynamic filtering) is available.
+Dynamic filtering requires the [code execution tool](code-execution-tool.md) to be enabled. The improved web search tool is available on the Claude API and Microsoft Azure. On Google Vertex AI, the basic web search tool (without dynamic filtering) is available.
 </Note>
 
 To enable dynamic filtering, use the `web_search_20260209` tool version:
@@ -497,7 +497,7 @@ The `max_uses` parameter limits the number of searches performed. If Claude atte
 
 #### Domain filtering
 
-For domain filtering with `allowed_domains` and `blocked_domains`, see [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#domain-filtering).
+For domain filtering with `allowed_domains` and `blocked_domains`, see [Server tools](server-tools.md#domain-filtering).
 
 #### Localization
 
@@ -625,11 +625,11 @@ These are the possible error codes:
 
 #### `pause_turn` stop reason
 
-For continuing after a `pause_turn` stop reason, see [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#the-server-side-loop-and-pause-turn).
+For continuing after a `pause_turn` stop reason, see [Server tools](server-tools.md#the-server-side-loop-and-pause-turn).
 
 ## Prompt caching
 
-For caching tool definitions across turns, see [Tool use with prompt caching](/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching).
+For caching tool definitions across turns, see [Tool use with prompt caching](tool-use-with-prompt-caching.md).
 
 ## Streaming
 
@@ -662,7 +662,7 @@ data: {"type": "content_block_start", "index": 2, "content_block": {"type": "web
 
 ## Batch requests
 
-You can include the web search tool in the [Messages Batches API](/docs/en/build-with-claude/batch-processing). Web search tool calls through the Messages Batches API are priced the same as those in regular Messages API requests.
+You can include the web search tool in the [Messages Batches API](../model-capabilities/batch-processing.md). Web search tool calls through the Messages Batches API are priced the same as those in regular Messages API requests.
 
 ## Usage and pricing
 

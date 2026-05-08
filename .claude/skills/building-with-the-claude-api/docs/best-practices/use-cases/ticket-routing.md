@@ -161,7 +161,7 @@ In addition to intent, ticket routing and prioritization may also be influenced 
 
 ### Establish success criteria
 
-Work with your support team to [define clear success criteria](/docs/en/test-and-evaluate/develop-tests) with measurable benchmarks, thresholds, and goals.
+Work with your support team to [define clear success criteria](../evaluation/define-success-criteria.md) with measurable benchmarks, thresholds, and goals.
 
 Here are some standard criteria and benchmarks when using LLMs for support ticket routing:
 
@@ -258,7 +258,7 @@ Here are some common success criteria that may be useful regardless of whether a
 
 The choice of model depends on the trade-offs between cost, accuracy, and response time.
 
-Many customers have found `claude-haiku-4-5-20251001` an ideal model for ticket routing, as it is the fastest and most cost-effective model in the Claude 4 family while still delivering excellent results. If your classification problem requires deep subject matter expertise or a large volume of intent categories complex reasoning, you may opt for the [larger Sonnet model](/docs/en/about-claude/models).
+Many customers have found `claude-haiku-4-5-20251001` an ideal model for ticket routing, as it is the fastest and most cost-effective model in the Claude 4 family while still delivering excellent results. If your classification problem requires deep subject matter expertise or a large volume of intent categories complex reasoning, you may opt for the [larger Sonnet model](https://docs.claude.com/en/docs/about-claude/models).
 
 ### Build a strong prompt
 
@@ -267,7 +267,7 @@ Ticket routing is a type of classification task. Claude analyzes the content of 
 Let’s write a ticket classification prompt. Our initial prompt should contain the contents of the user request and return both the reasoning and the intent.
 
 <Tip>
-Try the [prompt generator](/docs/en/prompt-generator) on the [Claude Console](/login) to have Claude write a first draft for you.
+Try the [prompt generator](https://docs.claude.com/en/docs/prompt-generator) on the [Claude Console](/login) to have Claude write a first draft for you.
 </Tip>
 
 Here's an example ticket routing classification prompt:
@@ -340,7 +340,7 @@ The reason we want to have Claude split its response into various XML tag sectio
 
 ### Deploy your prompt
 
-It’s hard to know how well your prompt works without deploying it in a test production setting and [running evaluations](/docs/en/test-and-evaluate/develop-tests).
+It’s hard to know how well your prompt works without deploying it in a test production setting and [running evaluations](../evaluation/define-success-criteria.md).
 
 Let’s build the deployment structure. Start by defining the method signature for wrapping our call to Claude. We'll take the method we’ve already begun to write, which has `ticket_contents` as input, and now return a tuple of `reasoning` and `intent` as output. If you have an existing automation using traditional ML, you'll want to follow that method signature instead.
 
@@ -398,7 +398,7 @@ Since we need to wait for the entire reasoning and intent text to be generated b
 
 Prompting often requires testing and optimization for it to be production ready. To determine the readiness of your solution, evaluate performance based on the success criteria and thresholds you established earlier.
 
-To run your evaluation, you need test cases to run it on. The rest of this guide assumes you have already [developed your test cases](/docs/en/test-and-evaluate/develop-tests).
+To run your evaluation, you need test cases to run it on. The rest of this guide assumes you have already [developed your test cases](../evaluation/define-success-criteria.md).
 
 ### Build an evaluation function
 
@@ -470,7 +470,7 @@ Having these thresholds allows you to quickly and easily tell at scale, and with
 
 ## Improve performance
 
-In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](/docs/en/build-with-claude/prompt-engineering/overview) & [guardrail implementation strategies](/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations). Here are some common scenarios:
+In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](../prompt-engineering/overview.md) & [guardrail implementation strategies](../guardrails/reduce-hallucinations.md). Here are some common scenarios:
 
 ### Use a taxonomic hierarchy for cases with 20+ intent categories
 

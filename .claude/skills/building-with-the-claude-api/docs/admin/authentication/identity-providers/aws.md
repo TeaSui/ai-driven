@@ -6,11 +6,11 @@ Authenticate AWS workloads on Lambda, EC2, ECS, or EKS to the Claude API with Wo
 
 AWS workloads can authenticate to the Claude API without static API keys by exchanging an AWS-signed OIDC identity token. The recommended path calls the AWS STS [`GetWebIdentityToken`](https://docs.aws.amazon.com/STS/latest/APIReference/API_GetWebIdentityToken.html) API, which works anywhere the workload has AWS credentials: Lambda, EC2, ECS, and EKS. EKS workloads can alternatively use the [Kubernetes projected-token path](#use-eks-projected-service-account-tokens), which has fewer configuration steps but only works inside a pod.
 
-This guide shows both paths. For the underlying concepts (service accounts, federation issuers, and federation rules), see [Workload Identity Federation](/docs/en/build-with-claude/workload-identity-federation).
+This guide shows both paths. For the underlying concepts (service accounts, federation issuers, and federation rules), see [Workload Identity Federation](../workload-identity-federation.md).
 
 ## Prerequisites
 
-- Familiarity with [WIF concepts](/docs/en/build-with-claude/workload-identity-federation#concepts): service accounts, federation issuers, and federation rules.
+- Familiarity with [WIF concepts](../workload-identity-federation.md#concepts): service accounts, federation issuers, and federation rules.
 - An AWS workload (EKS pod, ECS task, Lambda function, or EC2 instance) with an attached IAM role.
 - The `aws` CLI or an AWS SDK available in the workload.
 - Permission to create service accounts, federation issuers, and federation rules in the Claude Console for your Anthropic organization.
@@ -64,7 +64,7 @@ python3 -c "import boto3; print(boto3.client('iam').get_outbound_web_identity_fe
 
 ### Configure Anthropic
 
-Follow the [setup walkthrough](/docs/en/build-with-claude/workload-identity-federation#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these STS-specific values.
+Follow the [setup walkthrough](../workload-identity-federation.md#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these STS-specific values.
 
 **Federation issuer:** Register the per-account STS issuer URL you copied in the prior step. It exposes a public JWKS endpoint, so use discovery mode.
 
@@ -456,11 +456,11 @@ curl -sS https://api.anthropic.com/v1/oauth/token \
   }" | jq
 ```
 
-A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](/docs/en/api/authentication/wif-reference#troubleshoot-a-failed-exchange); the most common AWS-side cause is an `iss` mismatch (the per-account STS issuer URL must match the registered `issuer_url` exactly).
+A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](../wif-reference.md#troubleshoot-a-failed-exchange); the most common AWS-side cause is an `iss` mismatch (the per-account STS issuer URL must match the registered `issuer_url` exactly).
 
 ## Use EKS projected service-account tokens
 
-If your workload runs in an EKS pod, you can skip the STS call and read a Kubernetes-projected service-account token directly from disk. Kubernetes natively projects an OIDC-compatible token into the pod, and the SDK can read it from a file path, so no token-provider callable is required. This path has two fewer AWS configuration steps than the STS path but only works inside a pod; the underlying mechanism is the same as the [generic Kubernetes integration](/docs/en/build-with-claude/wif-providers/kubernetes).
+If your workload runs in an EKS pod, you can skip the STS call and read a Kubernetes-projected service-account token directly from disk. Kubernetes natively projects an OIDC-compatible token into the pod, and the SDK can read it from a file path, so no token-provider callable is required. This path has two fewer AWS configuration steps than the STS path but only works inside a pod; the underlying mechanism is the same as the [generic Kubernetes integration](kubernetes.md).
 
 This path additionally requires an EKS cluster with an [IAM OIDC provider enabled](https://docs.aws.amazon.com/eks/latest/userguide/enable-iam-roles-for-service-accounts.html) and `kubectl` access to the cluster.
 
@@ -551,7 +551,7 @@ This path additionally requires an EKS cluster with an [IAM OIDC provider enable
 
 ### Configure Anthropic
 
-Follow the [setup walkthrough](/docs/en/build-with-claude/workload-identity-federation#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these EKS-specific values.
+Follow the [setup walkthrough](../workload-identity-federation.md#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these EKS-specific values.
 
 **Federation issuer:** EKS issuers expose a public JWKS endpoint, so use discovery mode. The issuer URL must exactly match the token's `iss` claim. Register one issuer per cluster.
 
@@ -823,7 +823,7 @@ curl -sS https://api.anthropic.com/v1/oauth/token \
   }" | jq
 ```
 
-A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](/docs/en/api/authentication/wif-reference#troubleshoot-a-failed-exchange); the most common EKS-side cause is the projected token's `aud` not matching the rule (project a token with `audience: https://api.anthropic.com`, not the IRSA default `sts.amazonaws.com`).
+A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](../wif-reference.md#troubleshoot-a-failed-exchange); the most common EKS-side cause is the projected token's `aud` not matching the rule (project a token with `audience: https://api.anthropic.com`, not the IRSA default `sts.amazonaws.com`).
 
 ## Scope your rule
 
@@ -840,5 +840,5 @@ Lock the rule's `match` block to the narrowest scope that fits your use case:
 
 ## Next steps
 
-- Review the [WIF reference](/docs/en/api/authentication/wif-reference) for the full credential precedence, profile configuration, and rule matching reference.
-- For self-managed Kubernetes clusters that aren't on EKS, see [Use WIF with Kubernetes](/docs/en/build-with-claude/wif-providers/kubernetes).
+- Review the [WIF reference](../wif-reference.md) for the full credential precedence, profile configuration, and rule matching reference.
+- For self-managed Kubernetes clusters that aren't on EKS, see [Use WIF with Kubernetes](kubernetes.md).

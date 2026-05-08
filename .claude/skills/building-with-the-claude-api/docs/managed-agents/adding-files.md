@@ -12,7 +12,7 @@ All Managed Agents API requests require the `managed-agents-2026-04-01` beta hea
 
 ## Uploading files
 
-First, upload a file using the [Files API](/docs/en/build-with-claude/files):
+First, upload a file using the [Files API](../files/files-api.md):
 
 <CodeGroup>
   
@@ -264,7 +264,7 @@ session = client.beta.sessions.create(
 
 </CodeGroup>
 
-A new `file_id` will be created that references the instance of the file in the session. These copies do not count against your [storage limits](/docs/en/build-with-claude/files).
+A new `file_id` will be created that references the instance of the file in the session. These copies do not count against your [storage limits](../files/files-api.md).
 
 ## Multiple files
 
@@ -578,7 +578,7 @@ client.beta.sessions.resources.delete(resource.id, session_id: session.id)
 
 ## Listing and downloading session files
 
-Use the [Files API](/docs/en/build-with-claude/files) to list files scoped to a session and download them.
+Use the [Files API](../files/files-api.md) to list files scoped to a session and download them.
 
 <CodeGroup>
 ```bash curl

@@ -5,10 +5,10 @@ The legacy Amazon Bedrock integration for Claude models, using InvokeModel and C
 ---
 
 <Note>
-This page covers the legacy Amazon Bedrock integration: the `InvokeModel` and `Converse` APIs with ARN-versioned model identifiers and AWS event-stream encoding. For models available on the Messages-API Bedrock endpoint, see [Claude in Amazon Bedrock](/docs/en/build-with-claude/claude-in-amazon-bedrock), which uses the Messages API at `/anthropic/v1/messages` with SSE streaming.
+This page covers the legacy Amazon Bedrock integration: the `InvokeModel` and `Converse` APIs with ARN-versioned model identifiers and AWS event-stream encoding. For models available on the Messages-API Bedrock endpoint, see [Claude in Amazon Bedrock](amazon-bedrock.md), which uses the Messages API at `/anthropic/v1/messages` with SSE streaming.
 </Note>
 
-Calling Claude through Bedrock slightly differs from how you would call Claude when using Anthropic's client SDKs. This guide walks you through completing an API call to Claude on Bedrock using one of Anthropic's [client SDKs](/docs/en/api/client-sdks).
+Calling Claude through Bedrock slightly differs from how you would call Claude when using Anthropic's client SDKs. This guide walks you through completing an API call to Claude on Bedrock using one of Anthropic's [client SDKs](https://docs.claude.com/en/docs/api/client-sdks).
 
 Note that this guide assumes you have already signed up for an [AWS account](https://portal.aws.amazon.com/billing/signup) and configured programmatic access.
 
@@ -24,7 +24,7 @@ aws sts get-caller-identity
 
 ## Install an SDK for accessing Bedrock
 
-Anthropic's [client SDKs](/docs/en/api/client-sdks) support Bedrock. You can also use an AWS SDK like `boto3` directly.
+Anthropic's [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) support Bedrock. You can also use an AWS SDK like `boto3` directly.
 
 <Tabs>
 <Tab title="Python">
@@ -127,7 +127,7 @@ Go to the [AWS Console > Bedrock > Model Access](https://console.aws.amazon.com/
 <Note>
   Claude Opus 4.7 is reachable through `InvokeModel` on `bedrock-runtime`.
   These requests are served by the same infrastructure as the
-  [Claude in Amazon Bedrock](/docs/en/build-with-claude/claude-in-amazon-bedrock)
+  [Claude in Amazon Bedrock](amazon-bedrock.md)
   endpoint. For the native Messages API request shape and full feature
   parity, use that page. Claude Opus 4.7 is omitted from the model table
   on this page because it does not have an ARN-versioned model ID.
@@ -528,7 +528,7 @@ The following examples show how to generate text from Claude on Bedrock:
   ```
 </CodeGroup>
 
-See the [client SDKs](/docs/en/api/client-sdks) for more details, and the [official Bedrock documentation](https://docs.aws.amazon.com/bedrock/).
+See the [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) for more details, and the [official Bedrock documentation](https://docs.aws.amazon.com/bedrock/).
 
 ### Bearer token authentication
 
@@ -641,22 +641,22 @@ Turning on this service does not give AWS or Anthropic any access to your conten
 </Note>
 
 ## Feature support
-For all currently supported features on Bedrock, see [API features overview](/docs/en/api/overview).
+For all currently supported features on Bedrock, see [API features overview](https://docs.claude.com/en/docs/api/overview).
 
 ### PDF support on Bedrock
 
-PDF support is available on Amazon Bedrock through both the Converse API and InvokeModel API. For detailed information about PDF processing capabilities and limitations, see the [PDF support documentation](/docs/en/build-with-claude/pdf-support#amazon-bedrock-pdf-support).
+PDF support is available on Amazon Bedrock through both the Converse API and InvokeModel API. For detailed information about PDF processing capabilities and limitations, see the [PDF support documentation](../files/pdf-support.md#amazon-bedrock-pdf-support).
 
 **Important considerations for Converse API users:**
 - Visual PDF analysis (charts, images, layouts) requires citations to be enabled
 - Without citations, only basic text extraction is available
 - For full control without forced citations, use the InvokeModel API
 
-For more details on the two document processing modes and their limitations, refer to the [PDF support guide](/docs/en/build-with-claude/pdf-support#amazon-bedrock-pdf-support).
+For more details on the two document processing modes and their limitations, refer to the [PDF support guide](../files/pdf-support.md#amazon-bedrock-pdf-support).
 
 ### Context window
 
-Claude Opus 4.6 and Claude Sonnet 4.6 have a [1M-token context window](/docs/en/build-with-claude/context-windows) on Amazon Bedrock. Other Claude models, including Sonnet 4.5 and Sonnet 4 (deprecated), have a 200k-token context window.
+Claude Opus 4.6 and Claude Sonnet 4.6 have a [1M-token context window](../context-management/context-windows.md) on Amazon Bedrock. Other Claude models, including Sonnet 4.5 and Sonnet 4 (deprecated), have a 200k-token context window.
 
 Amazon Bedrock limits request payloads to 20 MB. When sending large documents or many images, you may reach this limit before the token limit.
 
@@ -967,4 +967,4 @@ message = client.messages.create(
 - **AWS Bedrock pricing:** [aws.amazon.com/bedrock/pricing](https://aws.amazon.com/bedrock/pricing/)
 - **AWS pricing documentation:** [Bedrock pricing guide](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-pricing.html)
 - **AWS blog post:** [Introducing Claude Sonnet 4.5 in Amazon Bedrock](https://aws.amazon.com/blogs/aws/introducing-claude-sonnet-4-5-in-amazon-bedrock-anthropics-most-intelligent-model-best-for-coding-and-complex-agents/)
-- **Anthropic pricing details:** [Pricing documentation](/docs/en/about-claude/pricing#third-party-platform-pricing)
+- **Anthropic pricing details:** [Pricing documentation](https://docs.claude.com/en/docs/about-claude/pricing#third-party-platform-pricing)

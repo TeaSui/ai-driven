@@ -330,7 +330,7 @@ puts "Agent ID: #{agent.id}, version: #{agent.version}"
 
     </CodeGroup>
 
-    The `agent_toolset_20260401` tool type enables the full set of pre-built agent tools (bash, file operations, web search, and more). See [Tools](/docs/en/managed-agents/tools) for the complete list and per-tool configuration options.
+    The `agent_toolset_20260401` tool type enables the full set of pre-built agent tools (bash, file operations, web search, and more). See [Tools](tools.md) for the complete list and per-tool configuration options.
 
     Save the returned `agent.id`. You'll reference it in every session you create.
 

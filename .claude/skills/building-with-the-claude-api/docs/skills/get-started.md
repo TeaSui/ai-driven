@@ -305,7 +305,7 @@ if (fileId) {
 </CodeGroup>
 
 <Note>
-For complete details on working with generated files, see the [code execution tool documentation](/docs/en/agents-and-tools/tool-use/code-execution-tool#retrieve-generated-files).
+For complete details on working with generated files, see the [code execution tool documentation](../tools/code-execution-tool.md#retrieve-generated-files).
 </Note>
 
 ## Try more examples

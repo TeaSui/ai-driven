@@ -115,7 +115,7 @@ Archiving a workspace immediately revokes all API keys in that workspace. This a
 
 ### Via the Admin API
 
-Programmatically manage workspaces using the [Admin API](/docs/en/build-with-claude/administration-api).
+Programmatically manage workspaces using the [Admin API](admin-api-overview.md).
 
 <Note>
 Admin API endpoints require an Admin API key (starting with `sk-ant-admin...`) that differs from standard API keys. Only organization members with the admin role can provision Admin API keys through the [Claude Console](/settings/admin-keys).
@@ -139,7 +139,7 @@ curl --request POST "https://api.anthropic.com/v1/organizations/workspaces/{work
   --header "x-api-key: $ANTHROPIC_ADMIN_KEY"
 ```
 
-For complete parameter details and response schemas, see the [Workspaces API reference](/docs/en/api/admin-api/workspaces/get-workspace).
+For complete parameter details and response schemas, see the [Workspaces API reference](https://docs.claude.com/en/docs/api/admin-api/workspaces/get-workspace).
 
 ### Managing workspace members
 
@@ -167,23 +167,23 @@ curl --request DELETE "https://api.anthropic.com/v1/organizations/workspaces/{wo
   --header "x-api-key: $ANTHROPIC_ADMIN_KEY"
 ```
 
-For complete parameter details, see the [Workspace Members API reference](/docs/en/api/admin-api/workspace_members/get-workspace-member).
+For complete parameter details, see the [Workspace Members API reference](https://docs.claude.com/en/docs/api/admin-api/workspace_members/get-workspace-member).
 
 ## API keys and resource scoping
 
 API keys are scoped to a specific workspace. When you create an API key in a workspace, it can only access resources within that workspace.
 
 Resources scoped to workspaces include:
-- **Files** created via the [Files API](/docs/en/build-with-claude/files)
-- **Message Batches** created via the [Batch API](/docs/en/build-with-claude/batch-processing)
-- **Skills** created via the [Skills API](/docs/en/build-with-claude/skills-guide)
+- **Files** created via the [Files API](../../files/files-api.md)
+- **Message Batches** created via the [Batch API](../../model-capabilities/batch-processing.md)
+- **Skills** created via the [Skills API](../../skills/get-started.md)
 
 <Note>
-Starting February 5, 2026, [prompt caches](/docs/en/build-with-claude/prompt-caching) will also be isolated per workspace (applies to the Claude API and Azure only).
+Starting February 5, 2026, [prompt caches](../../context-management/prompt-caching.md) will also be isolated per workspace (applies to the Claude API and Azure only).
 </Note>
 
 <Tip>
-To retrieve your organization's workspace IDs, use the [List Workspaces](/docs/en/api/admin-api/workspaces/list-workspaces) endpoint, or find them in the [Claude Console](/settings/workspaces).
+To retrieve your organization's workspace IDs, use the [List Workspaces](https://docs.claude.com/en/docs/api/admin-api/workspaces/list-workspaces) endpoint, or find them in the [Claude Console](/settings/workspaces).
 </Tip>
 
 ## Workspace limits
@@ -203,11 +203,11 @@ Workspace limits can be set lower than (but not higher than) your organization's
 - Organization-wide limits always apply, even if workspace limits add up to more
 </Note>
 
-For detailed information on rate limits and how they work, see [Rate limits](/docs/en/api/rate-limits). You can also read your current organization and workspace rate limits programmatically with the [Rate Limits API](/docs/en/build-with-claude/rate-limits-api).
+For detailed information on rate limits and how they work, see [Rate limits](../monitoring/rate-limits-api.md). You can also read your current organization and workspace rate limits programmatically with the [Rate Limits API](../monitoring/rate-limits-api.md).
 
 ## Usage and cost tracking
 
-Track usage and costs by workspace using the [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api):
+Track usage and costs by workspace using the [Usage and Cost API](../monitoring/usage-and-cost-api.md):
 
 ```bash cURL
 curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
@@ -262,7 +262,7 @@ Create workspaces for specific projects or products to track usage and costs sep
     Review workspace membership periodically to ensure only appropriate users have access.
   </Step>
   <Step title="Monitor usage">
-    Use the [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api) to track workspace-level consumption.
+    Use the [Usage and Cost API](../monitoring/usage-and-cost-api.md) to track workspace-level consumption.
   </Step>
 </Steps>
 
@@ -312,7 +312,7 @@ API keys persist in their current state as they are scoped to the organization a
 
 ## See also
 
-- [Admin API overview](/docs/en/build-with-claude/administration-api)
-- [Admin API reference](/docs/en/api/admin)
-- [Rate limits](/docs/en/api/rate-limits)
-- [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api)
+- [Admin API overview](admin-api-overview.md)
+- [Admin API reference](../index.md)
+- [Rate limits](../monitoring/rate-limits-api.md)
+- [Usage and Cost API](../monitoring/usage-and-cost-api.md)

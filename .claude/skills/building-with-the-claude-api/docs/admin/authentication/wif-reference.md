@@ -4,7 +4,7 @@ Environment variables, validation rules, profile configuration, and error refere
 
 ---
 
-This page collects the configuration surfaces, validation constraints, and error mappings for [Workload Identity Federation](/docs/en/build-with-claude/workload-identity-federation). For setup walkthroughs, see the [provider guides](/docs/en/build-with-claude/workload-identity-federation#identity-providers).
+This page collects the configuration surfaces, validation constraints, and error mappings for [Workload Identity Federation](workload-identity-federation.md). For setup walkthroughs, see the [provider guides](workload-identity-federation.md#identity-providers).
 
 ## Token exchange response
 
@@ -109,7 +109,7 @@ The `oauth_scope` you set on a federation rule determines which Claude API endpo
 
 | Scope | Grants access to |
 | :--- | :--- |
-| `workspace:developer` | All non-administrative Claude API endpoints in the rule's workspace: [Messages](/docs/en/api/messages) (including streaming and token counting), [Models](/docs/en/api/models-list), [Managed Agents](/docs/en/managed-agents/overview) and their sessions, [Files](/docs/en/build-with-claude/files), and [Skills](/docs/en/build-with-claude/skills-guide). This matches the access an API key issued for the same workspace has. |
+| `workspace:developer` | All non-administrative Claude API endpoints in the rule's workspace: [Messages](../../messages-api/using-the-messages-api.md) (including streaming and token counting), [Models](https://docs.claude.com/en/docs/api/models-list), [Managed Agents](../../managed-agents/index.md) and their sessions, [Files](../../files/files-api.md), and [Skills](../../skills/get-started.md). This matches the access an API key issued for the same workspace has. |
 
 A request to an endpoint outside the token's scope returns HTTP 403. Finer-grained scopes (per resource, or read versus write) are not currently available.
 
@@ -123,7 +123,7 @@ Anthropic enforces these constraints when you create or update issuers and rules
 | :--- | :--- |
 | Issuer, rule, and service account `name` | Must match `^[a-z0-9-]+$`, length 1 to 255 characters. |
 | `workspace_id` | The workspace (`wrkspc_...`) whose quota, billing, and rate limits apply to tokens minted under this rule. Must be a workspace in the same organization, and the target service account must be a member of that workspace. |
-| `token_lifetime_seconds` | Integer between `60` and `86400` (1 minute to 24 hours). Default `3600`. Values outside this range are rejected at request time. See [Token lifetime and refresh](/docs/en/build-with-claude/workload-identity-federation#token-lifetime-and-refresh). |
+| `token_lifetime_seconds` | Integer between `60` and `86400` (1 minute to 24 hours). Default `3600`. Values outside this range are rejected at request time. See [Token lifetime and refresh](workload-identity-federation.md#token-lifetime-and-refresh). |
 
 ### URL fields
 
@@ -183,7 +183,7 @@ CEL conditions are security boundaries. An expression that evaluates to `true` f
 
 ### Token exchange errors
 
-`POST /v1/oauth/token` returns errors in the standard [API error shape](/docs/en/api/errors). The SDK wraps exchange failures in a typed `FederationExchangeError` (or language equivalent) that exposes the HTTP status, the response body, and the `request_id`.
+`POST /v1/oauth/token` returns errors in the standard [API error shape](https://docs.claude.com/en/docs/api/errors). The SDK wraps exchange failures in a typed `FederationExchangeError` (or language equivalent) that exposes the HTTP status, the response body, and the `request_id`.
 
 | Status | Error | Cause | Resolution |
 | :--- | :--- | :--- | :--- |

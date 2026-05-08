@@ -15,13 +15,13 @@ This API enables you to better monitor, analyze, and optimize your Claude implem
 * **Accurate Usage Tracking:** Get precise token counts and usage patterns instead of relying solely on response token counting
 * **Cost Reconciliation:** Match internal records with Anthropic billing for finance and accounting teams
 * **Product performance and improvement:** Monitor product performance while measuring if changes to the system have improved it, or setup alerting
-* **[Rate limit](/docs/en/api/rate-limits) and [Priority Tier](/docs/en/api/service-tiers#get-started-with-priority-tier) optimization:** Optimize features like [prompt caching](/docs/en/build-with-claude/prompt-caching) or specific prompts to make the most of one’s allocated capacity, or purchase dedicated capacity.
+* **[Rate limit](rate-limits-api.md) and [Priority Tier](https://docs.claude.com/en/docs/api/service-tiers#get-started-with-priority-tier) optimization:** Optimize features like [prompt caching](../../context-management/prompt-caching.md) or specific prompts to make the most of one’s allocated capacity, or purchase dedicated capacity.
 * **Advanced Analysis:** Perform deeper data analysis than what's available in Console
 
 <Check>
   **Admin API key required**
 
-  This API is part of the [Admin API](/docs/en/build-with-claude/administration-api). These endpoints require an Admin API key (starting with `sk-ant-admin...`) that differs from standard API keys. Only organization members with the admin role can provision Admin API keys through the [Claude Console](/settings/admin-keys).
+  This API is part of the [Admin API](../organization/admin-api-overview.md). These endpoints require an Admin API key (starting with `sk-ant-admin...`) that differs from standard API keys. Only organization members with the admin role can provision Admin API keys through the [Claude Console](/settings/admin-keys).
 </Check>
 
 ## Partner solutions
@@ -76,10 +76,10 @@ Track token consumption across your organization with detailed breakdowns by mod
 
 - **Time buckets**: Aggregate usage data in fixed intervals (`1m`, `1h`, or `1d`)
 - **Token tracking**: Measure uncached input, cached input, cache creation, and output tokens
-- **Filtering & grouping**: Filter by API key, workspace, model, service tier, context window, [data residency](/docs/en/build-with-claude/data-residency), or speed (beta), and group results by these dimensions
+- **Filtering & grouping**: Filter by API key, workspace, model, service tier, context window, [data residency](../data-compliance/data-residency.md), or speed (beta), and group results by these dimensions
 - **Server tool usage**: Track usage of server-side tools like web search
 
-For complete parameter details and response schemas, see the [Usage API reference](/docs/en/api/admin-api/usage-cost/get-messages-usage-report).
+For complete parameter details and response schemas, see the [Usage API reference](https://docs.claude.com/en/docs/api/admin-api/usage-cost/get-messages-usage-report).
 
 ### Basic examples
 
@@ -125,14 +125,14 @@ bucket_width=1d" \
 ```
 
 <Tip>
-To retrieve your organization's API key IDs, use the [List API Keys](/docs/en/api/admin-api/apikeys/list-api-keys) endpoint.
+To retrieve your organization's API key IDs, use the [List API Keys](https://docs.claude.com/en/docs/api/admin-api/apikeys/list-api-keys) endpoint.
 
-To retrieve your organization's workspace IDs, use the [List Workspaces](/docs/en/api/admin-api/workspaces/list-workspaces) endpoint, or find your organization's workspace IDs in the Claude Console.
+To retrieve your organization's workspace IDs, use the [List Workspaces](https://docs.claude.com/en/docs/api/admin-api/workspaces/list-workspaces) endpoint, or find your organization's workspace IDs in the Claude Console.
 </Tip>
 
 #### Data residency
 
-Track your [data residency controls](/docs/en/build-with-claude/data-residency) by grouping and filtering usage with the `inference_geo` dimension. This is useful for verifying geographic routing across your organization.
+Track your [data residency controls](../data-compliance/data-residency.md) by grouping and filtering usage with the `inference_geo` dimension. This is useful for verifying geographic routing across your organization.
 
 ```bash cURL
 curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
@@ -164,7 +164,7 @@ Models released before February 2026 (prior to Claude Opus 4.6) don't support th
 
 #### Fast mode (beta: research preview)
 
-Track [fast mode](/docs/en/build-with-claude/fast-mode) usage by grouping and filtering with the `speed` dimension. This is useful for monitoring standard vs. fast mode usage.
+Track [fast mode](../../model-capabilities/fast-mode.md) usage by grouping and filtering with the `speed` dimension. This is useful for monitoring standard vs. fast mode usage.
 
 ```bash cURL
 curl "https://api.anthropic.com/v1/organizations/usage_report/messages?\
@@ -215,7 +215,7 @@ Retrieve service-level cost breakdowns in USD with the `/v1/organizations/cost_r
 - **Grouping**: Group costs by workspace or description for detailed breakdowns. When grouping by `description`, responses include parsed fields like `model` and `inference_geo`
 - **Time buckets**: Daily granularity only (`1d`)
 
-For complete parameter details and response schemas, see the [Cost API reference](/docs/en/api/admin-api/usage-cost/get-cost-report).
+For complete parameter details and response schemas, see the [Cost API reference](https://docs.claude.com/en/docs/api/admin-api/usage-cost/get-cost-report).
 
 <Warning>
   Priority Tier costs use a different billing model and are not included in the cost endpoint. Track Priority Tier usage through the usage endpoint instead.
@@ -294,16 +294,16 @@ Usage and costs attributed to the default workspace have a `null` value for `wor
 
 ### How do I get per-user cost breakdowns for Claude Code?
 
-Use the [Claude Code Analytics API](/docs/en/build-with-claude/claude-code-analytics-api), which provides per-user estimated costs and productivity metrics without the performance limitations of breaking down costs by many API keys. For general API usage with many keys, use the [Usage API](#usage-api) to track token consumption as a cost proxy.
+Use the [Claude Code Analytics API](claude-code-analytics-api.md), which provides per-user estimated costs and productivity metrics without the performance limitations of breaking down costs by many API keys. For general API usage with many keys, use the [Usage API](#usage-api) to track token consumption as a cost proxy.
 
 ## See also
 The Usage and Cost APIs can be used to help you deliver a better experience for your users, help you manage costs, and preserve your rate limit. Learn more about some of these other features:
 
-- [Admin API overview](/docs/en/build-with-claude/administration-api)
-- [Admin API reference](/docs/en/api/admin)
-- [Pricing](/docs/en/about-claude/pricing)
-- [Prompt caching](/docs/en/build-with-claude/prompt-caching) - Optimize costs with caching
-- [Batch processing](/docs/en/build-with-claude/batch-processing) - 50% discount on batch requests
-- [Rate limits](/docs/en/api/rate-limits) - Understand usage tiers
-- [Rate Limits API](/docs/en/build-with-claude/rate-limits-api) - Read your configured rate limits
-- [Data residency](/docs/en/build-with-claude/data-residency) - Control inference geography
+- [Admin API overview](../organization/admin-api-overview.md)
+- [Admin API reference](../index.md)
+- [Pricing](https://docs.claude.com/en/docs/about-claude/pricing)
+- [Prompt caching](../../context-management/prompt-caching.md) - Optimize costs with caching
+- [Batch processing](../../model-capabilities/batch-processing.md) - 50% discount on batch requests
+- [Rate limits](rate-limits-api.md) - Understand usage tiers
+- [Rate Limits API](rate-limits-api.md) - Read your configured rate limits
+- [Data residency](../data-compliance/data-residency.md) - Control inference geography

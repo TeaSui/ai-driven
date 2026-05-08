@@ -4,7 +4,7 @@
 
 When you make a request to the Messages API, Claude's response includes a `stop_reason` field that indicates why the model stopped generating its response. Understanding these values is crucial for building robust applications that handle different response types appropriately.
 
-For details about `stop_reason` in the API response, see the [Messages API reference](/docs/en/api/messages/create).
+For details about `stop_reason` in the API response, see the [Messages API reference](https://docs.claude.com/en/docs/api/messages/create).
 
 ## The stop_reason field
 
@@ -407,7 +407,7 @@ if response.stop_reason == "stop_sequence":
 Claude is calling a tool and expects you to execute it.
 
 <Note>
-For most tool use implementations, we recommend using the [tool runner](/docs/en/agents-and-tools/tool-use/tool-runner) which automatically handles tool execution, result formatting, and conversation management.
+For most tool use implementations, we recommend using the [tool runner](../tools/tool-runner-sdk.md) which automatically handles tool execution, result formatting, and conversation management.
 </Note>
 
 ```python Python nocheck
@@ -448,7 +448,7 @@ if response.stop_reason == "tool_use":
 ```
 
 ### pause_turn
-Returned when the server-side sampling loop reaches its iteration limit while executing [server tools](/docs/en/agents-and-tools/tool-use/server-tools) like web search or web fetch. The default limit is 10 iterations per request.
+Returned when the server-side sampling loop reaches its iteration limit while executing [server tools](../tools/server-tools.md) like web search or web fetch. The default limit is 10 iterations per request.
 
 When this happens, the response may contain a `server_tool_use` block without a corresponding `server_tool_result`. To let Claude finish processing, continue the conversation by sending the response back as-is.
 
@@ -576,7 +576,7 @@ def handle_truncated_response(response):
 
 ### 3. Implement retry logic for pause_turn
 
-When using [server tools](/docs/en/agents-and-tools/tool-use/server-tools), the API may return `pause_turn` if the server-side sampling loop reaches its iteration limit (default 10). Handle this by continuing the conversation:
+When using [server tools](../tools/server-tools.md), the API may return `pause_turn` if the server-side sampling loop reaches its iteration limit (default 10). Handle this by continuing the conversation:
 
 ```python nocheck
 def handle_server_tool_conversation(client, user_query, tools, max_continuations=5):
@@ -676,7 +676,7 @@ with client.messages.stream(
 ### Handling tool use workflows
 
 <Tip>
-**Simpler with tool runner**: The example below shows manual tool handling. For most use cases, the [tool runner](/docs/en/agents-and-tools/tool-use/tool-runner) automatically handles tool execution with much less code.
+**Simpler with tool runner**: The example below shows manual tool handling. For most use cases, the [tool runner](../tools/tool-runner-sdk.md) automatically handles tool execution with much less code.
 </Tip>
 
 ```python nocheck

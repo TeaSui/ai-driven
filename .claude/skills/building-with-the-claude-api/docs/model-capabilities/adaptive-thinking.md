@@ -5,10 +5,10 @@ Let Claude dynamically determine when and how much to use extended thinking with
 ---
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
-Adaptive thinking is the recommended way to use [extended thinking](/docs/en/build-with-claude/extended-thinking) with Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6, and is the default mode on [Claude Mythos Preview](https://anthropic.com/glasswing) (where it auto-applies whenever `thinking` is unset). Instead of manually setting a thinking token budget, adaptive thinking lets Claude dynamically determine when and how much to use extended thinking based on the complexity of each request. On Claude Opus 4.7, adaptive thinking is the **only** supported thinking mode; manual `thinking: {type: "enabled", budget_tokens: N}` is no longer accepted.
+Adaptive thinking is the recommended way to use [extended thinking](extended-thinking.md) with Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6, and is the default mode on [Claude Mythos Preview](https://anthropic.com/glasswing) (where it auto-applies whenever `thinking` is unset). Instead of manually setting a thinking token budget, adaptive thinking lets Claude dynamically determine when and how much to use extended thinking based on the complexity of each request. On Claude Opus 4.7, adaptive thinking is the **only** supported thinking mode; manual `thinking: {type: "enabled", budget_tokens: N}` is no longer accepted.
 
 <Tip>
 Adaptive thinking can drive better performance than extended thinking with a fixed `budget_tokens` for many workloads, especially bimodal tasks and long-horizon agentic workflows. No beta header is required.
@@ -26,7 +26,7 @@ Adaptive thinking is supported on the following models:
 - Claude Sonnet 4.6 (`claude-sonnet-4-6`)
 
 <Warning>
-`thinking.type: "enabled"` and `budget_tokens` are [**deprecated**](/docs/en/build-with-claude/overview#feature-availability) on Opus 4.6 and Sonnet 4.6 and will be removed in a future model release. Use `thinking.type: "adaptive"` with the `effort` parameter instead. Existing `budget_tokens` configurations are still functional but no longer recommended; plan to migrate.
+`thinking.type: "enabled"` and `budget_tokens` are [**deprecated**](../messages-api/features-overview.md#feature-availability) on Opus 4.6 and Sonnet 4.6 and will be removed in a future model release. Use `thinking.type: "adaptive"` with the `effort` parameter instead. Existing `budget_tokens` configurations are still functional but no longer recommended; plan to migrate.
 
 Older models (Sonnet 4.5, Opus 4.5, etc.) do not support adaptive thinking and require `thinking.type: "enabled"` with `budget_tokens`.
 </Warning>
@@ -35,7 +35,7 @@ Older models (Sonnet 4.5, Opus 4.5, etc.) do not support adaptive thinking and r
 
 In adaptive mode, thinking is optional for the model. Claude evaluates the complexity of each request and determines whether and how much to use extended thinking. At the default effort level (`high`), Claude almost always thinks. At lower effort levels, Claude may skip thinking for simpler problems.
 
-Adaptive thinking also automatically enables [interleaved thinking](/docs/en/build-with-claude/extended-thinking#interleaved-thinking). This means Claude can think between tool calls, making it especially effective for agentic workflows.
+Adaptive thinking also automatically enables [interleaved thinking](extended-thinking.md#interleaved-thinking). This means Claude can think between tool calls, making it especially effective for agentic workflows.
 
 ## How to use adaptive thinking
 
@@ -302,7 +302,7 @@ end
 
 ## Adaptive thinking with the effort parameter
 
-You can combine adaptive thinking with the [effort parameter](/docs/en/build-with-claude/effort) to guide how much thinking Claude does. The effort level acts as soft guidance for Claude's thinking allocation:
+You can combine adaptive thinking with the [effort parameter](effort.md) to guide how much thinking Claude does. The effort level acts as soft guidance for Claude's thinking allocation:
 
 | Effort level | Thinking behavior |
 |:-------------|:------------------|
@@ -534,7 +534,7 @@ puts message.content.first.text
 
 ## Streaming with adaptive thinking
 
-Adaptive thinking works seamlessly with [streaming](/docs/en/build-with-claude/streaming). Thinking blocks are streamed via `thinking_delta` events just like manual thinking mode:
+Adaptive thinking works seamlessly with [streaming](streaming-messages.md). Thinking blocks are streamed via `thinking_delta` events just like manual thinking mode:
 
 <CodeGroup>
 ```bash CLI
@@ -791,7 +791,7 @@ When using adaptive thinking, previous assistant turns don't need to start with 
 
 ### Prompt caching
 
-Consecutive requests using `adaptive` thinking preserve [prompt cache](/docs/en/build-with-claude/prompt-caching) breakpoints. However, switching between `adaptive` and `enabled`/`disabled` thinking modes breaks cache breakpoints for messages. System prompts and tool definitions remain cached regardless of mode changes.
+Consecutive requests using `adaptive` thinking preserve [prompt cache](../context-management/prompt-caching.md) breakpoints. However, switching between `adaptive` and `enabled`/`disabled` thinking modes breaks cache breakpoints for messages. System prompts and tool definitions remain cached regardless of mode changes.
 
 ### Tuning thinking behavior
 
@@ -804,7 +804,7 @@ that require multi-step reasoning. When in doubt, respond directly.
 ```
 
 <Warning>
-Steering Claude to think less often may reduce quality on tasks that benefit from reasoning. Measure the impact on your specific workloads before deploying prompt-based tuning to production. Consider testing with lower [effort levels](/docs/en/build-with-claude/effort) first.
+Steering Claude to think less often may reduce quality on tasks that benefit from reasoning. Measure the impact on your specific workloads before deploying prompt-based tuning to production. Consider testing with lower [effort levels](effort.md) first.
 </Warning>
 
 ### Cost control
@@ -848,7 +848,7 @@ Setting `display: "omitted"` is useful when your application doesn't surface thi
 Here are some important considerations for omitted thinking:
 
 - You're still charged for the full thinking tokens. Omitting reduces latency, not cost.
-- If you pass thinking blocks back in multi-turn conversations, pass them unchanged. The server decrypts the `signature` to reconstruct the original thinking for prompt construction (see [Preserving thinking blocks](/docs/en/build-with-claude/extended-thinking#preserving-thinking-blocks)). Any text you place in the `thinking` field of a round-tripped omitted block is ignored.
+- If you pass thinking blocks back in multi-turn conversations, pass them unchanged. The server decrypts the `signature` to reconstruct the original thinking for prompt construction (see [Preserving thinking blocks](extended-thinking.md#preserving-thinking-blocks)). Any text you place in the `thinking` field of a round-tripped omitted block is ignored.
 - `display` is invalid with `thinking.type: "disabled"` (there is nothing to display).
 - When using `thinking.type: "adaptive"` and the model skips thinking for a simple request, no thinking block is produced regardless of `display`.
 
@@ -867,7 +867,7 @@ thinking = {
 ```
 </Note>
 
-For code examples and streaming behavior with `display: "omitted"`, see [Controlling thinking display](/docs/en/build-with-claude/extended-thinking#controlling-thinking-display) on the extended thinking page. The examples there use `type: "enabled"`; with adaptive thinking, use:
+For code examples and streaming behavior with `display: "omitted"`, see [Controlling thinking display](extended-thinking.md#controlling-thinking-display) on the extended thinking page. The examples there use `type: "enabled"`; with adaptive thinking, use:
 
 ```python
 thinking = {"type": "adaptive", "display": "omitted"}
@@ -878,20 +878,20 @@ thinking = {"type": "adaptive", "display": "omitted"}
 Full thinking content is encrypted and returned in the `signature` field. This field is used to verify that thinking blocks were generated by Claude when passed back to the API.
 
 <Note>
-It is only strictly necessary to send back thinking blocks when using [tools with extended thinking](/docs/en/build-with-claude/extended-thinking#extended-thinking-with-tool-use). Otherwise you can omit thinking blocks from previous turns. If you pass them back, whether the API keeps or strips them depends on the model: Opus 4.5+ and Sonnet 4.6+ keep them in context by default; earlier Opus/Sonnet models and all Haiku models strip them. See [context editing](/docs/en/build-with-claude/context-editing) to configure this.
+It is only strictly necessary to send back thinking blocks when using [tools with extended thinking](extended-thinking.md#extended-thinking-with-tool-use). Otherwise you can omit thinking blocks from previous turns. If you pass them back, whether the API keeps or strips them depends on the model: Opus 4.5+ and Sonnet 4.6+ keep them in context by default; earlier Opus/Sonnet models and all Haiku models strip them. See [context editing](../context-management/context-editing.md) to configure this.
 
 If sending back thinking blocks, we recommend passing everything back as you received it for consistency and to avoid potential issues.
 </Note>
 
 Here are some important considerations on thinking encryption:
-- When [streaming responses](/docs/en/build-with-claude/extended-thinking#streaming-thinking), the signature is added via a `signature_delta` inside a `content_block_delta` event just before the `content_block_stop` event.
+- When [streaming responses](extended-thinking.md#streaming-thinking), the signature is added via a `signature_delta` inside a `content_block_delta` event just before the `content_block_stop` event.
 - `signature` values are significantly longer in Claude 4 models than in previous models.
 - The `signature` field is an opaque field and should not be interpreted or parsed.
-- `signature` values are compatible across platforms (Claude APIs, [Amazon Bedrock](/docs/en/build-with-claude/claude-in-amazon-bedrock), and [Vertex AI](/docs/en/build-with-claude/claude-on-vertex-ai)). Values generated on one platform will be compatible with another.
+- `signature` values are compatible across platforms (Claude APIs, [Amazon Bedrock](../third-party-platforms/amazon-bedrock.md), and [Vertex AI](../third-party-platforms/vertex-ai.md)). Values generated on one platform will be compatible with another.
 
 ### Pricing
 
-For complete pricing information including base rates, cache writes, cache hits, and output tokens, see the [pricing page](/docs/en/about-claude/pricing).
+For complete pricing information including base rates, cache writes, cache hits, and output tokens, see the [pricing page](https://docs.claude.com/en/docs/about-claude/pricing).
 
 The thinking process incurs charges for:
 - Tokens used during thinking (output tokens)
@@ -921,9 +921,9 @@ The billed output token count will **not** match the visible token count in the 
 
 The extended thinking page covers several topics in more detail with mode-specific code examples:
 
-- **[Tool use with thinking](/docs/en/build-with-claude/extended-thinking#extended-thinking-with-tool-use)**: The same rules apply for adaptive thinking: preserve thinking blocks between tool calls and be aware of `tool_choice` limitations when thinking is active.
-- **[Prompt caching](/docs/en/build-with-claude/extended-thinking#extended-thinking-with-prompt-caching)**: With adaptive thinking, consecutive requests using the same thinking mode preserve cache breakpoints. Switching between `adaptive` and `enabled`/`disabled` modes breaks cache breakpoints for messages (system prompts and tool definitions remain cached).
-- **[Context windows](/docs/en/build-with-claude/extended-thinking#max-tokens-and-context-window-size-with-extended-thinking)**: How thinking tokens interact with `max_tokens` and context window limits.
+- **[Tool use with thinking](extended-thinking.md#extended-thinking-with-tool-use)**: The same rules apply for adaptive thinking: preserve thinking blocks between tool calls and be aware of `tool_choice` limitations when thinking is active.
+- **[Prompt caching](extended-thinking.md#extended-thinking-with-prompt-caching)**: With adaptive thinking, consecutive requests using the same thinking mode preserve cache breakpoints. Switching between `adaptive` and `enabled`/`disabled` modes breaks cache breakpoints for messages (system prompts and tool definitions remain cached).
+- **[Context windows](extended-thinking.md#max-tokens-and-context-window-size-with-extended-thinking)**: How thinking tokens interact with `max_tokens` and context window limits.
 
 ## Next steps
 

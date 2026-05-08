@@ -23,6 +23,46 @@ from ai_driven.observability.trace_context import bind_task, new_span
 
 logger = logging.getLogger(__name__)
 
+
+class AwaitingHumanInput(BaseException):
+    """Raised by ``human.ask_clarification`` when the caller opted into
+    async-continuation (HITL) mode.
+
+    Subclasses :class:`BaseException`, NOT :class:`Exception`, so it
+    propagates through the Claude tool-exec ``except Exception`` guard
+    in ``claude/client.py::_execute_tool_calls`` and unwinds all the
+    way up to the SQS wrapper. The wrapper persists the specialist
+    conversation + pending questions to ``task_specialist_state`` and
+    ACKs the SQS message — no worker stays blocked.
+
+    Attributes:
+        questions: list of ``{id, question, options, why}`` dicts.
+        round_id: UUID string tying this pending round to a later
+                  ``/respond`` POST.
+        messages: the Claude conversation so far (user + assistant +
+                  tool_use turns up to this point). Needed so the
+                  resumed specialist can append the answer as a
+                  ``tool_result`` block and continue without replay.
+        tool_use_id: the ``tool_use_id`` of the ask_clarification call
+                     being paused on; required to build the matching
+                     ``tool_result`` on resume.
+    """
+
+    def __init__(
+        self,
+        *,
+        questions: list[dict[str, Any]],
+        round_id: str,
+        messages: list[dict[str, Any]],
+        tool_use_id: str,
+    ) -> None:
+        super().__init__(f"awaiting human input ({len(questions)} questions)")
+        self.questions = questions
+        self.round_id = round_id
+        self.messages = messages
+        self.tool_use_id = tool_use_id
+
+
 # Streaming buffer settings
 _STREAM_FLUSH_INTERVAL = 0.2  # seconds
 _STREAM_FLUSH_SIZE = 500  # chars
@@ -111,64 +151,156 @@ class BaseAgent(ABC):
         self._register_tools()
         self._register_ask_human()
 
+    # HITL mode flag. Defaults to "poll" — legacy inline polling that
+    # blocks the worker until the user answers. SpecialistBase flips
+    # this to "async" when a specialist opts into HITL; in that mode
+    # the tool raises :class:`AwaitingHumanInput` instead of polling.
+    # The SQS wrapper catches the exception, persists state, and ACKs.
+    _hitl_mode: str = "poll"
+
     def _register_ask_human(self) -> None:
         """Register the universal human-in-the-loop clarification tool.
 
-        The agent invokes this when it's genuinely uncertain and a human
-        decision would save iterations/cost. The tool:
-          1. publishes a `human_input_required` event with the question,
-          2. marks the task `awaiting_input` via the control key,
-          3. long-polls Redis for `task:{id}:human_answer`,
-          4. returns the answer so the agent loop continues.
+        Two modes are supported:
 
-        Humans respond via POST /api/chat/tasks/{id}/respond or via the UI's
-        clarification dialog. Use sparingly — prefer acting on best-guess
-        when a reasonable default exists.
+        * ``_hitl_mode == "poll"`` (default): the tool long-polls Redis
+          for an answer and returns it inline. The caller (typically a
+          CodingAgent running inside its own SQS message) is happy to
+          wait because it owns the message.
+        * ``_hitl_mode == "async"``: the tool validates its inputs,
+          persists minimal state, and raises :class:`AwaitingHumanInput`
+          so the caller's outer SQS wrapper can snapshot the full
+          specialist conversation and ACK the message. Used by
+          specialists whose long-polling would starve the queue.
+
+        Humans respond via POST /api/chat/tasks/{id}/respond. Use
+        sparingly — prefer best-guess defaults when reasonable.
         """
         @self._registry.tool(
             name="human.ask_clarification",
             description=(
-                "Ask the human operator a question and wait for their answer. "
-                "Use ONLY when the Jira ticket or context is genuinely ambiguous "
-                "AND a wrong guess would waste significant effort (e.g. breaking API "
-                "changes, schema choices, undocumented product decisions). Do NOT "
-                "use for clarifying easy defaults — pick a sensible default and "
-                "note the assumption in your Jira comment instead."
+                "Ask the human operator one or more questions in ONE call and "
+                "wait for answers. Use ONLY when the Jira ticket is genuinely "
+                "ambiguous AND a wrong guess would waste significant effort. "
+                "Emit ALL clarifications in a single call via the `questions` "
+                "array — do not make multiple sequential ask_clarification "
+                "calls. The legacy `question` string field is still accepted "
+                "for one-off single-question prompts."
             ),
             input_schema={
                 "type": "object",
                 "properties": {
+                    "questions": {
+                        "type": "array",
+                        "description": (
+                            "Batch list of questions to ask at once. Prefer "
+                            "this over the scalar `question` field."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Stable short id (e.g. 'auth_mechanism').",
+                                },
+                                "question": {"type": "string"},
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "why": {
+                                    "type": "string",
+                                    "description": "One sentence on why this blocks progress.",
+                                },
+                            },
+                            "required": ["id", "question"],
+                        },
+                    },
                     "question": {
                         "type": "string",
-                        "description": "The specific question to ask the human, in plain English.",
+                        "description": "Legacy single-question field (prefer `questions`).",
                     },
                     "context": {
                         "type": "string",
-                        "description": "One-sentence context on why you're stuck and what you've tried.",
+                        "description": "One-sentence context on why you're stuck.",
                     },
                     "options": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of concrete choices (will render as buttons).",
+                        "description": "Options for the legacy single-question form.",
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "How long to wait for an answer before giving up (default 600 = 10 min).",
+                        "description": "Polling-mode timeout (ignored in async HITL mode).",
                         "default": 600,
                     },
                 },
-                "required": ["question"],
             },
         )
         async def ask_human(
-            question: str,
+            questions: list[dict[str, Any]] | None = None,
+            question: str = "",
             context: str = "",
             options: list[str] | None = None,
             timeout_seconds: int = 600,
         ) -> dict[str, Any]:
             import asyncio
             import json
+            import uuid as _uuid
 
+            # Normalize to batch shape. A caller using the legacy single-
+            # question form becomes a one-element batch with id="q1".
+            batch: list[dict[str, Any]] = []
+            if questions:
+                for q in questions:
+                    if not isinstance(q, dict):
+                        continue
+                    qid = str(q.get("id") or f"q{len(batch)+1}")
+                    qtext = str(q.get("question") or "").strip()
+                    if not qtext:
+                        continue
+                    batch.append({
+                        "id": qid,
+                        "question": qtext,
+                        "options": list(q.get("options") or []),
+                        "why": str(q.get("why") or "").strip(),
+                    })
+            elif question:
+                batch.append({
+                    "id": "q1",
+                    "question": question,
+                    "options": list(options or []),
+                    "why": "",
+                })
+
+            if not batch:
+                return {
+                    "answered": False,
+                    "reason": "ask_clarification called with no questions",
+                    "suggestion": "proceed with best-guess default",
+                }
+
+            # ── Async HITL path ──────────────────────────────────────
+            # Caller opted into async-continuation. Raise so the outer
+            # SQS wrapper can snapshot conversation state and ACK. The
+            # wrapper provides `messages` + `tool_use_id` — unavailable
+            # from inside the tool, so the wrapper attaches them when
+            # it catches the exception (see SpecialistBase).
+            if self._hitl_mode == "async":
+                round_id = _uuid.uuid4().hex[:12]
+                # messages/tool_use_id are filled in by the outer tool
+                # loop in SpecialistBase when it re-raises after the
+                # single-step Claude turn; the tool itself can't see
+                # either. We raise with placeholders; the caller sets
+                # the real values before re-raising.
+                raise AwaitingHumanInput(
+                    questions=batch,
+                    round_id=round_id,
+                    messages=[],
+                    tool_use_id="",
+                )
+
+            # ── Legacy polling path ──────────────────────────────────
             client = await self._get_redis_client()
             if client is None or not self._task_id:
                 # No Redis / no task context: can't block. Return a sentinel
@@ -178,6 +310,10 @@ class BaseAgent(ABC):
                     "reason": "human clarification unavailable (no session)",
                     "suggestion": "proceed with best-guess default",
                 }
+            # Legacy mode only honors the first question in the batch.
+            question = batch[0]["question"]
+            options = batch[0]["options"]
+            context = context or batch[0].get("why", "")
 
             # Stamp a marker so the UI knows to show the dialog.
             await client.set(f"task:{self._task_id}:control", "awaiting_input", ex=timeout_seconds)
@@ -633,10 +769,8 @@ class BaseAgent(ABC):
             # Both leave the branch pushed but no PR opened. Mark as failed
             # so the UI surfaces the problem instead of a misleading
             # "completed" badge with no PR URL.
-            bad_stop = getattr(response, "stop_reason", None) in (
-                "max_iterations", "max_tokens",
-            )
-            iterations_exhausted = bad_stop  # kept for the AgentResult message below
+            stop_reason_final = getattr(response, "stop_reason", None)
+            bad_stop = stop_reason_final in ("max_iterations", "max_tokens")
             # Budget-exceeded is also a failure mode: the loop halted
             # mid-workflow to stop runaway cost. Mark the result as failed
             # so the UI surfaces "$X.XX / $Y.YY budget ceiling hit" rather
@@ -700,13 +834,28 @@ class BaseAgent(ABC):
                     f"wide for a single run; split the ticket or raise the "
                     f"ceiling after investigating."
                 )
-            elif iterations_exhausted:
+            elif stop_reason_final == "max_tokens":
+                # The model's final response got truncated at the output-token
+                # cap mid-turn — typically a batched file-write or PR body
+                # that didn't fit in one response. Iterations weren't the
+                # bottleneck here; raising the tool-loop cap won't help.
+                error_msg = (
+                    f"Agent output truncated at the {settings.claude_max_tokens}-"
+                    f"token response cap on iteration {iteration_count} "
+                    f"(stop_reason=max_tokens). The model tried to emit more "
+                    f"text in a single turn than the cap allows — likely a "
+                    f"large batched file write or a long PR body. Raise "
+                    f"AI_DRIVEN_CLAUDE_MAX_TOKENS (Sonnet 4.6/4.7 support up "
+                    f"to 64k) or prompt the agent to split the turn."
+                )
+            elif stop_reason_final == "max_iterations":
                 error_msg = (
                     f"Agent stopped after {iteration_count} iterations without "
-                    f"finishing (max_iterations={max_iterations or 'default'}). "
-                    f"Last step may have been a mid-workflow file write — check "
-                    f"the branch on the SCM side and consider raising "
-                    f"AI_DRIVEN_CLAUDE_MAX_TOOL_ITERATIONS or re-running."
+                    f"finishing (max_iterations={max_iterations or 'default'}, "
+                    f"stop_reason=max_iterations). Last step may have been a "
+                    f"mid-workflow file write — check the branch on the SCM "
+                    f"side and consider raising AI_DRIVEN_CLAUDE_MAX_TOOL_"
+                    f"ITERATIONS or re-running."
                 )
             else:
                 error_msg = None

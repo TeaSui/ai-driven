@@ -2,19 +2,19 @@
 
 ---
 
-The Files API lets you upload and manage files to use with the Claude API without re-uploading content with each request. This is particularly useful when using the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool) to provide inputs (e.g. datasets and documents) and then download outputs (e.g. charts). You can also use the Files API to prevent having to continually re-upload frequently used documents and images across multiple API calls. You can [explore the API reference directly](/docs/en/api/files-create), in addition to this guide.
+The Files API lets you upload and manage files to use with the Claude API without re-uploading content with each request. This is particularly useful when using the [code execution tool](../tools/code-execution-tool.md) to provide inputs (e.g. datasets and documents) and then download outputs (e.g. charts). You can also use the Files API to prevent having to continually re-upload frequently used documents and images across multiple API calls. You can [explore the API reference directly](https://docs.claude.com/en/docs/api/files-create), in addition to this guide.
 
 <Note>
 The Files API is in beta. Reach out through the [feedback form](https://forms.gle/tisHyierGwgN4DUE9) to share your experience with the Files API.
 </Note>
 
 <Note>
-This feature is **not** eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). Data is retained according to the feature's standard retention policy.
+This feature is **not** eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). Data is retained according to the feature's standard retention policy.
 </Note>
 
 ## Supported models
 
-Referencing a `file_id` in a Messages request is supported in all models that support the given file type. For example, [images](/docs/en/build-with-claude/vision) are supported in all Claude 3+ models, [PDFs](/docs/en/build-with-claude/pdf-support) in all Claude 3.5+ models, and [various other file types](/docs/en/agents-and-tools/tool-use/code-execution-tool#supported-file-types) for the code execution tool in Claude Haiku 4.5 plus all Claude 3.7+ models.
+Referencing a `file_id` in a Messages request is supported in all models that support the given file type. For example, [images](images-and-vision.md) are supported in all Claude 3+ models, [PDFs](pdf-support.md) in all Claude 3.5+ models, and [various other file types](../tools/code-execution-tool.md#supported-file-types) for the code execution tool in Claude Haiku 4.5 plus all Claude 3.7+ models.
 
 The Files API is currently not supported on Amazon Bedrock or Google Vertex AI.
 
@@ -24,7 +24,7 @@ The Files API provides a simple create-once, use-many-times approach for working
 
 - **Upload files** to Anthropic's secure storage and receive a unique `file_id`
 - **Download files** that are created from skills or the code execution tool
-- **Reference files** in [Messages](/docs/en/api/messages/create) requests using the `file_id` instead of re-uploading content
+- **Reference files** in [Messages](https://docs.claude.com/en/docs/api/messages/create) requests using the `file_id` instead of re-uploading content
 - **Manage your files** with list, retrieve, and delete operations
 
 ## How to use the Files API
@@ -396,7 +396,7 @@ The Files API supports different file types that correspond to different content
 | PDF | `application/pdf` | `document` | Text analysis, document processing |
 | Plain text | `text/plain` | `document` | Text analysis, processing |
 | Images | `image/jpeg`, `image/png`, `image/gif`, `image/webp` | `image` | Image analysis, visual tasks |
-| [Datasets, others](/docs/en/agents-and-tools/tool-use/code-execution-tool#supported-file-types) | Varies | `container_upload` | Analyze data, create visualizations  |
+| [Datasets, others](../tools/code-execution-tool.md#supported-file-types) | Varies | `container_upload` | Analyze data, create visualizations  |
 
 ### Working with other file formats
 
@@ -680,7 +680,7 @@ puts message.content.first.text
 </CodeGroup>
 
 <Note>
-For .docx files containing images, convert them to PDF format first, then use [PDF support](/docs/en/build-with-claude/pdf-support) to take advantage of the built-in image parsing. This allows using citations from the PDF document.
+For .docx files containing images, convert them to PDF format first, then use [PDF support](pdf-support.md) to take advantage of the built-in image parsing. This allows using citations from the PDF document.
 </Note>
 
 #### Document blocks
@@ -1037,7 +1037,7 @@ File.binwrite("downloaded_file.txt", file_content.read)
 </CodeGroup>
 
 <Note>
-You can only download files that were created by [skills](/docs/en/build-with-claude/skills-guide) or the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool). Files that you uploaded cannot be downloaded.
+You can only download files that were created by [skills](../skills/get-started.md) or the [code execution tool](../tools/code-execution-tool.md). Files that you uploaded cannot be downloaded.
 </Note>
 
 ---
@@ -1063,7 +1063,7 @@ You can only download files that were created by [skills](/docs/en/build-with-cl
 
 Files uploaded via the Files API are retained until explicitly deleted using the `DELETE /v1/files/{file_id}` endpoint. Files are stored for reuse across multiple API requests.
 
-For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Error handling
 
@@ -1095,7 +1095,7 @@ File API operations are **free**:
 - Getting file metadata
 - Deleting files
 
-File content used in `Messages` requests are priced as input tokens. You can only download files created by [skills](/docs/en/build-with-claude/skills-guide) or the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool).
+File content used in `Messages` requests are priced as input tokens. You can only download files created by [skills](../skills/get-started.md) or the [code execution tool](../tools/code-execution-tool.md).
 
 ### Rate limits
 

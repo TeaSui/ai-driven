@@ -16,7 +16,7 @@ For [Claude Mythos Preview](https://anthropic.com/glasswing), web fetch is suppo
 Use the [feedback form](https://forms.gle/NhWcgmkcvPCMmPE86) to provide feedback on the quality of the model responses, the API itself, or the quality of the documentation.
 </Note>
 
-For Zero Data Retention eligibility and the `allowed_callers` workaround, see [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#zdr-and-allowed-callers).
+For Zero Data Retention eligibility and the `allowed_callers` workaround, see [Server tools](server-tools.md#zdr-and-allowed-callers).
 
 <Warning>
 Enabling the web fetch tool in environments where Claude processes untrusted input alongside sensitive data poses data exfiltration risks. Only use this tool in trusted environments or when handling non-sensitive data.
@@ -29,7 +29,7 @@ If data exfiltration is a concern, consider:
 - Using the `allowed_domains` parameter to restrict to known safe domains
 </Warning>
 
-For model support, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference).
+For model support, see the [Tool reference](../tool-infrastructure/tool-reference.md).
 
 ## How web fetch works
 
@@ -55,7 +55,7 @@ This dynamic filtering is particularly useful for:
 - Reducing token costs when working with large documents
 
 <Note>
-Dynamic filtering requires the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool) to be enabled. The web fetch tool (with and without dynamic filtering) is available on the Claude API and Microsoft Azure.
+Dynamic filtering requires the [code execution tool](code-execution-tool.md) to be enabled. The web fetch tool (with and without dynamic filtering) is available on the Claude API and Microsoft Azure.
 </Note>
 
 To enable dynamic filtering, use the `web_fetch_20260209` tool version:
@@ -517,7 +517,7 @@ The `max_uses` parameter limits the number of web fetches performed. If Claude a
 
 #### Domain filtering
 
-For domain filtering with `allowed_domains` and `blocked_domains`, see [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#domain-filtering).
+For domain filtering with `allowed_domains` and `blocked_domains`, see [Server tools](server-tools.md#domain-filtering).
 
 #### Content limits
 
@@ -718,7 +718,7 @@ In this workflow, Claude will:
 
 ## Prompt caching
 
-For caching tool definitions across turns, see [Tool use with prompt caching](/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching).
+For caching tool definitions across turns, see [Tool use with prompt caching](tool-use-with-prompt-caching.md).
 
 ## Streaming
 
@@ -751,7 +751,7 @@ data: {"type": "content_block_start", "index": 2, "content_block": {"type": "web
 
 ## Batch requests
 
-You can include the web fetch tool in the [Messages Batches API](/docs/en/build-with-claude/batch-processing). Web fetch tool calls through the Messages Batches API are priced the same as those in regular Messages API requests.
+You can include the web fetch tool in the [Messages Batches API](../model-capabilities/batch-processing.md). Web fetch tool calls through the Messages Batches API are priced the same as those in regular Messages API requests.
 
 ## Usage and pricing
 

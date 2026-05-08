@@ -4,7 +4,7 @@ Create a session to run your agent and begin executing tasks.
 
 ---
 
-A session is a running agent instance within an environment. Each session references an [agent](/docs/en/managed-agents/agent-setup) and an [environment](/docs/en/managed-agents/environments) (both created separately), and maintains conversation history across multiple interactions.
+A session is a running agent instance within an environment. Each session references an [agent](agent-setup.md) and an [environment](cloud-environment-setup.md) (both created separately), and maintains conversation history across multiple interactions.
 
 <Note>
 All Managed Agents API requests require the `managed-agents-2026-04-01` beta header. The SDK sets the beta header automatically.
@@ -180,12 +180,12 @@ To pin a session to a specific agent version, pass an object. This lets you cont
 </CodeGroup>
 
 <Tip>
-The agent defines how Claude behaves within the session, including the model, system prompt, tools, and MCP servers. See [Agent setup](/docs/en/managed-agents/agent-setup) for details.
+The agent defines how Claude behaves within the session, including the model, system prompt, tools, and MCP servers. See [Agent setup](agent-setup.md) for details.
 </Tip>
 
 ## MCP authentication through vaults
 
-If your agent uses MCP tools that require authentication, pass `vault_ids` at session creation to reference a vault containing stored OAuth credentials. Anthropic manages token refresh on your behalf. See [Authenticate with vaults](/docs/en/managed-agents/vaults) for how to create vaults and register credentials.
+If your agent uses MCP tools that require authentication, pass `vault_ids` at session creation to reference a vault containing stored OAuth credentials. Anthropic manages token refresh on your behalf. See [Authenticate with vaults](authenticate-with-vaults.md) for how to create vaults and register credentials.
 
 <CodeGroup>
   
@@ -273,7 +273,7 @@ If your agent uses MCP tools that require authentication, pass `vault_ids` at se
 
 ## Starting the session
 
-Creating a session provisions the environment and agent but does not start any work. To delegate a task, send events to the session using a [user event](/docs/en/managed-agents/events-and-streaming#user-events). The session acts as a state machine that tracks progress while events drive the actual execution.
+Creating a session provisions the environment and agent but does not start any work. To delegate a task, send events to the session using a [user event](session-event-stream.md#user-events). The session acts as a state machine that tracks progress while events drive the actual execution.
 
 <CodeGroup>
   
@@ -400,7 +400,7 @@ Creating a session provisions the environment and agent but does not start any w
   ```
 </CodeGroup>
 
-See [Events and streaming](/docs/en/managed-agents/events-and-streaming) for how to stream the agent's responses and handle tool confirmations.
+See [Events and streaming](session-event-stream.md) for how to stream the agent's responses and handle tool confirmations.
 
 ## Session statuses
 
@@ -564,7 +564,7 @@ Archive a session to prevent new events from being sent while preserving its his
 
 ### Deleting a session
 
-Delete a session to permanently remove its record, events, and associated container. A `running` session cannot be deleted; send an [interrupt event](/docs/en/managed-agents/events-and-streaming#user-events) if you need to delete it immediately.
+Delete a session to permanently remove its record, events, and associated container. A `running` session cannot be deleted; send an [interrupt event](session-event-stream.md#user-events) if you need to delete it immediately.
 
 Files, memory stores, environments, and agents are independent resources and are not affected by session deletion.
 

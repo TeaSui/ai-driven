@@ -10,7 +10,7 @@ Anthropic offers two ways to build with Claude, each suited to different use cas
 |---|---|---|
 | **What it is** | Direct model prompting access | Pre-built, configurable agent harness that runs in managed infrastructure |
 | **Best for** | Custom agent loops and fine-grained control | Long-running tasks and asynchronous work |
-| **Learn more** | [Messages API docs](/docs/en/build-with-claude/working-with-messages) | [Claude Managed Agents docs](/docs/en/managed-agents/overview) |
+| **Learn more** | [Messages API docs](../messages-api/features-overview.md) | [Claude Managed Agents docs](index.md) |
 
 Claude Managed Agents provides the harness and infrastructure for running Claude as an autonomous agent. Instead of building your own agent loop, tool execution, and runtime, you get a fully managed environment where Claude can read files, run commands, browse the web, and execute code securely. The harness supports built in prompt caching, compaction, and other performance optimizations for high quality, efficient agent outputs.
 
@@ -72,7 +72,7 @@ Claude Managed Agents gives Claude access to a comprehensive set of built-in too
 - **Web search and fetch** - Search the web and retrieve content from URLs
 - **MCP servers** - Connect to external tool providers
 
-See [Tools](/docs/en/managed-agents/tools) for the full list and configuration options.
+See [Tools](tools.md) for the full list and configuration options.
 
 ## Beta access
 <Note>
@@ -85,7 +85,7 @@ To get started, you need:
 2. The beta header above on all requests
 3. Access to Claude Managed Agents (enabled by default for all API accounts)
 
-Certain features ([outcomes](/docs/en/managed-agents/define-outcomes) and [multiagent](/docs/en/managed-agents/multi-agent)) are in research preview. [Request access](https://claude.com/form/claude-managed-agents) to try them.
+Certain features ([outcomes](define-outcomes.md) and [multiagent](multiagent-sessions.md)) are in research preview. [Request access](https://claude.com/form/claude-managed-agents) to try them.
 
 ## Rate limits
 
@@ -96,7 +96,7 @@ Managed Agents endpoints are rate-limited per organization:
 | Create endpoints (agents, sessions, environments, etc.) | 300 requests per minute |
 | Read endpoints (retrieve, list, stream, etc.) | 600 requests per minute |
 
-Organization-level [spend limits and tier-based rate limits](/docs/en/api/rate-limits) also apply.
+Organization-level [spend limits and tier-based rate limits](../admin/monitoring/rate-limits-api.md) also apply.
 
 ## Branding guidelines
 

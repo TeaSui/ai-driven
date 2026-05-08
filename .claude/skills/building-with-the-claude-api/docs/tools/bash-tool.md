@@ -3,7 +3,7 @@
 ---
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 The bash tool enables Claude to execute shell commands in a persistent bash session, allowing system operations, script execution, and command-line automation. Shell access is a foundational agent capability. On [Terminal-Bench 2.0](https://github.com/terminal-bench/terminal-bench), a benchmark that evaluates real-world terminal tasks using shell-only validation, Claude shows strong performance gains with access to a persistent bash session.
@@ -16,7 +16,7 @@ The bash tool provides Claude with:
 - Access to environment variables and working directory
 - Command chaining and scripting capabilities
 
-For model support, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference).
+For model support, see the [Tool reference](../tool-infrastructure/tool-reference.md).
 
 ## Use cases
 
@@ -414,7 +414,7 @@ Additional tokens are consumed by:
 - Error messages
 - Large file contents
 
-See [tool use pricing](/docs/en/agents-and-tools/tool-use/overview#pricing) for complete pricing details.
+See [tool use pricing](tool-use-overview.md#pricing) for complete pricing details.
 
 ## Common patterns
 
@@ -452,10 +452,10 @@ Git serves as a structured recovery mechanism in long-running agent workflows, n
 
 ## Combining with other tools
 
-The bash tool is most powerful when combined with the [text editor](/docs/en/agents-and-tools/tool-use/text-editor-tool) and other tools.
+The bash tool is most powerful when combined with the [text editor](text-editor-tool.md) and other tools.
 
 <Note>
-If you're also using the [code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool), Claude has access to two separate execution environments: your local bash session and Anthropic's sandboxed container. State is not shared between them. See [Using code execution with other execution tools](/docs/en/agents-and-tools/tool-use/code-execution-tool#using-code-execution-with-other-execution-tools) for guidance on prompting Claude to distinguish between environments.
+If you're also using the [code execution tool](code-execution-tool.md), Claude has access to two separate execution environments: your local bash session and Anthropic's sandboxed container. State is not shared between them. See [Using code execution with other execution tools](code-execution-tool.md#using-code-execution-with-other-execution-tools) for guidance on prompting Claude to distinguish between environments.
 </Note>
 
 ## Next steps

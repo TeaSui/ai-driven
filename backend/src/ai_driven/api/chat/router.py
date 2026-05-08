@@ -137,12 +137,54 @@ async def send_message(
             },
         )
 
+    # Coding / review agents cannot function without a repo_full_name.
+    # Reject early with a clear 400 rather than letting the worker
+    # dispatch a task whose first tool call hits "SCM client not
+    # configured" and stalls on a clarification.
+    repo_required_agents = {"coding", "review"}
+    if body.agentType in repo_required_agents:
+        if not (body.context or {}).get("repo_full_name"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "REPO_REQUIRED", "message": f"repo_full_name is required for agentType={body.agentType!r}"}},
+            )
+
     task_id = str(uuid.uuid4())
 
     # Bind task to trace context so all downstream logs correlate
     bind_task(task_id, agent_type=body.agentType)
 
     logger.info("chat_message_received", extra={"agent_type": body.agentType})
+
+    # Hydrate Jira ticket context so the orchestrator classifier sees
+    # the actual trust-boundary signal (labels like security/auth/
+    # payments/pii) rather than defaulting everything to fast_path.
+    # The UI's "New run" modal only sends {jira_key, repo_full_name};
+    # without this fetch, input_data.labels stays empty and the
+    # classifier collapses on summary-only input.
+    jira_hydrated: dict[str, Any] = {}
+    jira_key_for_hydrate = body.context.get("jira_key")
+    if jira_key_for_hydrate:
+        try:
+            from ai_driven.jira.client import JiraClient
+            _jira = JiraClient()
+            try:
+                issue = await _jira.get_issue(jira_key_for_hydrate)
+                jira_hydrated = {
+                    "summary": issue.summary,
+                    "description": issue.description,
+                    "labels": issue.labels or [],
+                    "issue_type": issue.issue_type,
+                    "acceptance_criteria": issue.acceptance_criteria,
+                }
+            finally:
+                await _jira.close()
+        except Exception:
+            logger.warning(
+                "chat_send.jira_hydrate_failed",
+                extra={"jira_key": jira_key_for_hydrate},
+                exc_info=True,
+            )
 
     # Persist task in PostgreSQL
     try:
@@ -174,7 +216,13 @@ async def send_message(
                 task_id=task_id,
                 agent_type=body.agentType,
                 title=body.message[:200],
-                input_data={"message": body.message, **body.context},
+                input_data={
+                    "message": body.message,
+                    **body.context,
+                    # Hydrated Jira fields override any same-key
+                    # values the client may have sent optimistically.
+                    **jira_hydrated,
+                },
                 team_id=uuid.UUID(team_id),
                 repo_id=resolved_repo_id,
             )
@@ -198,7 +246,14 @@ async def send_message(
         await producer.enqueue_task(
             task_id=task_id,
             agent_type=body.agentType,
-            payload={"message": body.message, **body.context},
+            payload={
+                "message": body.message,
+                **body.context,
+                # Same hydration as input_data — the SQS consumer
+                # reads labels/summary/description off the payload
+                # when building the orchestrator ticket dict.
+                **jira_hydrated,
+            },
         )
     except Exception:
         logger.exception("Failed to enqueue task %s", task_id)
@@ -216,19 +271,67 @@ async def send_message(
 
 @router.post("/tasks/{task_id}/pause")
 async def pause_task(task_id: str, _task=Depends(require_task_access)) -> dict:
-    """Pause a running agent task by setting a Redis control flag."""
+    """Pause a running agent task.
+
+    Sets a Redis control flag that the agent loop checks between
+    iterations AND flips tasks.status to 'paused' in Postgres. Without
+    the DB update the UI's Resume button (which is gated on
+    ``task.status === 'paused'``) never appears, and any worker-side
+    exception while the flag is set silently transitions the row to
+    'failed'.
+    """
+    from ai_driven.db.postgres.repository import TaskRepository
+    from ai_driven.db.postgres.session import async_session_factory
+
     settings = get_settings()
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
     await redis_client.set(f"task:{task_id}:control", "paused", ex=3600)
+
+    async with async_session_factory() as session:
+        task_repo = TaskRepository(session)
+        try:
+            await task_repo.update_status(uuid.UUID(task_id), "paused")
+            await session.commit()
+        except Exception:
+            logger.exception("pause_status_update_failed", extra={"task_id": task_id})
+
+    # Notify any live WebSocket subscribers so the UI flips to Resume
+    # without waiting for the next polling tick.
+    await redis_client.publish(
+        f"task:{task_id}:events",
+        json.dumps({"type": "phase_change", "data": {"phase": "paused"}}),
+    )
     return {"status": "paused", "taskId": task_id}
 
 
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str, _task=Depends(require_task_access)) -> dict:
-    """Resume a paused agent task by clearing the Redis control flag."""
+    """Resume a paused agent task.
+
+    Clears the Redis control flag and moves tasks.status from 'paused'
+    back to 'running' so the sidebar/task list reflect in-flight state
+    immediately. The agent loop's pause-wait (base.py) will observe the
+    cleared flag on its next 2s tick and continue.
+    """
+    from ai_driven.db.postgres.repository import TaskRepository
+    from ai_driven.db.postgres.session import async_session_factory
+
     settings = get_settings()
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
     await redis_client.delete(f"task:{task_id}:control")
+
+    async with async_session_factory() as session:
+        task_repo = TaskRepository(session)
+        try:
+            await task_repo.update_status(uuid.UUID(task_id), "running")
+            await session.commit()
+        except Exception:
+            logger.exception("resume_status_update_failed", extra={"task_id": task_id})
+
+    await redis_client.publish(
+        f"task:{task_id}:events",
+        json.dumps({"type": "phase_change", "data": {"phase": "resumed"}}),
+    )
     return {"status": "resumed", "taskId": task_id}
 
 
@@ -259,24 +362,153 @@ async def stop_task(task_id: str, _task=Depends(require_task_access)) -> dict:
 # ── Human-in-the-loop clarification ──────────────────────────────────────────
 
 class HumanResponseBody(BaseModel):
-    """Body for POST /tasks/{id}/respond — answers the agent's pending question."""
-    answer: str
+    """Body for POST /tasks/{id}/respond — answers the agent's pending clarification.
+
+    Two flavours for forward + backward compatibility:
+
+      * HITL-v1 (preferred): ``answers`` is a dict keyed by question id,
+        ``round_id`` matches the pending round in
+        ``task_specialist_state.pending_question``. The endpoint
+        records the answer and enqueues a ``specialist_resume`` SQS
+        message — the worker is NOT blocked during the wait.
+      * Legacy: ``answer`` is a single string. Writes the pre-HITL-v1
+        Redis key that the legacy CodingAgent polling loop reads.
+        Preserved so the CodingAgent flow keeps working.
+    """
+    answer: str | None = None
+    answers: dict[str, str] | None = None
+    round_id: str | None = None
 
 
-@router.post("/tasks/{task_id}/respond")
+@router.post("/tasks/{task_id}/respond", response_model=None)
 async def respond_to_task(
     task_id: str,
     body: HumanResponseBody,
     _task=Depends(require_task_access),
-) -> dict:
-    """Reply to an agent that invoked `human.ask_clarification`.
+) -> dict | JSONResponse:
+    """Reply to an agent that invoked ``human.ask_clarification``.
 
-    The agent loop is waiting on the Redis key `task:{id}:human_answer`. We
-    write the answer there; the pending future resolves and the agent continues
-    its next iteration with the clarification as a tool_result.
+    When a ``round_id`` is present, routes to the HITL-v1 async
+    continuation path: updates ``task_specialist_state`` + enqueues a
+    ``specialist_resume`` SQS message. Otherwise falls back to the
+    legacy Redis-key path used by the CodingAgent polling loop.
     """
     settings = get_settings()
     redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+    # ── HITL-v1 async path ───────────────────────────────────────────
+    if body.round_id:
+        # Normalize answers. An empty dict is acceptable — the user can
+        # acknowledge with no answers when the cap is hit, letting the
+        # specialist emit a terminal verdict on best-guess defaults.
+        answers = {
+            str(k): (v if isinstance(v, str) else json.dumps(v))
+            for k, v in (body.answers or {}).items()
+        }
+        from ai_driven.db.postgres.repository import (
+            SpecialistStateRepository,
+            TaskRepository,
+        )
+        from ai_driven.db.postgres.session import async_session_factory
+
+        # Find the open specialist state row for this task. The
+        # frontend doesn't track which role is pending; we look it up.
+        async with async_session_factory() as session:
+            from ai_driven.db.postgres.models import TaskSpecialistState
+            from sqlalchemy import select
+            task_uuid = uuid.UUID(task_id)
+            rows = await session.execute(
+                select(TaskSpecialistState).where(
+                    TaskSpecialistState.task_id == task_uuid,
+                    TaskSpecialistState.pending_question.isnot(None),
+                )
+            )
+            row = rows.scalar_one_or_none()
+            if row is None:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "NO_PENDING_QUESTION", "message": "no clarification is pending for this task"}},
+                )
+            # Cap check. When hitl_max_rounds is reached we still
+            # accept the answer but the resume wrapper hides the
+            # ask_clarification tool, forcing a terminal verdict.
+            state_repo = SpecialistStateRepository(session)
+            updated = await state_repo.record_answer(
+                task_uuid, row.role, body.round_id, answers,
+            )
+            if updated is None:
+                return JSONResponse(
+                    status_code=409,
+                    content={"error": {"code": "ROUND_MISMATCH", "message": "round_id does not match the pending round"}},
+                )
+            # Move task back into running so the UI stops rendering
+            # the awaiting_input card while the resume SQS message is
+            # picked up.
+            await TaskRepository(session).update_status(task_uuid, "running")
+            await session.commit()
+            role = row.role
+            rounds_now = updated.rounds
+            # Grab the original payload for re-enqueue. We stored the
+            # minimal payload at pause time; reconstruct from task row
+            # for safety.
+            from ai_driven.db.postgres.models import Task
+            task_row = await session.get(Task, task_uuid)
+            original_payload = dict(task_row.input_data or {}) if task_row else {}
+
+        # Enqueue the specialist_resume SQS message. The wrapper loads
+        # state, continues the Claude conversation with the answer,
+        # and re-enqueues the coding-task on terminal verdict.
+        from ai_driven.queue.producer import TaskProducer
+        producer = TaskProducer()
+        resume_payload = {
+            "role": role,
+            "round_id": body.round_id,
+            "ticket": {
+                "key": original_payload.get("jira_key", ""),
+                "summary": original_payload.get("summary", ""),
+                "description": original_payload.get("description", ""),
+                "labels": original_payload.get("labels", []),
+                "acceptance_criteria": original_payload.get("acceptance_criteria", ""),
+                "issue_type": original_payload.get("issue_type", ""),
+                "triggered_by": original_payload.get("triggered_by", ""),
+            },
+            "repo": {
+                "full_name": original_payload.get("repo_full_name", ""),
+                "scm_type": original_payload.get("scm_type", ""),
+                "default_branch": original_payload.get("default_branch", "master"),
+            },
+            "tier": "full_workflow",
+            "original_payload": original_payload,
+        }
+        try:
+            await producer.enqueue_task(
+                task_id=task_id,
+                agent_type="specialist_resume",
+                payload=resume_payload,
+                skip_orchestrator_routing=True,
+            )
+        except Exception:
+            logger.exception("specialist_resume_enqueue_failed",
+                             extra={"task_id": task_id, "round_id": body.round_id})
+            return JSONResponse(
+                status_code=503,
+                content={"error": {"code": "ENQUEUE_FAILED", "message": "could not enqueue resume"}},
+            )
+
+        # Persist to the replayable event_log AND publish live. Detail page
+        # reads event_log via REST; without the rpush, a page refresh would
+        # still see the unmatched clarification_requested event and keep
+        # rendering the ClarificationCard even though the answer is in.
+        answered_event = json.dumps({
+            "type": "specialist.clarification_answered",
+            "data": {"role": role, "round_id": body.round_id, "rounds": rounds_now},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        await redis_client.rpush(f"task:{task_id}:event_log", answered_event)
+        await redis_client.publish(f"task:{task_id}:events", answered_event)
+        return {"status": "resumed", "taskId": task_id, "rounds": rounds_now}
+
+    # ── Legacy single-string-answer path (CodingAgent) ───────────────
     answer = (body.answer or "").strip()
     if not answer:
         return JSONResponse(

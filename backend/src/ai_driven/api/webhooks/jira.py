@@ -22,6 +22,39 @@ router = APIRouter()
 READY_STATUSES = {"ready for dev", "ready for development"}
 
 
+def _adf_to_text(adf: Any) -> str:
+    """Flatten a Jira Atlassian Document Format node (or plain string) to text.
+
+    Jira v3 REST returns rich-text fields (``description``, custom AC
+    field) as ADF JSON; v2/plain text returns strings. Handle both so
+    the orchestrator classifier sees readable content.
+    """
+    if adf is None:
+        return ""
+    if isinstance(adf, str):
+        return adf
+    if not isinstance(adf, dict):
+        return ""
+    out: list[str] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for n in node:
+                walk(n)
+            return
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "text" and isinstance(node.get("text"), str):
+            out.append(node["text"])
+        for child in node.get("content", []) or []:
+            walk(child)
+        if node.get("type") in {"paragraph", "heading", "listItem"}:
+            out.append("\n")
+
+    walk(adf)
+    return " ".join(s.strip() for s in "".join(out).splitlines() if s.strip())
+
+
 @router.post("")
 async def jira_webhook(
     request: Request,
@@ -82,6 +115,18 @@ async def _handle_issue_updated(payload: dict[str, Any], session: AsyncSession) 
             )
             return
 
+        # Forward labels, description, issue type, and acceptance
+        # criteria into the task payload so the orchestrator's tier
+        # classifier can see the actual trust-boundary signal (labels
+        # like "security"/"auth"/"payments"/"pii"). Without these the
+        # classifier only sees the summary and defaults everything to
+        # fast_path — which skips specialists entirely.
+        description = _adf_to_text(fields.get("description"))
+        issue_type = (fields.get("issuetype") or {}).get("name", "")
+        from ai_driven.config import get_settings as _get_settings
+        ac_field = _get_settings().jira_acceptance_criteria_field
+        acceptance_criteria = _adf_to_text(fields.get(ac_field)) if ac_field else ""
+
         # Create coding task
         task_repo = TaskRepository(session)
         task = await task_repo.create(
@@ -93,6 +138,10 @@ async def _handle_issue_updated(payload: dict[str, Any], session: AsyncSession) 
             input_data={
                 "jira_key": issue_key,
                 "summary": fields.get("summary", ""),
+                "description": description,
+                "acceptance_criteria": acceptance_criteria,
+                "issue_type": issue_type,
+                "labels": labels,
                 "repo_full_name": db_repo.full_name,
                 "triggered_by": "jira_transition",
                 "from_status": from_status,

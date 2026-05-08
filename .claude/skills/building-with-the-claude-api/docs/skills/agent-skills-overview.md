@@ -5,7 +5,7 @@ Agent Skills are modular capabilities that extend Claude's functionality. Each S
 ---
 
 <Note>
-This feature is **not** eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). Data is retained according to the feature's standard retention policy.
+This feature is **not** eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). Data is retained according to the feature's standard retention policy.
 </Note>
 
 ## Why use Skills
@@ -31,7 +31,7 @@ Anthropic provides pre-built Agent Skills for common document tasks (PowerPoint,
 
 <Note>
 **Get started:**
-- For pre-built Agent Skills: See the [quickstart tutorial](/docs/en/agents-and-tools/agent-skills/quickstart) to start using PowerPoint, Excel, Word, and PDF skills in the API
+- For pre-built Agent Skills: See the [quickstart tutorial](get-started.md) to start using PowerPoint, Excel, Word, and PDF skills in the API
 - For custom Skills: See the [Agent Skills Cookbook](https://platform.claude.com/cookbook/skills-notebooks-01-skills-introduction) to learn how to create your own Skills
 </Note>
 
@@ -165,7 +165,7 @@ The Claude API supports both pre-built Agent Skills and custom Skills. Both work
 
 Use pre-built Agent Skills by referencing their `skill_id` (for example, `pptx`, `xlsx`), or create and upload your own via the Skills API (`/v1/skills` endpoints). Custom Skills are shared organization-wide.
 
-To learn more, see [Use Skills with the Claude API](/docs/en/build-with-claude/skills-guide).
+To learn more, see [Use Skills with the Claude API](get-started.md).
 
 ### Claude Code
 
@@ -225,7 +225,7 @@ description: Brief description of what this Skill does and when to use it
 - Maximum 1024 characters
 - Cannot contain XML tags
 
-The `description` should include both what the Skill does and when Claude should use it. For complete authoring guidance, see the [best practices guide](/docs/en/agents-and-tools/agent-skills/best-practices).
+The `description` should include both what the Skill does and when Claude should use it. For complete authoring guidance, see the [best practices guide](authoring-best-practices.md).
 
 ## Security considerations
 
@@ -253,13 +253,13 @@ The following pre-built Agent Skills are available for immediate use:
 - **Word (docx)**: Create documents, edit content, format text
 - **PDF (pdf)**: Generate formatted PDF documents and reports
 
-These Skills are available on the Claude API and claude.ai. See the [quickstart tutorial](/docs/en/agents-and-tools/agent-skills/quickstart) to start using them in the API.
+These Skills are available on the Claude API and claude.ai. See the [quickstart tutorial](get-started.md) to start using them in the API.
 
 ### Open-source Skills
 
 Anthropic also publishes open-source Skills in the [skills repository](https://github.com/anthropics/skills):
 
-- **[Claude API](/docs/en/agents-and-tools/agent-skills/claude-api-skill)**: Provides Claude with up-to-date API reference material, SDK documentation, and best practices for 8 programming languages. Bundled with Claude Code and also available for installation from the skills repository.
+- **[Claude API](using-skills-with-the-api.md)**: Provides Claude with up-to-date API reference material, SDK documentation, and best practices for 8 programming languages. Bundled with Claude Code and also available for installation from the skills repository.
 
 ### Custom Skills examples
 
@@ -269,7 +269,7 @@ For complete examples of custom Skills, see the [Skills cookbook](https://platfo
 
 Agent Skills is not covered by ZDR arrangements. Skill definitions and execution data are retained according to Anthropic's standard data retention policy.
 
-For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Limitations and constraints
 
@@ -303,7 +303,7 @@ The exact runtime environment available to your skill depends on the product sur
 - **Claude API**:
     - **No network access**: Skills cannot make external API calls or access the internet
     - **No runtime package installation**: Only pre-installed packages are available. You cannot install new packages during execution.
-    - **Pre-configured dependencies only**: Check the [code execution tool documentation](/docs/en/agents-and-tools/tool-use/code-execution-tool) for the list of available packages
+    - **Pre-configured dependencies only**: Check the [code execution tool documentation](../tools/code-execution-tool.md) for the list of available packages
 - **Claude Code**:
     - **Full network access**: Skills have the same network access as any other program on the user's computer
     - **Global package installation discouraged**: Skills should only install packages locally in order to avoid interfering with the user's computer

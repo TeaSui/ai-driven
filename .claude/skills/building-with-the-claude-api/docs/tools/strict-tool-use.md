@@ -4,7 +4,7 @@ Enforce JSON Schema compliance on Claude's tool inputs with grammar-constrained 
 
 ---
 
-Setting `strict: true` on a tool definition uses grammar-constrained sampling to guarantee Claude's tool inputs match your JSON Schema. This page covers why strict mode matters for agents, how to enable it, and common use cases. For the supported JSON Schema subset, see [JSON Schema limitations](/docs/en/build-with-claude/structured-outputs#json-schema-limitations). For non-strict schema guidance, see [Define tools](/docs/en/agents-and-tools/tool-use/define-tools).
+Setting `strict: true` on a tool definition uses grammar-constrained sampling to guarantee Claude's tool inputs match your JSON Schema. This page covers why strict mode matters for agents, how to enable it, and common use cases. For the supported JSON Schema subset, see [JSON Schema limitations](../model-capabilities/structured-outputs.md#json-schema-limitations). For non-strict schema guidance, see [Define tools](define-tools.md).
 
 Strict tool use validates tool parameters, ensuring Claude calls your functions with correctly-typed arguments. Use strict tool use when you need to:
 
@@ -409,7 +409,7 @@ puts message.content
 
 <Steps>
   <Step title="Define your tool schema">
-    Create a JSON schema for your tool's `input_schema`. The schema uses standard JSON Schema format with some limitations (see [JSON Schema limitations](/docs/en/build-with-claude/structured-outputs#json-schema-limitations)).
+    Create a JSON schema for your tool's `input_schema`. The schema uses standard JSON Schema format with some limitations (see [JSON Schema limitations](../model-capabilities/structured-outputs.md#json-schema-limitations)).
   </Step>
   <Step title="Add strict: true">
     Set `"strict": true` as a top-level property in your tool definition, alongside `name`, `description`, and `input_schema`.
@@ -1172,8 +1172,8 @@ puts message
 
 ## Data retention
 
-Strict tool use compiles tool `input_schema` definitions into grammars using the same pipeline as [structured outputs](/docs/en/build-with-claude/structured-outputs). Tool schemas are temporarily cached for up to 24 hours since last use. Prompts and responses are not retained beyond the API response.
+Strict tool use compiles tool `input_schema` definitions into grammars using the same pipeline as [structured outputs](../model-capabilities/structured-outputs.md). Tool schemas are temporarily cached for up to 24 hours since last use. Prompts and responses are not retained beyond the API response.
 
 Strict tool use is HIPAA eligible, but **PHI must not be included in tool schema definitions**. The API caches compiled schemas separately from message content, and these cached schemas do not receive the same PHI protections as prompts and responses. Do not include PHI in `input_schema` property names, `enum` values, `const` values, or `pattern` regular expressions. PHI should only appear in message content (prompts and responses), where it is protected under HIPAA safeguards.
 
-For ZDR and HIPAA eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR and HIPAA eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).

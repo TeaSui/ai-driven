@@ -6,7 +6,7 @@ Common Anthropic tool pairings for research agents, coding agents, and long-runn
 
 Anthropic-provided tools are designed to work together. Common agent patterns pair tools that cover complementary stages of a workflow: one tool gathers or discovers, another processes or acts. The combinations below are starting points, not prescriptions. Mix them to fit your task.
 
-Each snippet shows only the `tools` array. See [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls) for the full request shape.
+Each snippet shows only the `tools` array. See [Handle tool calls](../tools/handle-tool-calls.md) for the full request shape.
 
 ## Research agent: web_search + code_execution
 
@@ -36,7 +36,7 @@ The text editor reads and modifies files; bash runs tests and build commands. Th
 }
 ```
 
-Pair this with a constrained working directory and a command allowlist if the agent operates on untrusted code. See [Text editor tool](/docs/en/agents-and-tools/tool-use/text-editor-tool) and [Bash tool](/docs/en/agents-and-tools/tool-use/bash-tool) for the execution contracts.
+Pair this with a constrained working directory and a command allowlist if the agent operates on untrusted code. See [Text editor tool](../tools/text-editor-tool.md) and [Bash tool](../tools/bash-tool.md) for the execution contracts.
 
 ## Cite-then-fetch: web_search + web_fetch
 
@@ -65,7 +65,7 @@ Memory persists state across conversations; the other tools do the work. Add mem
 
 Add your other tools alongside `memory` in the same array.
 
-Memory is orthogonal to the rest of your toolset. It doesn't change how other tools behave; it gives Claude a place to write down and later retrieve facts that would otherwise be lost when the context window resets. See [Memory tool](/docs/en/agents-and-tools/tool-use/memory-tool) for the storage model.
+Memory is orthogonal to the rest of your toolset. It doesn't change how other tools behave; it gives Claude a place to write down and later retrieve facts that would otherwise be lost when the context window resets. See [Memory tool](../tools/memory-tool.md) for the storage model.
 
 ## All-in-one: computer_use
 
@@ -84,7 +84,7 @@ The computer use tool subsumes most others by operating a full desktop. Claude s
 }
 ```
 
-Computer use is the most general option and also the slowest, since every action requires a screenshot roundtrip. Prefer narrower tools when they cover your use case, and reach for computer use when nothing else fits. See [Computer use tool](/docs/en/agents-and-tools/tool-use/computer-use-tool) for the sandbox setup.
+Computer use is the most general option and also the slowest, since every action requires a screenshot roundtrip. Prefer narrower tools when they cover your use case, and reach for computer use when nothing else fits. See [Computer use tool](../tools/computer-use-tool.md) for the sandbox setup.
 
 ## Next steps
 

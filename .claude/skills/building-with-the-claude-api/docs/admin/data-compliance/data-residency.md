@@ -5,7 +5,7 @@ Manage where model inference runs and where data is stored with geographic contr
 ---
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 Data residency controls let you manage where your data is processed and stored. Two independent settings govern this:
@@ -14,7 +14,7 @@ Data residency controls let you manage where your data is processed and stored. 
 - **Workspace geo:** Controls where data is stored at rest and where endpoint processing (image transcoding, code execution, etc.) happens. Configured at the workspace level in the [Console](https://platform.claude.com).
 
 <Note>
-[Claude Managed Agents](/docs/en/managed-agents/overview) does not support the `inference_geo` parameter, but respects the Workspace geo configured in Console.
+[Claude Managed Agents](../../managed-agents/index.md) does not support the `inference_geo` parameter, but respects the Workspace geo configured in Console.
 </Note>
 
 ## Inference geo
@@ -118,7 +118,7 @@ The response `usage` object includes an `inference_geo` field indicating where i
 The `inference_geo` parameter is supported on Claude Opus 4.6 and all subsequent models. Older models released before Opus 4.6 do not support the parameter. Requests with `inference_geo` on legacy models return a 400 error.
 
 <Note>
-The `inference_geo` parameter is only available on the Claude API (1P). On third-party platforms (AWS Bedrock, Google Vertex AI), the inference region is determined by the endpoint URL or inference profile, so `inference_geo` is not applicable. The `inference_geo` parameter is also not available via the [OpenAI SDK compatibility endpoint](/docs/en/api/openai-sdk).
+The `inference_geo` parameter is only available on the Claude API (1P). On third-party platforms (AWS Bedrock, Google Vertex AI), the inference region is determined by the endpoint URL or inference profile, so `inference_geo` is not applicable. The `inference_geo` parameter is also not available via the [OpenAI SDK compatibility endpoint](https://docs.claude.com/en/docs/api/openai-sdk).
 </Note>
 
 ### Workspace-level restrictions
@@ -128,7 +128,7 @@ Workspace settings also support restricting which inference geos are available:
 - **`allowed_inference_geos`:** Restricts which geos a workspace can use. If a request specifies an `inference_geo` not in this list, the API returns an error.
 - **`default_inference_geo`:** Sets the fallback geo when `inference_geo` is omitted from a request. Individual requests can override this by setting `inference_geo` explicitly.
 
-These settings can be configured through the Console or the [Admin API](/docs/en/build-with-claude/administration-api) under the `data_residency` field.
+These settings can be configured through the Console or the [Admin API](../organization/admin-api-overview.md) under the `data_residency` field.
 
 ## Workspace geo
 
@@ -148,15 +148,15 @@ Data residency pricing varies by model generation:
 - **Global routing** (`inference_geo: "global"` or omitted): Standard pricing applies.
 - **Older models:** Existing pricing is unchanged regardless of `inference_geo` settings.
 
-This pricing applies to the Claude API (1P) only. Third-party platforms (AWS Bedrock, Google Vertex AI) have their own regional pricing. See the [pricing page](/docs/en/about-claude/pricing#data-residency-pricing) for details.
+This pricing applies to the Claude API (1P) only. Third-party platforms (AWS Bedrock, Google Vertex AI) have their own regional pricing. See the [pricing page](https://docs.claude.com/en/docs/about-claude/pricing#data-residency-pricing) for details.
 
 <Note>
-If you use [Priority Tier](/docs/en/api/service-tiers), the 1.1x multiplier for US-only inference also affects how tokens are counted against your Priority Tier capacity. Each token consumed with `inference_geo: "us"` draws down 1.1 tokens from your committed TPM, consistent with how other pricing multipliers (such as prompt caching) affect burndown rates.
+If you use [Priority Tier](https://docs.claude.com/en/docs/api/service-tiers), the 1.1x multiplier for US-only inference also affects how tokens are counted against your Priority Tier capacity. Each token consumed with `inference_geo: "us"` draws down 1.1 tokens from your committed TPM, consistent with how other pricing multipliers (such as prompt caching) affect burndown rates.
 </Note>
 
 ## Batch API support
 
-The `inference_geo` parameter is supported on the [Batch API](/docs/en/build-with-claude/batch-processing). Each request in a batch can specify its own `inference_geo` value.
+The `inference_geo` parameter is supported on the [Batch API](../../model-capabilities/batch-processing.md). Each request in a batch can specify its own `inference_geo` value.
 
 ## Migration from legacy opt-outs
 

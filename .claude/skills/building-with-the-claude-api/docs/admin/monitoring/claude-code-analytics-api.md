@@ -21,7 +21,7 @@ This API enables you to better monitor, analyze, and optimize your Claude Code a
 <Check>
   **Admin API key required**
 
-  This API is part of the [Admin API](/docs/en/build-with-claude/administration-api). These endpoints require an Admin API key (starting with `sk-ant-admin...`) that differs from standard API keys. Only organization members with the admin role can provision Admin API keys through the [Claude Console](/settings/admin-keys).
+  This API is part of the [Admin API](../organization/admin-api-overview.md). These endpoints require an Admin API key (starting with `sk-ant-admin...`) that differs from standard API keys. Only organization members with the admin role can provision Admin API keys through the [Claude Console](/settings/admin-keys).
 </Check>
 
 ## Quick start
@@ -58,7 +58,7 @@ Track Claude Code usage, productivity metrics, and developer activity across you
 - **Cursor-based pagination**: Handle large datasets with stable pagination using opaque cursors
 - **Data freshness**: Metrics are available with up to 1-hour delay for consistency
 
-For complete parameter details and response schemas, see the [Claude Code Analytics API reference](/docs/en/api/admin-api/claude-code/get-claude-code-usage-report).
+For complete parameter details and response schemas, see the [Claude Code Analytics API reference](https://docs.claude.com/en/docs/api/admin-api/claude-code/get-claude-code-usage-report).
 
 ### Basic examples
 
@@ -247,9 +247,9 @@ All dates are in UTC. The `starting_at` parameter should be in YYYY-MM-DD format
 
 The Claude Code Analytics API helps you understand and optimize your team's development workflow. Learn more about related features:
 
-- [Admin API overview](/docs/en/build-with-claude/administration-api)
-- [Admin API reference](/docs/en/api/admin)
+- [Admin API overview](../organization/admin-api-overview.md)
+- [Admin API reference](../index.md)
 - [Claude Code Analytics dashboard](/claude-code)
-- [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api) - Track API usage across all Anthropic services
+- [Usage and Cost API](usage-and-cost-api.md) - Track API usage across all Anthropic services
 - [Identity and access management](https://code.claude.com/docs/en/iam)
 - [Monitoring usage with OpenTelemetry](https://code.claude.com/docs/en/monitoring-usage) for custom metrics and alerting

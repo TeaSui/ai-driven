@@ -164,10 +164,33 @@ class ClaudeClient:
             # Append assistant message with full content (preserves tool_use blocks)
             messages.append({"role": "assistant", "content": response.raw_content})
 
-            # Execute all tool calls and collect results
-            tool_results = await self._execute_tool_calls(
-                response.tool_use_blocks, on_tool_call, on_tool_result
-            )
+            # Execute all tool calls and collect results.
+            # NOTE: when a tool raises AwaitingHumanInput (async HITL
+            # mode), it bypasses _execute_tool_calls' except Exception
+            # guard because AwaitingHumanInput is a BaseException. We
+            # catch it HERE so we can attach the full conversation
+            # (messages up to and including the assistant turn that
+            # emitted the tool_use block) and the matching tool_use_id.
+            # Without this, the caller sees an incomplete exception
+            # with no way to resume. See docs/specs/hitl-v1.md.
+            try:
+                tool_results = await self._execute_tool_calls(
+                    response.tool_use_blocks, on_tool_call, on_tool_result
+                )
+            except BaseException as exc:  # noqa: BLE001
+                from ai_driven.agents.base import AwaitingHumanInput
+                if isinstance(exc, AwaitingHumanInput):
+                    # Find the ask_clarification tool_use block that triggered it
+                    ask_block = next(
+                        (b for b in response.tool_use_blocks
+                         if getattr(b, "name", "") == "human.ask_clarification"),
+                        None,
+                    )
+                    if ask_block is not None:
+                        exc.tool_use_id = ask_block.id
+                    exc.messages = list(messages)
+                    raise
+                raise
 
             # Append tool results as user message
             messages.append({"role": "user", "content": tool_results})

@@ -98,7 +98,7 @@ The following fields are not expected to contain PHI under the BAA: workspace na
 
 #### Schema and tool definition restrictions
 
-When using [structured outputs](/docs/en/build-with-claude/structured-outputs) or tools with `strict: true`, the API compiles JSON schemas into grammars that are cached separately from message content. These cached schemas do not receive the same PHI protections as prompts and responses.
+When using [structured outputs](../../model-capabilities/structured-outputs.md) or tools with `strict: true`, the API compiles JSON schemas into grammars that are cached separately from message content. These cached schemas do not receive the same PHI protections as prompts and responses.
 
 **Do not include PHI in JSON schema definitions.** This restriction applies to:
 
@@ -131,38 +131,38 @@ The following table lists which Claude API features are eligible for ZDR and HIP
 
 | Feature | Endpoint | ZDR eligible | HIPAA eligible | Details |
 | ------- | -------- | ------------ | -------------- | ------- |
-| [Messages API](/docs/en/build-with-claude/working-with-messages) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Standard API calls for generating Claude responses. |
-| [Token counting](/docs/en/build-with-claude/token-counting) | `/v1/messages/count_tokens` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Count tokens before sending requests. |
-| [Web search](/docs/en/agents-and-tools/tool-use/web-search-tool) | `/v1/messages` (with `web_search` tool) | <Eligible>Yes</Eligible><sup>1</sup> | <Eligible>Yes</Eligible><sup>1</sup> | Real-time web search results returned in the API response. |
-| [Web fetch](/docs/en/agents-and-tools/tool-use/web-fetch-tool) | `/v1/messages` (with `web_fetch` tool) | <Eligible>Yes</Eligible><sup>1</sup> <sup>2</sup> | <Eligible status="no">No</Eligible> | Fetched web content returned in the API response. |
-| [Advisor tool](/docs/en/agents-and-tools/tool-use/advisor-tool) | `/v1/messages` (with `advisor` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Advisor model output is returned in the API response; nothing is stored server-side after the response. |
-| [Memory tool](/docs/en/agents-and-tools/tool-use/memory-tool) | `/v1/messages` (with `memory` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side memory storage where you control data retention. |
-| [Context management (compaction)](/docs/en/build-with-claude/compaction) | `/v1/messages` (with `context_management`) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Server-side compaction results are returned/round-tripped statelessly through the API response. |
-| [Context editing](/docs/en/build-with-claude/context-editing) | `/v1/messages` (with `context_management`) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Context edits (tool use clearing + thinking clearing) are applied in real time. |
-| [Fast mode](/docs/en/build-with-claude/fast-mode) | `/v1/messages` (with `speed: "fast"`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Same Messages API endpoint with faster inference. ZDR applies regardless of speed setting. |
-| [1M token context window](/docs/en/build-with-claude/context-windows) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Extended context processing uses the standard Messages API. |
-| [Adaptive thinking](/docs/en/build-with-claude/adaptive-thinking) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Dynamic thinking depth uses the standard Messages API. |
-| [Citations](/docs/en/build-with-claude/citations) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Source attribution uses the standard Messages API. |
-| [Data residency](/docs/en/build-with-claude/data-residency) | `/v1/messages` (with `inference_geo`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Geographic routing uses the standard Messages API. |
-| [Effort](/docs/en/build-with-claude/effort) | `/v1/messages` (with `effort`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Token efficiency control uses the standard Messages API. |
-| [Extended thinking](/docs/en/build-with-claude/extended-thinking) | `/v1/messages` (with `thinking`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Step-by-step reasoning uses the standard Messages API. |
-| [PDF support](/docs/en/build-with-claude/pdf-support) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | PDF document processing uses the standard Messages API. HIPAA eligibility applies to PDFs sent inline via the Messages API, not through the Files API. |
-| [Search results](/docs/en/build-with-claude/search-results) | `/v1/messages` (with `search_results` source) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | RAG citation support uses the standard Messages API. |
-| [Bash tool](/docs/en/agents-and-tools/tool-use/bash-tool) | `/v1/messages` (with `bash` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side tool executed in your environment. |
-| [Text editor tool](/docs/en/agents-and-tools/tool-use/text-editor-tool) | `/v1/messages` (with `text_editor` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side tool executed in your environment. |
-| [Computer use](/docs/en/agents-and-tools/tool-use/computer-use-tool) | `/v1/messages` (with `computer` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Client-side tool where screenshots and files are captured and stored in your environment, not by Anthropic. See [Computer use](/docs/en/agents-and-tools/tool-use/computer-use-tool#data-retention). |
-| [Fine-grained tool streaming](/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Streaming tool parameters uses the standard Messages API. |
-| [Prompt caching](/docs/en/build-with-claude/prompt-caching) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Your prompts and Claude's outputs are not stored. KV cache representations and cryptographic hashes are held in memory for the cache TTL and promptly deleted after expiry. See [Prompt caching](/docs/en/build-with-claude/prompt-caching#data-retention). |
-| [Structured outputs](/docs/en/build-with-claude/structured-outputs) | `/v1/messages` | <Eligible status="qualified">Yes (qualified)</Eligible> | <Eligible>Yes</Eligible><sup>3</sup> | Your prompts and Claude's outputs are not stored. Only the JSON schema is cached, for up to 24 hours since last use. This also covers [strict tool use](/docs/en/agents-and-tools/tool-use/strict-tool-use) (`strict: true` on tools), which uses the same grammar pipeline. See [Structured outputs](/docs/en/build-with-claude/structured-outputs#data-retention). |
-| [Tool search](/docs/en/agents-and-tools/tool-use/tool-search-tool) | `/v1/messages` (with `tool_search` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Tool search uses the standard Messages API. |
-| [Batch processing](/docs/en/build-with-claude/batch-processing) | `/v1/messages/batches` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | 29-day retention; async storage required. See [Batch processing](/docs/en/build-with-claude/batch-processing#data-retention). |
-| [Code execution](/docs/en/agents-and-tools/tool-use/code-execution-tool) | `/v1/messages` (with `code_execution` tool) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Container data retained up to 30 days. See [Code execution](/docs/en/agents-and-tools/tool-use/code-execution-tool#data-retention). |
-| [Programmatic tool calling](/docs/en/agents-and-tools/tool-use/programmatic-tool-calling) | `/v1/messages` (with `code_execution` tool) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Built on code execution containers; data retained up to 30 days. See [Programmatic tool calling](/docs/en/agents-and-tools/tool-use/programmatic-tool-calling#data-retention). |
-| [Files API](/docs/en/build-with-claude/files) | `/v1/files` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Files retained until explicitly deleted. See [Files API](/docs/en/build-with-claude/files#data-retention). |
-| [Agent skills](/docs/en/agents-and-tools/agent-skills/overview) | `/v1/messages` (with `skills`) / `/v1/skills` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Skill data retained per standard policy. See [Agent skills](/docs/en/agents-and-tools/agent-skills/overview#data-retention). |
-| [MCP connector](/docs/en/agents-and-tools/mcp-connector) | `/v1/messages` (with `mcp_servers`) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Data retained per standard policy. See [MCP connector](/docs/en/agents-and-tools/mcp-connector#data-retention). |
+| [Messages API](../../messages-api/features-overview.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Standard API calls for generating Claude responses. |
+| [Token counting](../../context-management/token-counting.md) | `/v1/messages/count_tokens` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Count tokens before sending requests. |
+| [Web search](../../tools/web-search-tool.md) | `/v1/messages` (with `web_search` tool) | <Eligible>Yes</Eligible><sup>1</sup> | <Eligible>Yes</Eligible><sup>1</sup> | Real-time web search results returned in the API response. |
+| [Web fetch](../../tools/web-fetch-tool.md) | `/v1/messages` (with `web_fetch` tool) | <Eligible>Yes</Eligible><sup>1</sup> <sup>2</sup> | <Eligible status="no">No</Eligible> | Fetched web content returned in the API response. |
+| [Advisor tool](../../tools/advisor-tool.md) | `/v1/messages` (with `advisor` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Advisor model output is returned in the API response; nothing is stored server-side after the response. |
+| [Memory tool](../../tools/memory-tool.md) | `/v1/messages` (with `memory` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side memory storage where you control data retention. |
+| [Context management (compaction)](../../context-management/compaction.md) | `/v1/messages` (with `context_management`) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Server-side compaction results are returned/round-tripped statelessly through the API response. |
+| [Context editing](../../context-management/context-editing.md) | `/v1/messages` (with `context_management`) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Context edits (tool use clearing + thinking clearing) are applied in real time. |
+| [Fast mode](../../model-capabilities/fast-mode.md) | `/v1/messages` (with `speed: "fast"`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Same Messages API endpoint with faster inference. ZDR applies regardless of speed setting. |
+| [1M token context window](../../context-management/context-windows.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Extended context processing uses the standard Messages API. |
+| [Adaptive thinking](../../model-capabilities/adaptive-thinking.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Dynamic thinking depth uses the standard Messages API. |
+| [Citations](../../model-capabilities/citations.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Source attribution uses the standard Messages API. |
+| [Data residency](data-residency.md) | `/v1/messages` (with `inference_geo`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Geographic routing uses the standard Messages API. |
+| [Effort](../../model-capabilities/effort.md) | `/v1/messages` (with `effort`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Token efficiency control uses the standard Messages API. |
+| [Extended thinking](../../model-capabilities/extended-thinking.md) | `/v1/messages` (with `thinking`) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Step-by-step reasoning uses the standard Messages API. |
+| [PDF support](../../files/pdf-support.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | PDF document processing uses the standard Messages API. HIPAA eligibility applies to PDFs sent inline via the Messages API, not through the Files API. |
+| [Search results](../../model-capabilities/search-results.md) | `/v1/messages` (with `search_results` source) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | RAG citation support uses the standard Messages API. |
+| [Bash tool](../../tools/bash-tool.md) | `/v1/messages` (with `bash` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side tool executed in your environment. |
+| [Text editor tool](../../tools/text-editor-tool.md) | `/v1/messages` (with `text_editor` tool) | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Client-side tool executed in your environment. |
+| [Computer use](../../tools/computer-use-tool.md) | `/v1/messages` (with `computer` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Client-side tool where screenshots and files are captured and stored in your environment, not by Anthropic. See [Computer use](../../tools/computer-use-tool.md#data-retention). |
+| [Fine-grained tool streaming](../../tool-infrastructure/fine-grained-tool-streaming.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Streaming tool parameters uses the standard Messages API. |
+| [Prompt caching](../../context-management/prompt-caching.md) | `/v1/messages` | <Eligible>Yes</Eligible> | <Eligible>Yes</Eligible> | Your prompts and Claude's outputs are not stored. KV cache representations and cryptographic hashes are held in memory for the cache TTL and promptly deleted after expiry. See [Prompt caching](../../context-management/prompt-caching.md#data-retention). |
+| [Structured outputs](../../model-capabilities/structured-outputs.md) | `/v1/messages` | <Eligible status="qualified">Yes (qualified)</Eligible> | <Eligible>Yes</Eligible><sup>3</sup> | Your prompts and Claude's outputs are not stored. Only the JSON schema is cached, for up to 24 hours since last use. This also covers [strict tool use](../../tools/strict-tool-use.md) (`strict: true` on tools), which uses the same grammar pipeline. See [Structured outputs](../../model-capabilities/structured-outputs.md#data-retention). |
+| [Tool search](../../tool-infrastructure/tool-search-tool.md) | `/v1/messages` (with `tool_search` tool) | <Eligible>Yes</Eligible> | <Eligible status="no">No</Eligible> | Tool search uses the standard Messages API. |
+| [Batch processing](../../model-capabilities/batch-processing.md) | `/v1/messages/batches` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | 29-day retention; async storage required. See [Batch processing](../../model-capabilities/batch-processing.md#data-retention). |
+| [Code execution](../../tools/code-execution-tool.md) | `/v1/messages` (with `code_execution` tool) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Container data retained up to 30 days. See [Code execution](../../tools/code-execution-tool.md#data-retention). |
+| [Programmatic tool calling](../../tool-infrastructure/programmatic-tool-calling.md) | `/v1/messages` (with `code_execution` tool) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Built on code execution containers; data retained up to 30 days. See [Programmatic tool calling](../../tool-infrastructure/programmatic-tool-calling.md#data-retention). |
+| [Files API](../../files/files-api.md) | `/v1/files` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Files retained until explicitly deleted. See [Files API](../../files/files-api.md#data-retention). |
+| [Agent skills](../../skills/agent-skills-overview.md) | `/v1/messages` (with `skills`) / `/v1/skills` | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Skill data retained per standard policy. See [Agent skills](../../skills/agent-skills-overview.md#data-retention). |
+| [MCP connector](../../mcp/mcp-connector.md) | `/v1/messages` (with `mcp_servers`) | <Eligible status="no">No</Eligible> | <Eligible status="no">No</Eligible> | Data retained per standard policy. See [MCP connector](../../mcp/mcp-connector.md#data-retention). |
 
-<sup>1</sup> [Dynamic filtering](/docs/en/agents-and-tools/tool-use/web-search-tool#dynamic-filtering) is not eligible for ZDR or HIPAA.
+<sup>1</sup> [Dynamic filtering](../../tools/web-search-tool.md#dynamic-filtering) is not eligible for ZDR or HIPAA.
 
 <sup>2</sup> While web fetch is ZDR-eligible, website publishers may retain request data (such as fetched URLs and request metadata) according to their own policies.
 
@@ -272,8 +272,8 @@ To request a ZDR arrangement, contact the [Anthropic sales team](https://claude.
 ## Related resources
 
 - [Privacy Policy](https://www.anthropic.com/legal/privacy)
-- [Structured outputs](/docs/en/build-with-claude/structured-outputs)
-- [Prompt caching](/docs/en/build-with-claude/prompt-caching)
-- [Batch processing](/docs/en/build-with-claude/batch-processing)
-- [Files API](/docs/en/api/files-create)
+- [Structured outputs](../../model-capabilities/structured-outputs.md)
+- [Prompt caching](../../context-management/prompt-caching.md)
+- [Batch processing](../../model-capabilities/batch-processing.md)
+- [Files API](https://docs.claude.com/en/docs/api/files-create)
 - [Trust Center](https://trust.anthropic.com/resources)

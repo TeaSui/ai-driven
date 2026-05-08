@@ -9,7 +9,7 @@ This guide walks you through the process of setting up and making API calls to C
 Regional availability: At launch, Claude is available as a Global Standard deployment type in Foundry resources (US DataZone coming soon). Pricing for Claude in the Microsoft Marketplace uses Anthropic's standard API pricing. Visit the [pricing page](https://claude.com/pricing#api) for details.
 
 <Note>
-Foundry is supported by the C#, Java, PHP, Python, and TypeScript SDKs. The Go and Ruby SDKs do not currently support Microsoft Foundry. For available SDK platform integrations, see [Client SDKs](/docs/en/api/client-sdks).
+Foundry is supported by the C#, Java, PHP, Python, and TypeScript SDKs. The Go and Ruby SDKs do not currently support Microsoft Foundry. For available SDK platform integrations, see [Client SDKs](https://docs.claude.com/en/docs/api/client-sdks).
 </Note>
 
 ## Preview
@@ -26,7 +26,7 @@ Before you begin, ensure you have:
 
 ## Install an SDK
 
-Anthropic's [client SDKs](/docs/en/api/client-sdks) support Foundry through platform-specific packages.
+Anthropic's [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) support Foundry through platform-specific packages.
 
 <Tabs>
 <Tab title="Python">
@@ -482,11 +482,11 @@ Foundry includes request identifiers in HTTP response headers for debugging and 
 
 ## Supported features
 
-Claude on Foundry supports most of Claude's powerful features. You can find all the features currently supported in the [overview documentation](/docs/en/build-with-claude/overview).
+Claude on Foundry supports most of Claude's powerful features. You can find all the features currently supported in the [overview documentation](../messages-api/features-overview.md).
 
 ### Context window
 
-Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6 have a [1M-token context window](/docs/en/build-with-claude/context-windows) on Microsoft Foundry. Other Claude models, including Sonnet 4.5, have a 200k-token context window.
+Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6 have a [1M-token context window](../context-management/context-windows.md) on Microsoft Foundry. Other Claude models, including Sonnet 4.5, have a 200k-token context window.
 
 ### Features not supported
 
@@ -496,7 +496,7 @@ Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6 have a [1M-token context
 
 ## API responses
 
-API responses from Claude on Foundry follow the standard [Claude API response format](/docs/en/api/messages/create). This includes the `usage` object in response bodies, which provides detailed token consumption information for your requests. The `usage` object is consistent across all platforms (first-party API, Foundry, Amazon Bedrock, and Google Vertex AI).
+API responses from Claude on Foundry follow the standard [Claude API response format](https://docs.claude.com/en/docs/api/messages/create). This includes the `usage` object in response bodies, which provides detailed token consumption information for your requests. The `usage` object is consistent across all platforms (first-party API, Foundry, Amazon Bedrock, and Google Vertex AI).
 
 For details on response headers specific to Foundry, see the [correlation request IDs section](#correlation-request-ids).
 
@@ -573,6 +573,6 @@ Foundry does not include Anthropic's standard rate limit headers (`anthropic-rat
 
 - **Foundry documentation:** [ai.azure.com/catalog](https://ai.azure.com/catalog/publishers/anthropic)
 - **Azure pricing:** [azure.microsoft.com/en-us/pricing](https://azure.microsoft.com/en-us/pricing/)
-- **Anthropic pricing details:** [Pricing documentation](/docs/en/about-claude/pricing#third-party-platform-pricing)
+- **Anthropic pricing details:** [Pricing documentation](https://docs.claude.com/en/docs/about-claude/pricing#third-party-platform-pricing)
 - **Authentication guide:** See the [authentication section](#authentication) above
 - **Azure portal:** [portal.azure.com](https://portal.azure.com/)

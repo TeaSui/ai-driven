@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
+
+
+def _looks_like_sha(value: str) -> bool:
+    """Heuristic: Bitbucket SHAs are 7-40 hex chars with no slashes."""
+    if not value or "/" in value:
+        return False
+    return bool(re.fullmatch(r"[0-9a-fA-F]{7,40}", value))
 
 import httpx
 from tenacity import (
@@ -254,6 +262,51 @@ class BitbucketClient:
                 results.append(file_content)
         return results
 
+    async def _resolve_parent_hash(
+        self, repo_full_name: str, branch: str
+    ) -> str | None:
+        """Return the tip commit hash of ``branch``, or of the repo's
+        default branch when ``branch`` does not exist yet.
+
+        Bitbucket's ``POST /src`` endpoint silently creates an ORPHAN
+        commit (no parent) when ``branch`` is new. The resulting branch
+        has no ancestry with the default branch and every subsequent
+        PR shows every file as a "new file", producing unmergeable
+        conflicts. Passing ``parents=<hash>`` forces Bitbucket to chain
+        the new commit off the real history.
+
+        Best-effort: if both lookups fail we return ``None`` and the
+        caller omits the field — preserving the pre-fix behavior rather
+        than raising.
+        """
+        # Try the target branch first.
+        try:
+            resp = await self._request(
+                "GET",
+                f"/repositories/{repo_full_name}/refs/branches/{branch}",
+            )
+            data = resp.json() if resp.text else {}
+            h = (data.get("target") or {}).get("hash")
+            if h:
+                return h
+        except Exception:  # noqa: BLE001
+            pass
+        # Fall back to the repo's default (main) branch so a brand-new
+        # feature branch inherits ancestry from main.
+        for candidate in ("main", "master"):
+            try:
+                resp = await self._request(
+                    "GET",
+                    f"/repositories/{repo_full_name}/refs/branches/{candidate}",
+                )
+                data = resp.json() if resp.text else {}
+                h = (data.get("target") or {}).get("hash")
+                if h:
+                    return h
+            except Exception:  # noqa: BLE001
+                continue
+        return None
+
     async def create_or_update_file(
         self,
         repo_full_name: str,
@@ -263,13 +316,14 @@ class BitbucketClient:
         branch: str = "main",
     ) -> dict[str, Any]:
         """Commit a file change via the Bitbucket source endpoint."""
+        data: dict[str, Any] = {"message": message, "branch": branch}
+        parent_hash = await self._resolve_parent_hash(repo_full_name, branch)
+        if parent_hash:
+            data["parents"] = parent_hash
         resp = await self._request(
             "POST",
             f"/repositories/{repo_full_name}/src",
-            data={
-                "message": message,
-                "branch": branch,
-            },
+            data=data,
             files={path: ("file", content.encode("utf-8"))},
         )
         return resp.json() if resp.text else {}
@@ -288,6 +342,10 @@ class BitbucketClient:
         this is just the single-file ``create_or_update_file`` path generalized
         to N parts. Dedupes by path (last wins) to match the semantics of N
         sequential writes.
+
+        Sets ``parents`` to the current tip so a brand-new branch inherits
+        real ancestry from main instead of an orphan root commit (see
+        :meth:`_resolve_parent_hash`).
         """
         if not files:
             return {"message": message, "files": []}
@@ -301,10 +359,14 @@ class BitbucketClient:
             path: ("file", content.encode("utf-8"))
             for path, content in deduped.items()
         }
+        data: dict[str, Any] = {"message": message, "branch": branch}
+        parent_hash = await self._resolve_parent_hash(repo_full_name, branch)
+        if parent_hash:
+            data["parents"] = parent_hash
         resp = await self._request(
             "POST",
             f"/repositories/{repo_full_name}/src",
-            data={"message": message, "branch": branch},
+            data=data,
             files=multipart,
         )
         if resp.text:
@@ -321,10 +383,22 @@ class BitbucketClient:
     async def create_branch(
         self, repo_full_name: str, branch_name: str, from_ref: str = "main"
     ) -> None:
+        """Create ``branch_name`` pointing at the tip of ``from_ref``.
+
+        Bitbucket's ``refs/branches`` endpoint expects ``target.hash`` to
+        be a commit SHA. Passing a branch name sometimes works, but has
+        been observed to silently produce orphan branches when the ref
+        resolver races. Resolve the branch to its tip SHA first.
+        """
+        target_hash = from_ref
+        if not _looks_like_sha(from_ref):
+            resolved = await self._resolve_parent_hash(repo_full_name, from_ref)
+            if resolved:
+                target_hash = resolved
         await self._request(
             "POST",
             f"/repositories/{repo_full_name}/refs/branches",
-            json={"name": branch_name, "target": {"hash": from_ref}},
+            json={"name": branch_name, "target": {"hash": target_hash}},
         )
 
     # ------------------------------------------------------------------

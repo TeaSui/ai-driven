@@ -20,6 +20,7 @@ import asyncio
 import logging
 
 from ai_driven.background.reapers import (
+    reap_stuck_awaiting_input,
     reap_stuck_orchestrators,
     reap_stuck_qa,
     reap_stuck_running,
@@ -72,6 +73,13 @@ async def _reaper_loop() -> None:
                     logger.info("reaper.running.reaped count=%d", n)
             except Exception:
                 logger.exception("reap_stuck_running loop iteration failed")
+
+            try:
+                n = await reap_stuck_awaiting_input()
+                if n:
+                    logger.info("reaper.awaiting_input.reaped count=%d", n)
+            except Exception:
+                logger.exception("reap_stuck_awaiting_input loop iteration failed")
 
             # Heartbeat counter — absence alert (>15 min without a tick)
             # pages oncall per brief.

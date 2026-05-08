@@ -390,7 +390,7 @@ Event streams may also include any number of `ping` events.
 
 ### Error events
 
-The API may occasionally send [errors](/docs/en/api/errors) in the event stream. For example, during periods of high usage, you may receive an `overloaded_error`, which would normally correspond to an HTTP 529 in a non-streaming context:
+The API may occasionally send [errors](https://docs.claude.com/en/docs/api/errors) in the event stream. For example, during periods of high usage, you may receive an `overloaded_error`, which would normally correspond to an HTTP 529 in a non-streaming context:
 
 ```sse Example error
 event: error
@@ -399,7 +399,7 @@ data: {"type": "error", "error": {"type": "overloaded_error", "message": "Overlo
 
 ### Other events
 
-In accordance with the [versioning policy](/docs/en/api/versioning), new event types may be added, and your code should handle unknown event types gracefully.
+In accordance with the [versioning policy](https://docs.claude.com/en/docs/api/versioning), new event types may be added, and your code should handle unknown event types gracefully.
 
 ## Content block delta types
 
@@ -417,7 +417,7 @@ data: {"type": "content_block_delta","index": 0,"delta": {"type": "text_delta", 
 
 The deltas for `tool_use` content blocks correspond to updates for the `input` field of the block. To support maximum granularity, the deltas are _partial JSON strings_, whereas the final `tool_use.input` is always an _object_.
 
-You can accumulate the string deltas and parse the JSON once you receive a `content_block_stop` event, by using a library like [Pydantic](https://docs.pydantic.dev/latest/concepts/json/#partial-json-parsing) to do partial JSON parsing, or by using the [SDKs](/docs/en/api/client-sdks), which provide helpers to access parsed incremental values.
+You can accumulate the string deltas and parse the JSON once you receive a `content_block_stop` event, by using a library like [Pydantic](https://docs.pydantic.dev/latest/concepts/json/#partial-json-parsing) to do partial JSON parsing, or by using the [SDKs](https://docs.claude.com/en/docs/api/client-sdks), which provide helpers to access parsed incremental values.
 
 A `tool_use` content block delta looks like:
 ```sse Input JSON delta
@@ -428,11 +428,11 @@ Note: Current models only support emitting one complete key and value property f
 
 ### Thinking delta
 
-When using [extended thinking](/docs/en/build-with-claude/extended-thinking#streaming-thinking) with streaming enabled, you'll receive thinking content via `thinking_delta` events. These deltas correspond to the `thinking` field of the `thinking` content blocks.
+When using [extended thinking](extended-thinking.md#streaming-thinking) with streaming enabled, you'll receive thinking content via `thinking_delta` events. These deltas correspond to the `thinking` field of the `thinking` content blocks.
 
 For thinking content, a special `signature_delta` event is sent just before the `content_block_stop` event. This signature is used to verify the integrity of the thinking block.
 
-When `display: "omitted"` is set on the thinking configuration, no `thinking_delta` events are sent. The thinking block opens, receives a single `signature_delta`, and closes. See [Controlling thinking display](/docs/en/build-with-claude/extended-thinking#controlling-thinking-display).
+When `display: "omitted"` is set on the thinking configuration, no `thinking_delta` events are sent. The thinking block opens, receives a single `signature_delta`, and closes. See [Controlling thinking display](extended-thinking.md#controlling-thinking-display).
 
 A typical thinking delta looks like:
 ```sse Thinking delta
@@ -448,7 +448,7 @@ data: {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_d
 
 ## Full HTTP Stream response
 
-Use the [client SDKs](/docs/en/api/client-sdks) when using streaming mode. However, if you are building a direct API integration, you need to handle these events yourself.
+Use the [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) when using streaming mode. However, if you are building a direct API integration, you need to handle these events yourself.
 
 A stream response is comprised of:
 1. A `message_start` event
@@ -676,7 +676,7 @@ data: {"type": "message_stop"}
 ### Streaming request with tool use
 
 <Tip>
-Tool use supports [fine-grained streaming](/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming) for parameter values. Enable it per tool with `eager_input_streaming`.
+Tool use supports [fine-grained streaming](../tool-infrastructure/fine-grained-tool-streaming.md) for parameter values. Enable it per tool with `eager_input_streaming`.
 </Tip>
 
 This request asks Claude to use a tool to report the weather.

@@ -5,7 +5,7 @@ Server-side context compaction for managing long conversations that approach con
 ---
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 <Tip>
@@ -25,7 +25,7 @@ This is ideal for:
 - Task-oriented prompts that require a lot of follow-up work (often tool use) that may exceed the context window
 
 <Note>
-Compaction is in beta. Include the [beta header](/docs/en/api/beta-headers) `compact-2026-01-12` in your API requests to use this feature.
+Compaction is in beta. Include the [beta header](https://docs.claude.com/en/docs/api/beta-headers) `compact-2026-01-12` in your API requests to use this feature.
 </Note>
 
 ## Supported models
@@ -1863,7 +1863,7 @@ end
 
 ### Prompt caching
 
-Compaction works well with [prompt caching](/docs/en/build-with-claude/prompt-caching). You can add a `cache_control` breakpoint on compaction blocks to cache the summarized content. The original compacted content is ignored.
+Compaction works well with [prompt caching](prompt-caching.md). You can add a `cache_control` breakpoint on compaction blocks to cache the summarized content. The original compacted content is ignored.
 
 ```json
 {

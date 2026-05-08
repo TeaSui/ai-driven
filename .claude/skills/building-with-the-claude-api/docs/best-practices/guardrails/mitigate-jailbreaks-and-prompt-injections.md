@@ -4,7 +4,7 @@
 
 Jailbreaking and prompt injections occur when users craft prompts to exploit model vulnerabilities, aiming to generate inappropriate content. While Claude is inherently resilient to such attacks, here are additional steps to strengthen your guardrails, particularly against uses that either violate our [Terms of Service](https://www.anthropic.com/legal/commercial-terms) or [Usage Policy](https://www.anthropic.com/legal/aup).
 
-- **Harmlessness screens**: Use a lightweight model like Claude Haiku 4.5 to pre-screen user inputs. Use [structured outputs](/docs/en/build-with-claude/structured-outputs) to constrain the response to a simple classification.
+- **Harmlessness screens**: Use a lightweight model like Claude Haiku 4.5 to pre-screen user inputs. Use [structured outputs](../../model-capabilities/structured-outputs.md) to constrain the response to a simple classification.
 
     <section title="Example: Harmlessness screen for content moderation">
 
@@ -66,7 +66,7 @@ Combine strategies for robust protection. Here's an enterprise-grade example wit
   | -------- | ------- |
   | User | \<user_query><br/>\{\{USER_QUERY}}<br/>\</user_query><br/><br/>Evaluate if this query violates SEC rules, FINRA guidelines, or client privacy. |
 
-  Use [structured outputs](/docs/en/build-with-claude/structured-outputs) to constrain the response to a boolean classification.
+  Use [structured outputs](../../model-capabilities/structured-outputs.md) to constrain the response to a boolean classification.
 
 </section>
 

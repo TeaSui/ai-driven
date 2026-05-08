@@ -15,7 +15,7 @@ This pattern fits long-horizon agentic workloads (coding agents, computer use, m
 </Note>
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 ## When to use it
@@ -519,7 +519,7 @@ The advisor's prompt on the Nth call is the (N-1)th call's prompt with one more 
 **Keep it consistent:** Set `caching` once and leave it for the whole conversation. Toggling it off and on mid-conversation causes cache misses.
 
 <Warning>
-  [`clear_thinking`](/docs/en/build-with-claude/context-editing) with a `keep`
+  [`clear_thinking`](../context-management/context-editing.md) with a `keep`
   value other than `"all"` shifts the advisor's quoted transcript each turn,
   causing advisor-side cache misses. This is a cost degradation only; advice
   quality is unaffected. When extended thinking is enabled without explicit
@@ -561,10 +561,10 @@ The executor can search the web, call the advisor, and use your custom tools in 
 
 | Feature                                                          | Interaction                                                                                                                                                                                                                                                                        |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Batch processing](/docs/en/build-with-claude/batch-processing)         | Supported. `usage.iterations` is reported per item.                                                                                                                                                                                                                                |
-| [Token counting](/docs/en/build-with-claude/token-counting)      | Returns the executor's first-iteration input tokens only. For a rough advisor estimate, call `count_tokens` with `model` set to the advisor model and the same messages.                                                                                                           |
-| [Context editing](/docs/en/build-with-claude/context-editing) | `clear_tool_uses` is not yet fully compatible with advisor tool blocks; full support is planned for a follow-up release. With `clear_thinking`, see the caching warning above.                                                                                                    |
-| `pause_turn`                                                     | A dangling advisor call ends the response with `stop_reason: "pause_turn"` and the `server_tool_use` block as the last content block. The advisor executes on resumption. See [Server tools](/docs/en/agents-and-tools/tool-use/server-tools#the-server-side-loop-and-pause-turn). |
+| [Batch processing](../model-capabilities/batch-processing.md)         | Supported. `usage.iterations` is reported per item.                                                                                                                                                                                                                                |
+| [Token counting](../context-management/token-counting.md)      | Returns the executor's first-iteration input tokens only. For a rough advisor estimate, call `count_tokens` with `model` set to the advisor model and the same messages.                                                                                                           |
+| [Context editing](../context-management/context-editing.md) | `clear_tool_uses` is not yet fully compatible with advisor tool blocks; full support is planned for a follow-up release. With `clear_thinking`, see the caching warning above.                                                                                                    |
+| `pause_turn`                                                     | A dangling advisor call ends the response with `stop_reason: "pause_turn"` and the `server_tool_use` block as the last content block. The advisor executes on resumption. See [Server tools](server-tools.md#the-server-side-loop-and-pause-turn). |
 
 ## Best practices
 
@@ -618,7 +618,7 @@ Pair this with the timing block above for the strongest cost-versus-quality trad
 
 ### Pairing with effort settings
 
-For coding tasks, pairing a Sonnet executor at medium [effort](/docs/en/build-with-claude/effort) with an Opus advisor achieves intelligence comparable to Sonnet at default effort, at lower cost. For maximum intelligence, keep the executor at default effort.
+For coding tasks, pairing a Sonnet executor at medium [effort](../model-capabilities/effort.md) with an Opus advisor achieves intelligence comparable to Sonnet at default effort, at lower cost. For maximum intelligence, keep the executor at default effort.
 
 ### Cost control
 

@@ -18,7 +18,7 @@ Both methods grant the same access to Claude API endpoints. Choose API keys to g
 API keys are static secrets that you generate in the Claude Console and pass on every request.
 
 - **Create a key:** Go to [Settings → API keys](https://platform.claude.com/settings/keys) in the Claude Console. Use [workspaces](https://platform.claude.com/settings/workspaces) to scope keys by project or environment.
-- **Send the key:** Set the `x-api-key` header on direct HTTP requests, or set the `ANTHROPIC_API_KEY` environment variable and the [client SDKs](/docs/en/api/client-sdks) pick it up automatically.
+- **Send the key:** Set the `x-api-key` header on direct HTTP requests, or set the `ANTHROPIC_API_KEY` environment variable and the [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) pick it up automatically.
 
 ```http
 POST /v1/messages
@@ -128,7 +128,7 @@ Workload Identity Federation (WIF) lets a workload authenticate with a short-liv
 
 Federation removes long-lived Claude API keys from your environment, which shrinks the blast radius of a leaked credential and lets you manage access with the same IdP controls you already use for cloud resources. It does not, on its own, guarantee end-to-end security: the trust chain is only as strong as your identity provider's configuration, and a long-lived secret one hop upstream (for example, a static cloud credential that can mint IdP tokens) can still undermine it. Pair federation with your provider's controls, such as IP allowlists, MFA, and audit logging.
 
-To configure federation, you create three resources in the Claude Console (a service account, a federation issuer, and a federation rule) and then point your SDK at the rule. See [Workload Identity Federation](/docs/en/build-with-claude/workload-identity-federation) for the full setup walkthrough.
+To configure federation, you create three resources in the Claude Console (a service account, a federation issuer, and a federation rule) and then point your SDK at the rule. See [Workload Identity Federation](workload-identity-federation.md) for the full setup walkthrough.
 
 ## Next steps
 

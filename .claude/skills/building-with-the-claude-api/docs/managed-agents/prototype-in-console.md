@@ -30,7 +30,7 @@ Console includes an inline session runner. After configuring your agent, you can
 Once your agent works as expected:
 
 1. Copy the agent ID from Console output.
-2. Reference it in your code when [creating sessions](/docs/en/managed-agents/sessions):
+2. Reference it in your code when [creating sessions](start-a-session.md):
 
 <CodeGroup>
 

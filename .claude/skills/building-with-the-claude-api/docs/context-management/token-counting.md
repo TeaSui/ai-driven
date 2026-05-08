@@ -8,14 +8,14 @@ Token counting enables you to determine the number of tokens in a message before
 - Optimize prompts to be a specific length
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 ---
 
 ## How to count message tokens
 
-The [token counting](/docs/en/api/messages-count-tokens) endpoint accepts the same structured list of inputs for creating a message, including support for system prompts, [tools](/docs/en/agents-and-tools/tool-use/overview), [images](/docs/en/build-with-claude/vision), and [PDFs](/docs/en/build-with-claude/pdf-support). The response contains the total number of input tokens.
+The [token counting](https://docs.claude.com/en/docs/api/messages-count-tokens) endpoint accepts the same structured list of inputs for creating a message, including support for system prompts, [tools](../tools/tool-use-overview.md), [images](../files/images-and-vision.md), and [PDFs](../files/pdf-support.md). The response contains the total number of input tokens.
 
 <Note>
 The token count should be considered an **estimate**. In some cases, the actual number of input tokens used when creating a message may differ by a small amount.
@@ -24,7 +24,7 @@ Token counts may include tokens added automatically by Anthropic for system opti
 </Note>
 
 ### Supported models
-All [active models](/docs/en/about-claude/models/overview) support token counting.
+All [active models](https://docs.claude.com/en/docs/about-claude/models/overview) support token counting.
 
 ### Count tokens in basic messages
 
@@ -207,7 +207,7 @@ puts response
 ### Count tokens in messages with tools
 
 <Note>
-[Server tool](/docs/en/agents-and-tools/tool-use/server-tools) token counts only apply to the first sampling call.
+[Server tool](../tools/server-tools.md) token counts only apply to the first sampling call.
 </Note>
 
 <CodeGroup>
@@ -887,7 +887,7 @@ puts response
 ### Count tokens in messages with extended thinking
 
 <Note>
-See [how the context window is calculated with extended thinking](/docs/en/build-with-claude/extended-thinking#how-context-window-is-calculated-with-extended-thinking) for more details
+See [how the context window is calculated with extended thinking](../model-capabilities/extended-thinking.md#how-context-window-is-calculated-with-extended-thinking) for more details
 - Thinking blocks from **previous** assistant turns are ignored and **do not** count toward your input tokens
 - **Current** assistant turn thinking **does** count toward your input tokens
 </Note>
@@ -1263,7 +1263,7 @@ puts response
 ### Count tokens in messages with PDFs
 
 <Note>
-Token counting supports PDFs with the same [limitations](/docs/en/build-with-claude/pdf-support#pdf-support-limitations) as the Messages API.
+Token counting supports PDFs with the same [limitations](../files/pdf-support.md#pdf-support-limitations) as the Messages API.
 </Note>
 
 <CodeGroup>
@@ -1598,7 +1598,7 @@ puts response
 
 ## Pricing and rate limits
 
-Token counting is **free to use** but subject to requests per minute rate limits based on your [usage tier](/docs/en/api/rate-limits#rate-limits). If you need higher limits, contact sales through the [Claude Console](/settings/limits).
+Token counting is **free to use** but subject to requests per minute rate limits based on your [usage tier](../admin/monitoring/rate-limits-api.md#rate-limits). If you need higher limits, contact sales through the [Claude Console](/settings/limits).
 
 | Usage tier | Requests per minute (RPM) |
 |------------|---------------------------|

@@ -11,7 +11,7 @@ Fast mode is in beta (research preview). [Join the waitlist](https://claude.com/
 </Note>
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 ## Supported models
@@ -227,10 +227,10 @@ Fast mode is priced at 6x standard Opus rates across the full context window, in
 
 Fast mode pricing stacks with other pricing modifiers:
 
-- [Prompt caching multipliers](/docs/en/about-claude/pricing#model-pricing) apply on top of fast mode pricing
-- [Data residency](/docs/en/build-with-claude/data-residency) multipliers apply on top of fast mode pricing
+- [Prompt caching multipliers](https://docs.claude.com/en/docs/about-claude/pricing#model-pricing) apply on top of fast mode pricing
+- [Data residency](../admin/data-compliance/data-residency.md) multipliers apply on top of fast mode pricing
 
-For complete pricing details, see the [pricing page](/docs/en/about-claude/pricing#fast-mode-pricing).
+For complete pricing details, see the [pricing page](https://docs.claude.com/en/docs/about-claude/pricing#fast-mode-pricing).
 
 ## Rate limits
 
@@ -247,7 +247,7 @@ The response includes headers that indicate your fast mode rate limit status:
 | `anthropic-fast-output-tokens-remaining` | Remaining fast mode output tokens |
 | `anthropic-fast-output-tokens-reset` | Time when the fast mode output token limit resets |
 
-For tier-specific rate limits, see the [rate limits page](/docs/en/api/rate-limits).
+For tier-specific rate limits, see the [rate limits page](../admin/monitoring/rate-limits-api.md).
 
 ## Checking which speed was used
 
@@ -426,7 +426,7 @@ puts(response.usage.speed)  # "fast" or "standard"
 }
 ```
 
-To track fast mode usage and costs across your organization, see the [Usage and Cost API](/docs/en/build-with-claude/usage-cost-api).
+To track fast mode usage and costs across your organization, see the [Usage and Cost API](../admin/monitoring/usage-and-cost-api.md).
 
 ## Retries and fallback
 
@@ -439,7 +439,7 @@ When fast mode rate limits are exceeded, the API returns a `429` error with a `r
 If you'd prefer to fall back to standard speed rather than wait for fast mode capacity, catch the rate limit error and retry without `speed: "fast"`. Set `max_retries` to `0` on the initial fast request to skip automatic retries and fail immediately on rate limit errors.
 
 <Note>
-Falling back from fast to standard speed will result in a [prompt cache](/docs/en/build-with-claude/prompt-caching) miss. Requests at different speeds do not share cached prefixes.
+Falling back from fast to standard speed will result in a [prompt cache](../context-management/prompt-caching.md) miss. Requests at different speeds do not share cached prefixes.
 </Note>
 
 Since setting `max_retries` to `0` also disables retries for other transient errors (overloaded, internal server errors), the examples below re-issue the original request with default retries for those cases.
@@ -809,8 +809,8 @@ message = create_message_with_fast_fallback(
 - **Prompt caching:** Switching between fast and standard speed invalidates the prompt cache. Requests at different speeds do not share cached prefixes.
 - **Supported models:** Fast mode is currently supported on Opus 4.6 only. Sending `speed: "fast"` with an unsupported model returns an error.
 - **TTFT:** Fast mode's benefits are focused on output tokens per second (OTPS), not time to first token (TTFT).
-- **Batch API:** Fast mode is not available with the [Batch API](/docs/en/build-with-claude/batch-processing).
-- **Priority Tier:** Fast mode is not available with [Priority Tier](/docs/en/api/service-tiers).
+- **Batch API:** Fast mode is not available with the [Batch API](batch-processing.md).
+- **Priority Tier:** Fast mode is not available with [Priority Tier](https://docs.claude.com/en/docs/api/service-tiers).
 
 ## Next steps
 

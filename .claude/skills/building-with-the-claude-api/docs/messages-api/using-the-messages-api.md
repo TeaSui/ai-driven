@@ -12,12 +12,12 @@ Anthropic offers two ways to build with Claude, each suited to different use cas
 |---|---|---|
 | **What it is** | Direct model prompting access | Pre-built, configurable agent harness that runs in managed infrastructure |
 | **Best for** | Custom agent loops and fine-grained control | Long-running tasks and asynchronous work |
-| **Learn more** | [Messages API docs](/docs/en/build-with-claude/working-with-messages) | [Claude Managed Agents docs](/docs/en/managed-agents/overview) |
+| **Learn more** | [Messages API docs](features-overview.md) | [Claude Managed Agents docs](../managed-agents/index.md) |
 
-This guide covers common patterns for working with the Messages API, including basic requests, multi-turn conversations, prefill techniques, and vision capabilities. For complete API specifications, see the [Messages API reference](/docs/en/api/messages/create).
+This guide covers common patterns for working with the Messages API, including basic requests, multi-turn conversations, prefill techniques, and vision capabilities. For complete API specifications, see the [Messages API reference](https://docs.claude.com/en/docs/api/messages/create).
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 ## Basic request and response
@@ -615,12 +615,12 @@ You can pre-fill part of Claude's response in the last position of the input mes
 ```
 
 <Warning>
-Prefilling is not supported on [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6. Requests using prefill with these models return a 400 error. Use [structured outputs](/docs/en/build-with-claude/structured-outputs) or system prompt instructions instead. See the [migration guide](/docs/en/about-claude/models/migration-guide) for migration patterns.
+Prefilling is not supported on [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6. Requests using prefill with these models return a 400 error. Use [structured outputs](../model-capabilities/structured-outputs.md) or system prompt instructions instead. See the [migration guide](https://docs.claude.com/en/docs/about-claude/models/migration-guide) for migration patterns.
 </Warning>
 
 ## Vision
 
-Claude can read both text and images in requests. Images can be supplied using the `base64`, `url`, or `file` source types. The `file` source type references an image uploaded through the [Files API](/docs/en/build-with-claude/files). Supported media types are `image/jpeg`, `image/png`, `image/gif`, and `image/webp`. See the [vision guide](/docs/en/build-with-claude/vision) for more details.
+Claude can read both text and images in requests. Images can be supplied using the `base64`, `url`, or `file` source types. The `file` source type references an image uploaded through the [Files API](../files/files-api.md). Supported media types are `image/jpeg`, `image/png`, `image/gif`, and `image/webp`. See the [vision guide](../files/images-and-vision.md) for more details.
 
 <CodeGroup>
   ```bash cURL
@@ -1206,6 +1206,6 @@ Claude can read both text and images in requests. Images can be supplied using t
 
 ## Tool use and computer use
 
-See the [tool use guide](/docs/en/agents-and-tools/tool-use/overview) for examples of how to use tools with the Messages API.
-See the [computer use guide](/docs/en/agents-and-tools/tool-use/computer-use-tool) for examples of how to control desktop computer environments with the Messages API.
-For guaranteed JSON output, see [Structured Outputs](/docs/en/build-with-claude/structured-outputs).
+See the [tool use guide](../tools/tool-use-overview.md) for examples of how to use tools with the Messages API.
+See the [computer use guide](../tools/computer-use-tool.md) for examples of how to control desktop computer environments with the Messages API.
+For guaranteed JSON output, see [Structured Outputs](../model-capabilities/structured-outputs.md).

@@ -216,6 +216,56 @@ function TaskRow({ task }: { task: Task }) {
 
 // ── Column header ─────────────────────────────────────────────────────────────
 
+/**
+ * ClarificationBanner — surfaces any coding tasks currently paused on
+ * a human.ask_clarification call. Rendered at the top of the Coding
+ * Agent list page as a compact notice with per-task links; the full
+ * form (questions + Submit answers) lives on the task detail page so
+ * there's a single source of truth for answering.
+ */
+function ClarificationBanner({ tasks }: { tasks: Task[] }) {
+  const paused = tasks.filter((t) => t.status === 'awaiting_input')
+  if (paused.length === 0) return null
+  return (
+    <div
+      role="region"
+      aria-label="Coding tasks awaiting your input"
+      style={{
+        margin: '12px 20px 0',
+        padding: '10px 14px',
+        borderRadius: 8,
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--brand-teal-200)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Pill tone="warn" size="xs" dot>Awaiting your input</Pill>
+        <span style={{ fontSize: 12, color: 'var(--text)' }}>
+          {paused.length} coding {paused.length === 1 ? 'run is' : 'runs are'} paused on a clarification.
+        </span>
+      </div>
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {paused.map((t) => (
+          <li key={t.id} style={{ fontSize: 12.5 }}>
+            <Link
+              href={`/dashboard/tasks/${t.id}`}
+              style={{ color: 'var(--brand-teal-700)', textDecoration: 'none', fontWeight: 600, marginRight: 8 }}
+            >
+              {t.jiraKey ?? t.id.slice(0, 8)}
+            </Link>
+            <span style={{ color: 'var(--text-muted)' }}>
+              {t.title || 'untitled'} — open the task to answer.
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function TableHeader() {
   return (
     <div
@@ -284,6 +334,9 @@ export default function TasksPage() {
           </div>
         </div>
       </header>
+
+      {/* HITL banner — any coding task currently paused on a clarification */}
+      <ClarificationBanner tasks={codingTasks} />
 
       {/* Content */}
       <div style={{ padding: '16px 20px 24px', flex: 1 }} aria-live="polite" aria-atomic="false">

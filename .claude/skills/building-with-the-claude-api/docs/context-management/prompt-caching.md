@@ -5,7 +5,7 @@
 Prompt caching optimizes your API usage by allowing resuming from specific prefixes in your prompts. This significantly reduces processing time and costs for repetitive tasks or prompts with consistent elements.
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 There are two ways to enable prompt caching:
@@ -275,10 +275,10 @@ Prompt caching introduces a new pricing structure. The table below shows the pri
 | Claude Sonnet 4.6   | $3 / MTok         | $3.75 / MTok    | $6 / MTok       | $0.30 / MTok | $15 / MTok    |
 | Claude Sonnet 4.5   | $3 / MTok         | $3.75 / MTok    | $6 / MTok       | $0.30 / MTok | $15 / MTok    |
 | Claude Sonnet 4   | $3 / MTok         | $3.75 / MTok    | $6 / MTok       | $0.30 / MTok | $15 / MTok    |
-| Claude Sonnet 3.7 ([deprecated](/docs/en/about-claude/model-deprecations)) | $3 / MTok         | $3.75 / MTok    | $6 / MTok       | $0.30 / MTok | $15 / MTok    |
+| Claude Sonnet 3.7 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations)) | $3 / MTok         | $3.75 / MTok    | $6 / MTok       | $0.30 / MTok | $15 / MTok    |
 | Claude Haiku 4.5  | $1 / MTok         | $1.25 / MTok    | $2 / MTok       | $0.10 / MTok | $5 / MTok     |
 | Claude Haiku 3.5  | $0.80 / MTok      | $1 / MTok       | $1.6 / MTok     | $0.08 / MTok | $4 / MTok     |
-| Claude Opus 3 ([deprecated](/docs/en/about-claude/model-deprecations))    | $15 / MTok        | $18.75 / MTok   | $30 / MTok      | $1.50 / MTok | $75 / MTok    |
+| Claude Opus 3 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations))    | $15 / MTok        | $18.75 / MTok   | $30 / MTok      | $1.50 / MTok | $75 / MTok    |
 | Claude Haiku 3    | $0.25 / MTok      | $0.30 / MTok    | $0.50 / MTok    | $0.03 / MTok | $1.25 / MTok  |
 
 <Note>
@@ -287,14 +287,14 @@ The table above reflects the following pricing multipliers for prompt caching:
 - 1-hour cache write tokens are 2 times the base input tokens price
 - Cache read tokens are 0.1 times the base input tokens price
 
-These multipliers stack with other pricing modifiers such as the Batch API discount and data residency. See [pricing](/docs/en/about-claude/pricing) for full details.
+These multipliers stack with other pricing modifiers such as the Batch API discount and data residency. See [pricing](https://docs.claude.com/en/docs/about-claude/pricing) for full details.
 </Note>
 
 ---
 
 ## Supported models
 
-Prompt caching (both automatic and explicit) is supported on all [active Claude models](/docs/en/about-claude/models/overview).
+Prompt caching (both automatic and explicit) is supported on all [active Claude models](https://docs.claude.com/en/docs/about-claude/models/overview).
 
 ---
 
@@ -660,11 +660,11 @@ Adding more `cache_control` breakpoints doesn't increase your costs - you still 
 The minimum cacheable prompt length is:
 - 4096 tokens for [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, and Claude Opus 4.5
 - 2048 tokens for Claude Sonnet 4.6
-- 1024 tokens for Claude Sonnet 4.5, Claude Opus 4.1, Claude Opus 4, Claude Sonnet 4, and Claude Sonnet 3.7 ([deprecated](/docs/en/about-claude/model-deprecations))
+- 1024 tokens for Claude Sonnet 4.5, Claude Opus 4.1, Claude Opus 4, Claude Sonnet 4, and Claude Sonnet 3.7 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations))
 - 4096 tokens for Claude Haiku 4.5
-- 2048 tokens for Claude Haiku 3.5 ([deprecated](/docs/en/about-claude/model-deprecations))
+- 2048 tokens for Claude Haiku 3.5 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations))
 
-Shorter prompts cannot be cached, even if marked with `cache_control`. Any requests to cache fewer than this number of tokens will be processed without caching, and no error is returned. To verify whether a prompt was cached, check the response usage [fields](/docs/en/build-with-claude/prompt-caching#tracking-cache-performance): if both `cache_creation_input_tokens` and `cache_read_input_tokens` are 0, the prompt was not cached (likely because it did not meet the minimum length requirement).
+Shorter prompts cannot be cached, even if marked with `cache_control`. Any requests to cache fewer than this number of tokens will be processed without caching, and no error is returned. To verify whether a prompt was cached, check the response usage [fields](prompt-caching.md#tracking-cache-performance): if both `cache_creation_input_tokens` and `cache_read_input_tokens` are 0, the prompt was not cached (likely because it did not meet the minimum length requirement).
 
 If your prompt falls just short of the minimum for the model you are using, expanding the cached content to reach the threshold is often worthwhile. Cache reads cost significantly less than uncached input tokens, so reaching the minimum can reduce costs for frequently reused prompts.
 
@@ -687,7 +687,7 @@ Each of these elements can be cached, either automatically or by marking them wi
 While most request blocks can be cached, there are some exceptions:
 
 - Thinking blocks cannot be cached directly with `cache_control`. However, thinking blocks CAN be cached alongside other content when they appear in previous assistant turns. When cached this way, they DO count as input tokens when read from cache.
-- Sub-content blocks (like [citations](/docs/en/build-with-claude/citations)) themselves cannot be cached directly. Instead, cache the top-level block.
+- Sub-content blocks (like [citations](../model-capabilities/citations.md)) themselves cannot be cached directly. Instead, cache the top-level block.
 
     In the case of citations, the top-level document content blocks that serve as the source material for citations can be cached. This allows you to use prompt caching with citations effectively by caching the documents that citations will reference.
 - Empty text blocks cannot be cached.
@@ -705,7 +705,7 @@ The following table shows which parts of the cache are invalidated by different 
 | **Tool definitions** | ✘ | ✘ | ✘ | Modifying tool definitions (names, descriptions, parameters) invalidates the entire cache |
 | **Web search toggle** | ✓ | ✘ | ✘ | Enabling/disabling web search modifies the system prompt |
 | **Citations toggle** | ✓ | ✘ | ✘ | Enabling/disabling citations modifies the system prompt |
-| **Speed setting** | ✓ | ✘ | ✘ | Switching between [`speed: "fast"` and standard speed](/docs/en/build-with-claude/fast-mode) invalidates system and message caches |
+| **Speed setting** | ✓ | ✘ | ✘ | Switching between [`speed: "fast"` and standard speed](../model-capabilities/fast-mode.md) invalidates system and message caches |
 | **Tool choice** | ✓ | ✓ | ✘ | Changes to `tool_choice` parameter only affect message blocks |
 | **Images** | ✓ | ✓ | ✘ | Adding/removing images anywhere in the prompt affects message blocks |
 | **Thinking parameters** | ✓ | ✓ | ✘ | Changes to extended thinking settings (enable/disable, budget) affect message blocks |
@@ -713,7 +713,7 @@ The following table shows which parts of the cache are invalidated by different 
 
 ### Tracking cache performance
 
-Monitor cache performance using these API response fields, within `usage` in the response (or `message_start` event if [streaming](/docs/en/build-with-claude/streaming)):
+Monitor cache performance using these API response fields, within `usage` in the response (or `message_start` event if [streaming](../model-capabilities/streaming-messages.md)):
 
 - `cache_creation_input_tokens`: Number of tokens written to the cache when creating a new entry.
 - `cache_read_input_tokens`: Number of tokens retrieved from the cache for this request.
@@ -745,7 +745,7 @@ This is important for understanding both costs and rate limits, as `input_tokens
 
 ### Caching with thinking blocks
 
-When using [extended thinking](/docs/en/build-with-claude/extended-thinking) with prompt caching, thinking blocks have special behavior:
+When using [extended thinking](../model-capabilities/extended-thinking.md) with prompt caching, thinking blocks have special behavior:
 
 **Automatic caching alongside other content**: While thinking blocks cannot be explicitly marked with `cache_control`, they get cached as part of the request content when you make subsequent API calls with tool results. This commonly happens during tool use when you pass thinking blocks back to continue the conversation.
 
@@ -783,7 +783,7 @@ User: [Text response, cache=True]
 
 On earlier Opus/Sonnet models and all Haiku models, all previous thinking blocks are removed from context at this point. On Opus 4.5+ and Sonnet 4.6+, prior thinking blocks are kept by default and remain part of the cached prefix.
 
-For more detailed information, see the [extended thinking documentation](/docs/en/build-with-claude/extended-thinking#understanding-thinking-block-caching-behavior).
+For more detailed information, see the [extended thinking documentation](../model-capabilities/extended-thinking.md#understanding-thinking-block-caching-behavior).
 
 ### Cache storage and sharing
 
@@ -1239,11 +1239,11 @@ Keep in mind that the cache TTL still applies. For the default 5-minute cache, s
 A `max_tokens: 0` request is rejected with an `invalid_request_error` if any of the following are set, since each implies output that a zero-token budget cannot produce:
 
 - `stream: true`
-- [Extended thinking](/docs/en/build-with-claude/extended-thinking) (`thinking.type: "enabled"`)
-- [Structured outputs](/docs/en/build-with-claude/structured-outputs) (`output_config.format`)
+- [Extended thinking](../model-capabilities/extended-thinking.md) (`thinking.type: "enabled"`)
+- [Structured outputs](../model-capabilities/structured-outputs.md) (`output_config.format`)
 - `tool_choice` of `{"type": "tool", ...}` or `{"type": "any"}`
 
-`max_tokens: 0` is also rejected inside a [Message Batches](/docs/en/build-with-claude/batch-processing) request. Pre-warming targets time-to-first-token, which does not apply to batch processing, and a cache entry written during batch processing would likely expire before the follow-up request runs.
+`max_tokens: 0` is also rejected inside a [Message Batches](../model-capabilities/batch-processing.md) request. Pre-warming targets time-to-first-token, which does not apply to batch processing, and a cache entry written during batch processing would likely expire before the follow-up request runs.
 
 ### Replacing the max_tokens=1 workaround
 
@@ -1600,7 +1600,7 @@ Tool definitions can be cached by placing `cache_control` on the last tool in yo
 
 On the first request, `cache_creation_input_tokens` reflects the token count of all tool definitions. On subsequent requests within the cache lifetime, those tokens appear under `cache_read_input_tokens` instead.
 
-For detailed interaction between tool definitions, `defer_loading`, and cache invalidation, see [Tool use with prompt caching](/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching).
+For detailed interaction between tool definitions, `defer_loading`, and cache invalidation, see [Tool use with prompt caching](../tools/tool-use-with-prompt-caching.md).
 
 </section>
 
@@ -3023,7 +3023,7 @@ Prompt caching (both automatic and explicit) is ZDR eligible. Anthropic does not
 
 KV (key-value) cache representations and cryptographic hashes of cached content are held in memory only and are not stored at rest. Cached entries have a minimum lifetime of 5 minutes (standard) or 60 minutes (extended), after which they are promptly, though not immediately, deleted. Cache entries are isolated between organizations.
 
-For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ---
 ## FAQ
@@ -3092,7 +3092,7 @@ For ZDR eligibility across all features, see [API and data retention](/docs/en/b
 
   <section title="Is prompt caching available for all models?">
 
-    Prompt caching is supported on all [active Claude models](/docs/en/about-claude/models/overview).
+    Prompt caching is supported on all [active Claude models](https://docs.claude.com/en/docs/about-claude/models/overview).
   
 </section>
 
@@ -3102,7 +3102,7 @@ For ZDR eligibility across all features, see [API and data retention](/docs/en/b
 
     For more details on cache invalidation, see [What invalidates the cache](#what-invalidates-the-cache).
 
-    For more on extended thinking, including its interaction with tool use and prompt caching, see the [extended thinking documentation](/docs/en/build-with-claude/extended-thinking#extended-thinking-and-prompt-caching).
+    For more on extended thinking, including its interaction with tool use and prompt caching, see the [extended thinking documentation](../model-capabilities/extended-thinking.md#extended-thinking-and-prompt-caching).
   
 </section>
 
@@ -3164,7 +3164,7 @@ Note: Starting February 5, 2026, caches will be isolated per workspace instead o
 </section>
   <section title="Can I use prompt caching with the Batches API?">
 
-    Yes, it is possible to use prompt caching with your [Batches API](/docs/en/build-with-claude/batch-processing) requests. However, because asynchronous batch requests can be processed concurrently and in any order, cache hits are provided on a best-effort basis.
+    Yes, it is possible to use prompt caching with your [Batches API](../model-capabilities/batch-processing.md) requests. However, because asynchronous batch requests can be processed concurrently and in any order, cache hits are provided on a best-effort basis.
 
     The [1-hour cache](#1-hour-cache-duration) can help improve your cache hits. The most cost effective way of using it is the following:
     - Gather a set of message requests that have a shared prefix.

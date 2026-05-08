@@ -5,7 +5,7 @@
 <Tip>
 **For guaranteed JSON schema conformance**
 
-If you need Claude to always output valid JSON that conforms to a specific schema, use [Structured Outputs](/docs/en/build-with-claude/structured-outputs) instead of the prompt engineering techniques below. Structured outputs provide guaranteed schema compliance and are specifically designed for this use case.
+If you need Claude to always output valid JSON that conforms to a specific schema, use [Structured Outputs](../../model-capabilities/structured-outputs.md) instead of the prompt engineering techniques below. Structured outputs provide guaranteed schema compliance and are specifically designed for this use case.
 
 The techniques below are useful for general output consistency or when you need flexibility beyond strict JSON schemas.
 </Tip>
@@ -26,7 +26,7 @@ Precisely define your desired output format using JSON, XML, or custom templates
 
 ## Prefill Claude's response
 
-<Note>Prefilling is not supported on [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6. Use [structured outputs](/docs/en/build-with-claude/structured-outputs) or system prompt instructions instead.</Note>
+<Note>Prefilling is not supported on [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6. Use [structured outputs](../../model-capabilities/structured-outputs.md) or system prompt instructions instead.</Note>
 
 Prefill the `Assistant` turn with your desired format. This trick bypasses Claude's friendly preamble and enforces your structure.
 
@@ -71,7 +71,7 @@ Break down complex tasks into smaller, consistent subtasks. Each subtask gets Cl
 
 For role-based applications, maintaining consistent character requires deliberate prompting.
 
-- **Use system prompts to set the role:** Use [system prompts](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#give-claude-a-role) to define Claude's role and personality. This sets a strong foundation for consistent responses.
+- **Use system prompts to set the role:** Use [system prompts](../prompt-engineering/prompting-best-practices.md#give-claude-a-role) to define Claude's role and personality. This sets a strong foundation for consistent responses.
     <Tip>When setting up the character, provide detailed information about the personality, background, and any specific traits or quirks. This will help the model better emulate and generalize the character's traits.</Tip>
 - **Prepare Claude for possible scenarios:** Provide a list of common scenarios and expected responses in your prompts. This "trains" Claude to handle diverse situations without breaking character.
 

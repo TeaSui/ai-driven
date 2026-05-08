@@ -5,15 +5,15 @@
 Claude can interact with computer environments through the computer use tool, which provides screenshot capabilities and mouse/keyboard control for autonomous desktop interaction. On [WebArena](https://webarena.dev/), a benchmark for autonomous web navigation across real websites, Claude achieves state-of-the-art results among single-agent systems, demonstrating strong ability to complete multi-step browser tasks end to end.
 
 <Note>
-Computer use is in beta and requires a [beta header](/docs/en/api/beta-headers):
+Computer use is in beta and requires a [beta header](https://docs.claude.com/en/docs/api/beta-headers):
 - `"computer-use-2025-11-24"` for Claude Opus 4.7, Claude Opus 4.6, Claude Sonnet 4.6, Claude Opus 4.5
-- `"computer-use-2025-01-24"` for Sonnet 4.5, Haiku 4.5, Opus 4.1, Sonnet 4, Opus 4, and Sonnet 3.7 ([deprecated](/docs/en/about-claude/model-deprecations))
+- `"computer-use-2025-01-24"` for Sonnet 4.5, Haiku 4.5, Opus 4.1, Sonnet 4, Opus 4, and Sonnet 3.7 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations))
 
 Reach out through the [feedback form](https://forms.gle/H6UFuXaaLywri9hz6) to share your feedback on this feature.
 </Note>
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 ## Overview
@@ -27,7 +27,7 @@ Computer use is a beta feature that enables Claude to interact with desktop envi
 
 While computer use can be augmented with other tools like bash and text editor for more comprehensive automation workflows, computer use specifically refers to the computer use tool's capability to see and control desktop environments.
 
-For model support, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference).
+For model support, see the [Tool reference](../tool-infrastructure/tool-reference.md).
 
 ## Security considerations
 
@@ -547,7 +547,7 @@ Here are some tips on how to get the best quality outputs:
 2. Claude sometimes assumes outcomes of its actions without explicitly checking their results. To prevent this you can prompt Claude with `After each step, take a screenshot and carefully evaluate if you have achieved the right outcome. Explicitly show your thinking: "I have evaluated step X..." If not correct, try again. Only when you confirm a step was executed correctly should you move on to the next one.`
 3. Some UI elements (like dropdowns and scrollbars) might be tricky for Claude to manipulate using mouse movements. If you experience this, try prompting the model to use keyboard shortcuts.
 4. For repeatable tasks or UI interactions, include example screenshots and tool calls of successful outcomes in your prompt.
-5. If you need the model to log in, provide it with the username and password in your prompt inside xml tags like `<robot_credentials>`. Using computer use within applications that require login increases the risk of bad outcomes as a result of prompt injection. Review the [guide on mitigating prompt injections](/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks) before providing the model with login credentials.
+5. If you need the model to log in, provide it with the username and password in your prompt inside xml tags like `<robot_credentials>`. Using computer use within applications that require login increases the risk of bad outcomes as a result of prompt injection. Review the [guide on mitigating prompt injections](../best-practices/guardrails/mitigate-jailbreaks-and-prompt-injections.md) before providing the model with login credentials.
 
 <Tip>
   If you repeatedly encounter a clear set of issues or know in advance the tasks
@@ -565,7 +565,7 @@ Here are some tips on how to get the best quality outputs:
 
 ### System prompts
 
-When one of the Anthropic-schema tools is requested via the Claude API, a computer use-specific system prompt is generated. It's similar to the [tool use system prompt](/docs/en/agents-and-tools/tool-use/define-tools#tool-use-system-prompt) but starts with:
+When one of the Anthropic-schema tools is requested via the Claude API, a computer use-specific system prompt is generated. It's similar to the [tool use system prompt](define-tools.md#tool-use-system-prompt) but starts with:
 
 > You have access to a set of functions you can use to answer the user's question. This includes access to a sandboxed computing environment. You do NOT currently have the ability to inspect files or interact with external resources, except by invoking the below functions.
 
@@ -714,11 +714,11 @@ The `text` parameter in click/scroll actions accepts modifier keys like `shift`,
 
 ### Combining with extended thinking
 
-For combining computer use with extended thinking, see [Extended thinking](/docs/en/build-with-claude/extended-thinking).
+For combining computer use with extended thinking, see [Extended thinking](../model-capabilities/extended-thinking.md).
 
 ### Augmenting computer use with other tools
 
-To add other tools alongside computer use, include them in the same `tools` array. The quick start above shows this pattern with the [bash tool](/docs/en/agents-and-tools/tool-use/bash-tool) and [text editor tool](/docs/en/agents-and-tools/tool-use/text-editor-tool). You can add your own [custom tool definitions](/docs/en/agents-and-tools/tool-use/define-tools) the same way.
+To add other tools alongside computer use, include them in the same `tools` array. The quick start above shows this pattern with the [bash tool](bash-tool.md) and [text editor tool](text-editor-tool.md). You can add your own [custom tool definitions](define-tools.md) the same way.
 
 ### Build a custom computer use environment
 
@@ -894,7 +894,7 @@ If an action fails to execute:
 Claude Opus 4.7 supports up to 2576 pixels on the long edge, and its coordinates are 1\:1 with image pixels (no scale-factor conversion required). The 1568-pixel guidance below applies to earlier models.
 </Note>
 
-The API constrains images to a maximum of 1568 pixels on the longest edge and approximately 1.15 megapixels total (see [image resizing](/docs/en/build-with-claude/vision#evaluate-image-size) for details). For example, a 1512x982 screen gets downsampled to approximately 1330x864. Claude analyzes this smaller image and returns coordinates in that space, but your tool executes clicks in the original screen space.
+The API constrains images to a maximum of 1568 pixels on the longest edge and approximately 1.15 megapixels total (see [image resizing](../files/images-and-vision.md#evaluate-image-size) for details). For example, a 1512x982 screen gets downsampled to approximately 1330x864. Claude analyzes this smaller image and returns coordinates in that space, but your tool executes clicks in the original screen space.
 
 This can cause Claude's click coordinates to miss their targets unless you handle the coordinate transformation.
 
@@ -1066,11 +1066,11 @@ Always carefully review and verify Claude's computer use actions and logs. Do no
 
 Computer use is a client-side tool. All screenshots, mouse actions, keyboard inputs, and any files involved in a session are captured and stored in your environment, not by Anthropic. Anthropic processes the screenshot images and action requests in real time as part of the API call but does not retain them after the response is returned.
 
-Because your application controls where and how computer use data is stored, computer use is ZDR eligible. For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+Because your application controls where and how computer use data is stored, computer use is ZDR eligible. For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Pricing
 
-Computer use follows the standard [tool use pricing](/docs/en/agents-and-tools/tool-use/overview#pricing). When using the computer use tool:
+Computer use follows the standard [tool use pricing](tool-use-overview.md#pricing). When using the computer use tool:
 
 **System prompt overhead**: The computer use beta adds 466-499 tokens to the system prompt
 
@@ -1078,10 +1078,10 @@ Computer use follows the standard [tool use pricing](/docs/en/agents-and-tools/t
 | Model | Input tokens per tool definition |
 | ----- | -------------------------------- |
 | Claude 4.x models | 735 tokens |
-| Claude Sonnet 3.7 ([deprecated](/docs/en/about-claude/model-deprecations)) | 735 tokens |
+| Claude Sonnet 3.7 ([deprecated](https://docs.claude.com/en/docs/about-claude/model-deprecations)) | 735 tokens |
 
 **Additional token consumption**:
-- Screenshot images (see [Vision pricing](/docs/en/build-with-claude/vision))
+- Screenshot images (see [Vision pricing](../files/images-and-vision.md))
 - Tool execution results returned to Claude
 
 <Note>

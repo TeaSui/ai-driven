@@ -4,7 +4,7 @@ Enable and format parallel tool calls, with message-history guidance and trouble
 
 ---
 
-This page covers parallel tool calls: when Claude calls multiple tools in one turn, how to format the message history so parallelism keeps working, and how to disable it. For the single-call flow, see [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls).
+This page covers parallel tool calls: when Claude calls multiple tools in one turn, how to format the message history so parallelism keeps working, and how to disable it. For the single-call flow, see [Handle tool calls](handle-tool-calls.md).
 
 By default, Claude may use multiple tools to answer a user query. You can disable this behavior by:
 
@@ -14,7 +14,7 @@ By default, Claude may use multiple tools to answer a user query. You can disabl
 ## Worked example
 
 <Note>
-**Simpler with Tool Runner**: The example below shows manual parallel tool handling. For most use cases, [Tool Runner](/docs/en/agents-and-tools/tool-use/tool-runner) automatically handles parallel tool execution with much less code.
+**Simpler with Tool Runner**: The example below shows manual parallel tool handling. For most use cases, [Tool Runner](tool-runner-sdk.md) automatically handles parallel tool execution with much less code.
 </Note>
 
 Here's a complete, runnable script to test and verify parallel tool calls are working correctly:
@@ -899,7 +899,7 @@ Specifically for parallel tool use:
 ]
 ```
 
-See [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls) for other formatting rules.
+See [Handle tool calls](handle-tool-calls.md) for other formatting rules.
 
 **2. Weak prompting**
 
@@ -927,6 +927,6 @@ print(f"Average tools per message: {avg_tools_per_message}")
 
 ## Next steps
 
-- For the single-tool-call flow and `tool_result` formatting rules, see [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls).
-- For the SDK abstraction that handles parallel execution automatically, see [Tool Runner](/docs/en/agents-and-tools/tool-use/tool-runner).
-- For the full tool-use workflow, see [Define tools](/docs/en/agents-and-tools/tool-use/define-tools).
+- For the single-tool-call flow and `tool_result` formatting rules, see [Handle tool calls](handle-tool-calls.md).
+- For the SDK abstraction that handles parallel execution automatically, see [Tool Runner](tool-runner-sdk.md).
+- For the full tool-use workflow, see [Define tools](define-tools.md).

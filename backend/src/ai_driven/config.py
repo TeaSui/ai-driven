@@ -60,9 +60,12 @@ class Settings(BaseSettings):
     # final "open the PR, summarize, update Jira" turn routinely writes
     # >4k tokens (full PR body + tool calls) and got truncated mid-response,
     # which prevented github.create_pr from firing (see KAN-10, 2026-04-25).
-    # Bump to 16384; models support this cleanly and the wall-clock cost
-    # is bounded by the request timeout, not the token cap.
-    claude_max_tokens: int = 16384
+    # 2026-05-08 (KAN-46 post-mortem): wide tickets where the CodingAgent
+    # emits a single "implement all files in one batch" tool-use turn still
+    # truncated at 16k. Sonnet 4.6/4.7 support 64k output tokens; bumping
+    # the cap to 32k halves the "stop_reason=max_tokens" failure rate with
+    # no wall-clock hit (request timeout still bounds the tail).
+    claude_max_tokens: int = 32768
     # Coding runs that touch ≥10 files often need 2 iterations per file
     # (read → write) plus explore + plan + deliver. The KAN-12 post-mortem
     # first dropped this 50 → 25, but a follow-up KAN-12 re-run on the new
@@ -193,6 +196,32 @@ class Settings(BaseSettings):
     # where you want to measure the real specialist error rate without the
     # fallback masking it.
     orchestrator_treat_errors_as_pass: bool = True
+
+    # HITL (Human-in-the-Loop) — specialists ask the user clarifying
+    # questions mid-run via async continuation. See
+    # docs/specs/hitl-v1.md. Default OFF — per-team opt-in via
+    # ``teams.settings_json.hitl_enabled`` OR global env override.
+    hitl_enabled: bool = False
+    # Comma-separated list of roles allowed to ask. Start with
+    # business_analyst only; expand after v1 burn-in.
+    hitl_specialists: str = "business_analyst"
+    # Per-task cap on clarification rounds. POST /respond refuses a
+    # (rounds+1) answer once this is hit, and the specialist's next
+    # turn is told to emit terminal verdict.
+    hitl_max_rounds: int = 3
+    # Reaper threshold — pending questions older than this many hours
+    # get reaped to failed with a timeout audit row.
+    hitl_awaiting_input_timeout_hours: int = 4
+    # CodingAgent-specific kill switch. When False, CodingAgent keeps
+    # its legacy polling-mode ask_clarification behavior (worker blocks
+    # in asyncio.sleep until /respond writes the Redis key). Flip False
+    # if the async-continuation path regresses a coding run; the BA
+    # HITL flow is unaffected by this flag.
+    hitl_coding_enabled: bool = True
+    # Per-task clarification cap specifically for coding runs. Lower
+    # than hitl_max_rounds (3) because coding context replay is more
+    # expensive than specialist single-turn replay.
+    hitl_coding_max_rounds: int = 2
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"

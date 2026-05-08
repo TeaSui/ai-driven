@@ -4,7 +4,7 @@ Work with Anthropic-executed tools: server_tool_use blocks, pause_turn continuat
 
 ---
 
-This page covers the shared mechanics of server-executed tools: the `server_tool_use` block, `pause_turn` continuation, ZDR considerations, and domain filtering. For individual tools, see the [tool reference](/docs/en/agents-and-tools/tool-use/tool-reference).
+This page covers the shared mechanics of server-executed tools: the `server_tool_use` block, `pause_turn` continuation, ZDR considerations, and domain filtering. For individual tools, see the [tool reference](../tool-infrastructure/tool-reference.md).
 
 ## The server_tool_use block
 
@@ -408,7 +408,7 @@ When handling `pause_turn`:
 
 ## ZDR and allowed_callers
 
-The basic versions of web search (`web_search_20250305`) and web fetch (`web_fetch_20250910`) are eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/zero-data-retention).
+The basic versions of web search (`web_search_20250305`) and web fetch (`web_fetch_20250910`) are eligible for [Zero Data Retention (ZDR)](https://docs.claude.com/en/docs/build-with-claude/zero-data-retention).
 
 The `_20260209` versions with dynamic filtering are **not** ZDR-eligible by default because dynamic filtering relies on code execution internally.
 
@@ -474,11 +474,11 @@ Including a standalone `code_execution` tool alongside `_20260209` versions of w
 
 Server-tool events stream as part of the normal SSE flow. The `server_tool_use` block and its result arrive as `content_block_start` and `content_block_delta` events, the same way text and client tool calls stream.
 
-See [Streaming](/docs/en/build-with-claude/streaming) for the full event reference. Individual tool pages document tool-specific event names where they differ.
+See [Streaming](../model-capabilities/streaming-messages.md) for the full event reference. Individual tool pages document tool-specific event names where they differ.
 
 ## Batch requests
 
-All server tools support batch processing. See [Batch processing](/docs/en/build-with-claude/batch-processing).
+All server tools support batch processing. See [Batch processing](../model-capabilities/batch-processing.md).
 
 ## Next steps
 

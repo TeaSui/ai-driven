@@ -2,7 +2,7 @@
 
 ---
 
-Programmatic tool calling allows Claude to write code that calls your tools programmatically within a [code execution](/docs/en/agents-and-tools/tool-use/code-execution-tool) container, rather than requiring round trips through the model for each tool invocation. This reduces latency for multi-tool workflows and decreases token consumption by allowing Claude to filter or process data before it reaches the model's context window. On agentic search benchmarks like [BrowseComp](https://arxiv.org/abs/2504.12516) and [DeepSearchQA](https://github.com/google-deepmind/deepsearchqa), which test multi-step web research and complex information retrieval, adding programmatic tool calling on top of basic search tools was the key factor that fully unlocked agent performance.
+Programmatic tool calling allows Claude to write code that calls your tools programmatically within a [code execution](../tools/code-execution-tool.md) container, rather than requiring round trips through the model for each tool invocation. This reduces latency for multi-tool workflows and decreases token consumption by allowing Claude to filter or process data before it reaches the model's context window. On agentic search benchmarks like [BrowseComp](https://arxiv.org/abs/2504.12516) and [DeepSearchQA](https://github.com/google-deepmind/deepsearchqa), which test multi-step web research and complex information retrieval, adding programmatic tool calling on top of basic search tools was the key factor that fully unlocked agent performance.
 
 The difference compounds fast in real workflows. Consider checking budget compliance across 20 employees: the traditional approach requires 20 separate model round-trips, pulling thousands of expense line items into the context along the way. With programmatic tool calling, a single script runs all 20 lookups, filters the results, and returns only the employees who exceeded their limits, shrinking what Claude needs to reason over from hundreds of kilobytes down to a handful of lines.
 
@@ -15,7 +15,7 @@ This feature requires the code execution tool to be enabled.
 </Note>
 
 <Note>
-This feature is **not** eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). Data is retained according to the feature's standard retention policy.
+This feature is **not** eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). Data is retained according to the feature's standard retention policy.
 </Note>
 
 ## Model compatibility
@@ -30,7 +30,7 @@ Programmatic tool calling requires `code_execution_20260120`, which is supported
 | Claude Opus 4.5 (`claude-opus-4-5-20251101`) |
 | Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) |
 
-For the full code execution tool version matrix, see the [code execution tool model compatibility table](/docs/en/agents-and-tools/tool-use/code-execution-tool#model-compatibility). Programmatic tool calling is available via the Claude API and Microsoft Foundry.
+For the full code execution tool version matrix, see the [code execution tool model compatibility table](../tools/code-execution-tool.md#model-compatibility). Programmatic tool calling is available via the Claude API and Microsoft Foundry.
 
 ## Quick start
 
@@ -1256,7 +1256,7 @@ Claude's code receives this error and can handle it appropriately.
 
 The following tools cannot currently be called programmatically, but support may be added in future releases:
 
-- Tools provided by an [MCP connector](/docs/en/agents-and-tools/mcp-connector)
+- Tools provided by an [MCP connector](../mcp/mcp-connector.md)
 
 ### Message formatting restrictions
 
@@ -1320,7 +1320,7 @@ For example, calling 10 tools directly uses ~10x the tokens of calling them prog
 
 ## Usage and pricing
 
-Programmatic tool calling uses the same pricing as code execution. See the [code execution pricing](/docs/en/agents-and-tools/tool-use/code-execution-tool#usage-and-pricing) for details.
+Programmatic tool calling uses the same pricing as code execution. See the [code execution pricing](../tools/code-execution-tool.md#usage-and-pricing) for details.
 
 <Note>
 Token counting for programmatic tool calls: Tool results from programmatic invocations do not count toward your input/output token usage. Only the final code execution result and Claude's response count.
@@ -1433,7 +1433,7 @@ Consider using Anthropic's managed solution if you're using the Claude API.
 
 Programmatic tool calling is built on the code execution infrastructure and uses the same sandbox containers. Container data, including execution artifacts and outputs, is retained for up to 30 days.
 
-For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Related features
 

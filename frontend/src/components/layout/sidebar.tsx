@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import useSWR from 'swr'
@@ -153,6 +153,18 @@ function IconKey({ size = 14 }: { size?: number }) {
   )
 }
 
+function IconLogOut({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'inline-block', flexShrink: 0 }}>
+      <path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3"/>
+      <path d="M10.5 11L14 8l-3.5-3"/>
+      <path d="M14 8H6"/>
+    </svg>
+  )
+}
+
 function IconSettings({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
@@ -203,9 +215,6 @@ const SUB_ITEMS: SubNavItem[] = [
   { id: 'rules',    label: 'Review rules', href: '/dashboard/admin/rules',    icon: <IconShield size={14}/> },
   { id: 'keys',     label: 'API keys',     href: '/dashboard/admin/api-keys', icon: <IconKey size={14}/> },
   { id: 'runs',     label: 'Run history',  href: '/dashboard/admin/runs',     icon: <IconClock size={14}/> },
-  // PR 2: Settings shell. Kept in the Configure sub-nav (not wired through
-  // the bottom-left gear icon, which is the sign-out button — see the
-  // `sidebar-sign-out` testid below).
   { id: 'settings', label: 'Settings',     href: '/dashboard/settings',       icon: <IconSettings size={13}/> },
 ]
 
@@ -297,6 +306,8 @@ export function Sidebar() {
   const NAV_ITEMS = buildNavItems(summary)
 
   const [teamName, setTeamName] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     authFetch('/api/admin/me')
@@ -305,7 +316,26 @@ export function Sidebar() {
       .catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (!menuOpen) return
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
   async function handleLogout() {
+    setMenuOpen(false)
     // Clears the session_token cookie server-side, revokes the Redis entry,
     // and also drops the legacy api_key cookie for belt-and-braces.
     await doLogout()
@@ -396,34 +426,87 @@ export function Sidebar() {
       </nav>
 
       {/* Team profile + theme toggle */}
-      <div style={{ padding: 10, borderTop: '1px solid var(--panel-border)', flexShrink: 0 }}>
+      <div ref={menuRef} style={{ position: 'relative', padding: 10, borderTop: '1px solid var(--panel-border)', flexShrink: 0 }}>
         {collapsed ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-            <Avatar name={teamName ?? 'Team'} size={28} />
+            <button
+              type="button"
+              aria-label={`${teamName ?? 'Team'} menu`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(v => !v)}
+              style={{
+                padding: 0, border: 'none', background: 'transparent',
+                borderRadius: '50%', cursor: 'pointer',
+              }}
+            >
+              <Avatar name={teamName ?? 'Team'} size={28} />
+            </button>
             <ThemeToggle iconOnly />
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 6px' }}>
-            <Avatar name={teamName ?? 'Team'} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {teamName ?? 'Loading...'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text-subtle)' }}>Team</div>
-            </div>
-            <ThemeToggle iconOnly />
             <button
+              type="button"
+              aria-label={`${teamName ?? 'Team'} menu`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen(v => !v)}
+              style={{
+                flex: 1, minWidth: 0,
+                display: 'flex', alignItems: 'center', gap: 9,
+                padding: '2px 4px',
+                border: 'none', background: 'transparent',
+                borderRadius: 6, cursor: 'pointer',
+                textAlign: 'left',
+                color: 'inherit',
+              }}
+            >
+              <Avatar name={teamName ?? 'Team'} size={28} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 12.5, fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {teamName ?? 'Loading...'}
+                </span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-subtle)' }}>Team</span>
+              </span>
+            </button>
+            <ThemeToggle iconOnly />
+          </div>
+        )}
+
+        {menuOpen && (
+          <div
+            role="menu"
+            aria-label="Account menu"
+            style={{
+              position: 'absolute',
+              left: 10, right: 10,
+              bottom: 'calc(100% - 4px)',
+              background: 'var(--panel)',
+              border: '1px solid var(--panel-border)',
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(10,20,22,0.12)',
+              padding: 4,
+              zIndex: 50,
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
               aria-label="Sign out"
               data-testid="sidebar-sign-out"
               onClick={handleLogout}
               style={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 44, height: 44, border: 'none',
-                background: 'transparent', color: 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', gap: 8,
+                width: '100%', padding: '8px 10px',
+                border: 'none', background: 'transparent',
+                color: 'var(--text)', fontSize: 13,
                 borderRadius: 6, cursor: 'pointer',
+                textAlign: 'left',
               }}
             >
-              <IconSettings size={13} />
+              <IconLogOut size={13} />
+              <span>Sign out</span>
             </button>
           </div>
         )}

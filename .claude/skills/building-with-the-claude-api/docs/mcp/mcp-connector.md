@@ -11,7 +11,7 @@ Claude's Model Context Protocol (MCP) connector feature enables you to connect t
 </Note>
 
 <Note>
-This feature is **not** eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). Data is retained according to the feature's standard retention policy.
+This feature is **not** eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). Data is retained according to the feature's standard retention policy.
 </Note>
 
 ## Key features
@@ -385,9 +385,9 @@ Each tool (whether configured in `default_config` or in `configs`) supports the 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `enabled` | boolean | `true` | Whether this tool is enabled |
-| `defer_loading` | boolean | `false` | If true, tool description is not sent to the model initially. Used with [Tool Search Tool](/docs/en/agents-and-tools/tool-use/tool-search-tool). |
+| `defer_loading` | boolean | `false` | If true, tool description is not sent to the model initially. Used with [Tool Search Tool](../tool-infrastructure/tool-search-tool.md). |
 
-For the full directory of Anthropic-provided tools and optional properties like `defer_loading`, see the [Tool reference](/docs/en/agents-and-tools/tool-use/tool-reference). For searching across large tool sets, see [Tool search tool](/docs/en/agents-and-tools/tool-use/tool-search-tool).
+For the full directory of Anthropic-provided tools and optional properties like `defer_loading`, see the [Tool reference](../tool-infrastructure/tool-reference.md). For searching across large tool sets, see [Tool search tool](../tool-infrastructure/tool-search-tool.md).
 
 ### Configuration merging
 
@@ -669,7 +669,7 @@ import {
 
 ### Use MCP tools
 
-Convert MCP tools for use with the SDK's [tool runner](/docs/en/agents-and-tools/tool-use/tool-runner), which handles tool execution automatically:
+Convert MCP tools for use with the SDK's [tool runner](../tools/tool-runner-sdk.md), which handles tool execution automatically:
 
 ```typescript nocheck hidelines={1}
 import Anthropic from "@anthropic-ai/sdk";
@@ -745,7 +745,7 @@ The conversion functions throw `UnsupportedMCPValueError` if an MCP value isn't 
 
 The MCP Connector is not covered by ZDR arrangements. Data exchanged with MCP servers, including tool definitions and execution results, is retained according to Anthropic's standard data retention policy.
 
-For ZDR eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Migration guide
 

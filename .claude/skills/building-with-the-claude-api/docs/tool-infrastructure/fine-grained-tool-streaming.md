@@ -5,10 +5,10 @@ Stream tool inputs character-by-character for latency-sensitive applications.
 ---
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
-Fine-grained tool streaming is generally available on all models and all platforms. It enables [streaming](/docs/en/build-with-claude/streaming) of tool use parameter values without buffering or JSON validation, reducing the latency to begin receiving large parameters.
+Fine-grained tool streaming is generally available on all models and all platforms. It enables [streaming](../model-capabilities/streaming-messages.md) of tool use parameter values without buffering or JSON validation, reducing the latency to begin receiving large parameters.
 
 <Warning>
 When using fine-grained tool streaming, you may potentially receive invalid or partial JSON inputs. Make sure to account for these edge cases in your code.
@@ -201,7 +201,7 @@ Chunk 2: ' new features comparison'
 
 <Warning>
 Because fine-grained streaming sends parameters without buffering or JSON validation, there is no guarantee that the resulting stream will complete in a valid JSON string.
-Particularly, if the [stop reason](/docs/en/build-with-claude/handling-stop-reasons) `max_tokens` is reached, the stream may end midway through a parameter and may be incomplete. You generally have to write specific support to handle when `max_tokens` is reached.
+Particularly, if the [stop reason](../messages-api/handling-stop-reasons.md) `max_tokens` is reached, the stream may end midway through a parameter and may be incomplete. You generally have to write specific support to handle when `max_tokens` is reached.
 </Warning>
 
 ## Accumulating tool input deltas

@@ -109,7 +109,25 @@ class TaskGrader:
         agent_output: str,
         agent_type: str = "coding",
     ) -> EvalResult:
-        """Grade an agent output on a single dimension."""
+        """Grade an agent output on a single dimension.
+
+        Provider-aware request shape:
+
+        * Anthropic Direct accepts the assistant-prefill pattern
+          (``{"role":"assistant","content":"```json\\n{"}`` +
+          ``stop_sequences=["```"]``) which strongly biases the model
+          toward valid JSON on round 1.
+        * Bedrock-hosted Claude REJECTS prefill with
+          ``ValidationException: "This model does not support assistant
+          message prefill. The conversation must end with a user
+          message."``
+
+        On Bedrock we drop the prefill and rely on ``_parse_grade``'s
+        markdown-fence fallback. Pre-fix, Bedrock graders threw on
+        every call and ``grade_all`` silently dropped every dimension,
+        so tasks ended with zero rows in ``task_evaluations`` and the
+        UI rendered nothing.
+        """
         dims = _AGENT_DIMENSIONS.get(agent_type, CODING_DIMENSIONS)
         description = dims.get(dimension, dimension)
         model = self._settings.claude_fast_model
@@ -120,22 +138,38 @@ class TaskGrader:
             f"<agent_output>\n{agent_output[:8000]}\n</agent_output>"
         )
 
-        # Use prefill + stop_sequences for reliable structured JSON output
-        # per Claude API best practice (avoids brittle markdown extraction).
+        # Match the rest of the codebase's convention: claude_provider
+        # is a str-valued enum that compares equal to the "bedrock"
+        # literal via __eq__ (see agents/specialists/base.py:377).
+        provider_is_bedrock = self._settings.claude_provider == "bedrock"
+
+        if provider_is_bedrock:
+            messages = [{"role": "user", "content": user_message}]
+            stop_sequences = None
+        else:
+            messages = [
+                {"role": "user", "content": user_message},
+                {"role": "assistant", "content": "```json\n{"},
+            ]
+            stop_sequences = ["```"]
+
         response = await self._provider.create_message(
             model=model,
             max_tokens=1024,
-            messages=[
-                {"role": "user", "content": user_message},
-                {"role": "assistant", "content": "```json\n{"},
-            ],
+            messages=messages,
             system=GRADER_SYSTEM_PROMPT,
             temperature=0.0,
-            stop_sequences=["```"],
+            stop_sequences=stop_sequences,
         )
 
-        # The prefill started with "{", so prepend it to the response text
-        raw_json = "{" + response.text
+        # Bedrock path gets raw text (may include ```json fences);
+        # Direct path gets everything AFTER the prefilled "{" so we
+        # must prepend "{" to re-form a parseable JSON object.
+        raw = response.text or ""
+        if provider_is_bedrock:
+            raw_json = raw
+        else:
+            raw_json = "{" + raw
         return self._parse_grade(raw_json, dimension, model)
 
     async def grade_all(
@@ -154,8 +188,14 @@ class TaskGrader:
             try:
                 result = await self.grade_dimension(dim, task_input, agent_output, agent_type)
                 results.append(result)
-            except Exception:
-                logger.warning("Failed to grade dimension: %s", dim)
+            except Exception as exc:  # noqa: BLE001
+                # Log the actual exception; the silent "Failed to grade
+                # dimension: X" line masked a Bedrock prefill rejection
+                # for weeks and left the UI with empty evaluations.
+                logger.warning(
+                    "evaluation.grade_failed dimension=%s error=%s",
+                    dim, exc, exc_info=True,
+                )
 
         return results
 

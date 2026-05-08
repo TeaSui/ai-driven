@@ -4,18 +4,18 @@ Anthropic's Claude models are now generally available through [Vertex AI](https:
 
 ---
 
-The Vertex API for accessing Claude is nearly-identical to the [Messages API](/docs/en/api/messages/create) and supports all of the same options, with two key differences:
+The Vertex API for accessing Claude is nearly-identical to the [Messages API](https://docs.claude.com/en/docs/api/messages/create) and supports all of the same options, with two key differences:
 
 * In Vertex, `model` is not passed in the request body. Instead, it is specified in the Google Cloud endpoint URL.
 * In Vertex, `anthropic_version` is passed in the request body (rather than as a header), and must be set to the value `vertex-2023-10-16`.
 
-Vertex is also supported by Anthropic's official [client SDKs](/docs/en/api/client-sdks). This guide walks you through making a request to Claude on Vertex AI using one of Anthropic's client SDKs.
+Vertex is also supported by Anthropic's official [client SDKs](https://docs.claude.com/en/docs/api/client-sdks). This guide walks you through making a request to Claude on Vertex AI using one of Anthropic's client SDKs.
 
 Note that this guide assumes you already have a GCP project that is able to use Vertex AI. See [using the Claude 3 models from Anthropic](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude) for more information on the setup required, as well as a full walkthrough.
 
 ## Install an SDK for accessing Vertex AI
 
-First, install Anthropic's [client SDK](/docs/en/api/client-sdks) for your language of choice.
+First, install Anthropic's [client SDK](https://docs.claude.com/en/docs/api/client-sdks) for your language of choice.
 
 <Tabs>
 <Tab title="Python">
@@ -335,9 +335,9 @@ The following examples show how to generate text from Claude on Vertex AI:
   ```
 </CodeGroup>
 
-See the [client SDKs](/docs/en/api/client-sdks) and the official [Vertex AI docs](https://cloud.google.com/vertex-ai/docs) for more details.
+See the [client SDKs](https://docs.claude.com/en/docs/api/client-sdks) and the official [Vertex AI docs](https://cloud.google.com/vertex-ai/docs) for more details.
 
-Claude is also available through [Amazon Bedrock](/docs/en/build-with-claude/claude-in-amazon-bedrock) and [Microsoft Foundry](/docs/en/build-with-claude/claude-in-microsoft-foundry).
+Claude is also available through [Amazon Bedrock](amazon-bedrock.md) and [Microsoft Foundry](microsoft-foundry.md).
 
 ## Activity logging
 
@@ -350,11 +350,11 @@ Turning on this service does not give Google or Anthropic any access to your con
 </Note>
 
 ## Feature support
-For all currently supported features on Vertex AI, see [API features overview](/docs/en/api/overview).
+For all currently supported features on Vertex AI, see [API features overview](https://docs.claude.com/en/docs/api/overview).
 
 ### Context window
 
-Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6 have a [1M-token context window](/docs/en/build-with-claude/context-windows) on Vertex AI. Other Claude models, including Sonnet 4.5 and Sonnet 4 (deprecated), have a 200k-token context window.
+Claude Opus 4.7, Claude Opus 4.6, and Claude Sonnet 4.6 have a [1M-token context window](../context-management/context-windows.md) on Vertex AI. Other Claude models, including Sonnet 4.5 and Sonnet 4 (deprecated), have a 200k-token context window.
 
 Vertex AI limits request payloads to 30 MB. When sending large documents or many images, you may reach this limit before the token limit.
 
@@ -906,4 +906,4 @@ Claude Mythos Preview is a research preview available to invited customers on Go
 - **Google Vertex AI pricing:** [cloud.google.com/vertex-ai/generative-ai/pricing](https://cloud.google.com/vertex-ai/generative-ai/pricing)
 - **Claude models documentation:** [Claude on Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude)
 - **Google blog post:** [Global endpoint for Claude models](https://cloud.google.com/blog/products/ai-machine-learning/global-endpoint-for-claude-models-generally-available-on-vertex-ai)
-- **Anthropic pricing details:** [Pricing documentation](/docs/en/about-claude/pricing#third-party-platform-pricing)
+- **Anthropic pricing details:** [Pricing documentation](https://docs.claude.com/en/docs/about-claude/pricing#third-party-platform-pricing)

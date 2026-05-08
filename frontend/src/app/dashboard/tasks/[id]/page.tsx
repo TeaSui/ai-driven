@@ -27,6 +27,7 @@ import {
   stopTask,
   respondToTask,
   extractPendingQuestion,
+  respondToClarification,
   getTaskFile,
   getTaskDiff,
 } from '@/lib/api'
@@ -482,13 +483,20 @@ function ClarificationCard({
     () => extractPendingQuestion(events, taskStatus), [events, taskStatus],
   )
   const [answer, setAnswer] = useState('')
+  const [batchAnswers, setBatchAnswers] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Clear local draft whenever a new question arrives or the current one is answered.
-  useEffect(() => { setAnswer(''); setError(null) }, [pending?.question])
+  // Clear local draft whenever a new question/round arrives.
+  useEffect(() => {
+    setAnswer('')
+    setBatchAnswers({})
+    setError(null)
+  }, [pending?.question, pending?.roundId])
 
   if (!pending) return null
+
+  const isBatch = !!(pending.roundId && pending.questions && pending.questions.length > 0)
 
   const submit = async (value: string) => {
     const trimmed = value.trim()
@@ -505,53 +513,159 @@ function ClarificationCard({
     }
   }
 
+  const submitBatch = async () => {
+    if (!pending.roundId || !pending.questions) return
+    // Require at least one answer; empty answers are allowed for
+    // individual questions (the BA is trained to fall back to
+    // best-guess defaults when the cap is hit).
+    const hasAny = Object.values(batchAnswers).some((v) => (v || '').trim().length > 0)
+    if (!hasAny) { setError('Answer at least one question.'); return }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const payload: Record<string, string> = {}
+      for (const q of pending.questions) {
+        const v = (batchAnswers[q.id] ?? '').trim()
+        if (v) payload[q.id] = v
+      }
+      await respondToClarification(taskId, pending.roundId, payload)
+      setBatchAnswers({})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to send reply')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div
       role="dialog"
       aria-live="polite"
       style={{
         margin: '12px 20px 0',
-        padding: '14px 16px',
         background: 'var(--accent-soft)',
         border: '1px solid var(--brand-teal-200)',
         borderRadius: 10,
+        display: 'flex',
+        flexDirection: 'column',
+        // Cap height so a long batch (6+ questions) never pushes the
+        // submit button off-screen; scroll inside the card instead.
+        maxHeight: 'min(60vh, 520px)',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 16px 6px' }}>
         <Pill tone="warn" size="xs" dot>Awaiting your input</Pill>
         <span style={{ fontSize: 11, color: 'var(--text-subtle)' }}>
-          The agent paused to ask you a question.
+          {isBatch
+            ? `The ${pending.role ?? 'specialist'} needs clarification on ${pending.questions?.length} item${(pending.questions?.length ?? 0) === 1 ? '' : 's'} before continuing.`
+            : 'The agent paused to ask you a question.'}
         </span>
       </div>
-      <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>
-        {pending.question}
-      </div>
-      {pending.context && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-          {pending.context}
-        </div>
-      )}
 
-      {pending.options && pending.options.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-          {pending.options.map((opt) => (
-            <Btn
-              key={opt}
-              size="sm"
-              tone="brand"
-              disabled={submitting}
-              onClick={() => submit(opt)}
-            >
-              {opt}
+      {/* Batched HITL-v1 form — multiple questions, one submit. */}
+      {isBatch && pending.questions && (
+        <form
+          onSubmit={(e) => { e.preventDefault(); void submitBatch() }}
+          style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}
+        >
+          <div style={{ padding: '4px 16px 10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {pending.questions.map((q, idx) => (
+              <div key={q.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
+                  <span style={{ color: 'var(--text-subtle)', marginRight: 6 }}>{idx + 1}.</span>
+                  {q.question}
+                </div>
+                {q.why && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{q.why}</div>
+                )}
+                {q.options && q.options.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {q.options.map((opt) => (
+                      <Btn
+                        key={opt}
+                        size="xs"
+                        tone={batchAnswers[q.id] === opt ? 'brand' : 'ghost'}
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setBatchAnswers((a) => ({ ...a, [q.id]: opt }))}
+                      >
+                        {opt}
+                      </Btn>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  rows={2}
+                  value={batchAnswers[q.id] ?? ''}
+                  onChange={(e) => setBatchAnswers((a) => ({ ...a, [q.id]: e.target.value }))}
+                  placeholder="Your answer (or pick an option above)…"
+                  disabled={submitting}
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: 12,
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                    background: 'var(--bg)',
+                    color: 'var(--text)',
+                    resize: 'vertical',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            padding: '10px 16px',
+            borderTop: '1px solid var(--brand-teal-200)',
+            background: 'var(--accent-soft)',
+          }}>
+            <div style={{ fontSize: 12, color: error ? 'var(--status-danger)' : 'var(--text-subtle)' }}>
+              {error ?? 'Tip: you can leave questions blank — the specialist will fall back to best-guess defaults.'}
+            </div>
+            <Btn type="submit" tone="brand" size="sm" disabled={submitting}>
+              {submitting ? 'Submitting…' : 'Submit answers'}
             </Btn>
-          ))}
-        </div>
+          </div>
+        </form>
       )}
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); submit(answer) }}
-        style={{ display: 'flex', gap: 8 }}
-      >
+      {/* Legacy single-question form (CodingAgent polling path). */}
+      {!isBatch && (
+        <>
+          <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>
+            {pending.question}
+          </div>
+          {pending.context && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+              {pending.context}
+            </div>
+          )}
+
+          {pending.options && pending.options.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {pending.options.map((opt) => (
+                <Btn
+                  key={opt}
+                  size="sm"
+                  tone="brand"
+                  disabled={submitting}
+                  onClick={() => submit(opt)}
+                >
+                  {opt}
+                </Btn>
+              ))}
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => { e.preventDefault(); submit(answer) }}
+            style={{ display: 'flex', gap: 8 }}
+          >
         <input
           type="text"
           value={answer}
@@ -579,6 +693,8 @@ function ClarificationCard({
         <div style={{ marginTop: 6, fontSize: 12, color: 'var(--status-danger)' }}>
           {error}
         </div>
+      )}
+        </>
       )}
     </div>
   )

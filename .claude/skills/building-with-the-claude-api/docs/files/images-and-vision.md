@@ -32,7 +32,7 @@ The maximal number of images per message or request is:
 The maximal dimensions per image are 8000x8000 px. If you submit more than 20 images in one API request, this limit is reduced to 2000x2000 px.
 
 <Note>
-While the API supports up to 600 images per request, [request size limits](/docs/en/api/overview#request-size-limits) (32&nbsp;MB for standard endpoints; lower on some third-party platforms) can be reached first. For many images, consider uploading with the [Files API](#files-api-image-example) and referencing by `file_id` to keep request payloads small.
+While the API supports up to 600 images per request, [request size limits](https://docs.claude.com/en/docs/api/overview#request-size-limits) (32&nbsp;MB for standard endpoints; lower on some third-party platforms) can be reached first. For many images, consider uploading with the [Files API](#files-api-image-example) and referencing by `file_id` to keep request payloads small.
 
 Even when using the Files API, requests with many large images can fail before reaching the 600-image count. Reduce image dimensions or file sizes (for example, by downsampling) before uploading (see [Evaluate image size](#evaluate-image-size)).
 </Note>
@@ -102,12 +102,12 @@ When providing images to Claude, keep the following in mind for best results:
 
 ## Prompt examples
 
-Many of the [prompting techniques](/docs/en/build-with-claude/prompt-engineering/overview) that work well for text-based interactions with Claude can also be applied to image-based prompts.
+Many of the [prompting techniques](../best-practices/prompt-engineering/overview.md) that work well for text-based interactions with Claude can also be applied to image-based prompts.
 
 These examples demonstrate best practice prompt structures involving images.
 
 <Tip>
-  Just as [placing long documents before your query](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#long-context-prompting) improves results in text prompts, Claude works best when images come before text. Images placed after text or interpolated with text still perform well, but if your use case allows it, prefer an image-then-text structure.
+  Just as [placing long documents before your query](../best-practices/prompt-engineering/prompting-best-practices.md#long-context-prompting) improves results in text prompts, Claude works best when images come before text. Images placed after text or interpolated with text still perform well, but if your use case allows it, prefer an image-then-text structure.
 </Tip>
 
 ### About the prompt examples
@@ -859,7 +859,7 @@ Below are examples of how to include images in a Messages API request using base
 
 ### Files API image example
 
-For images you'll use repeatedly or when you want to avoid encoding overhead, use the [Files API](/docs/en/build-with-claude/files). Upload the image once, then reference the returned `file_id` in subsequent messages instead of resending base64 data.
+For images you'll use repeatedly or when you want to avoid encoding overhead, use the [Files API](files-api.md). Upload the image once, then reference the returned `file_id` in subsequent messages instead of resending base64 data.
 
 <Tip>
   In multi-turn conversations and agentic workflows, each request resends the
@@ -1216,7 +1216,7 @@ puts message.content
 ```
 </CodeGroup>
 
-See [Messages API examples](/docs/en/api/messages/create) for more example code and parameter details.
+See [Messages API examples](https://docs.claude.com/en/docs/api/messages/create) for more example code and parameter details.
 
 <section title="Example: One image">
 
@@ -1473,7 +1473,7 @@ Ask Claude to contrast two images, then ask a follow-up question comparing the f
 | User | Image 1: \[Image 3\] Image 2: \[Image 4\] Are these images similar to the first two? |
 | Assistant | \[Claude's response\] |
 
-When using the API, simply insert new images into the array of Messages in the `user` role as part of any standard [multiturn conversation](/docs/en/api/messages/create) structure.
+When using the API, simply insert new images into the array of Messages in the `user` role as part of any standard [multiturn conversation](https://docs.claude.com/en/docs/api/messages/create) structure.
 
 </section>
 
@@ -1601,6 +1601,6 @@ Always carefully review and verify Claude's image interpretations, especially fo
 Ready to start building with images using Claude? Here are a few helpful resources:
 
 - [Multimodal cookbook](https://platform.claude.com/cookbook/multimodal-getting-started-with-vision): This cookbook has tips on [getting started with images](https://platform.claude.com/cookbook/multimodal-getting-started-with-vision) and [best practice techniques](https://platform.claude.com/cookbook/multimodal-best-practices-for-vision) to ensure the highest quality performance with images. See how you can effectively prompt Claude with images to carry out tasks such as [interpreting and analyzing charts](https://platform.claude.com/cookbook/multimodal-reading-charts-graphs-powerpoints) or [extracting content from forms](https://platform.claude.com/cookbook/multimodal-how-to-transcribe-text).
-- [API reference](/docs/en/api/messages/create): Documentation for the Messages API, including example [API calls involving images](/docs/en/build-with-claude/working-with-messages#vision).
+- [API reference](https://docs.claude.com/en/docs/api/messages/create): Documentation for the Messages API, including example [API calls involving images](../messages-api/features-overview.md#vision).
 
 If you have any other questions, reach out to the [support team](https://support.claude.com/). You can also join the [developer community](https://www.anthropic.com/discord) to connect with other creators and get help from Anthropic experts.

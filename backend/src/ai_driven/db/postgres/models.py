@@ -93,6 +93,13 @@ class Task(Base):
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Prompt A/B testing attribution. Stamped at dispatch by the SQS
+    # consumer via VariantPicker. Null for legacy rows.
+    prompt_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_prompt_variants.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     team: Mapped[Team] = relationship(back_populates="tasks")
     repository: Mapped[Repository | None] = relationship(back_populates="tasks")
@@ -333,4 +340,93 @@ class UserScmConnection(Base):
         ),
         sa.Index("ix_user_scm_connections_member", "team_member_id"),
         sa.Index("ix_user_scm_connections_team", "team_id"),
+    )
+
+
+class TaskSpecialistState(Base):
+    """HITL async-continuation row for a specialist that is mid-conversation.
+
+    Created when a specialist (starts with BusinessAnalyst) invokes the
+    ``human.ask_clarification`` tool. The SQS wrapper persists this row +
+    ACKs the message; the next resume comes in via
+    ``/api/chat/tasks/:id/respond`` → ``specialist_resume`` SQS message.
+
+    Natural key is ``(task_id, role)`` — only one HITL round per
+    specialist per task is ever in flight.
+    """
+
+    __tablename__ = "task_specialist_state"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Full Claude message list (incl. any pending tool_use block).
+    conversation: Mapped[list] = mapped_column(JSONB, nullable=False)
+    # {"questions":[{"id","question","options","why"}], "round_id", "asked_at"}
+    pending_question: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # {"answers":{"<qid>":"<text>"}, "round_id", "answered_at"}
+    last_answer: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    rounds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+
+
+class AgentPromptVariant(Base):
+    """Registry row for a candidate system prompt.
+
+    Exactly one variant per ``agent_type`` should have ``is_control=True``
+    (partial unique index). The dispatcher picks a variant by weighted
+    random over all rows for the given agent_type with ``weight > 0``;
+    ``weight=0`` hides the variant from future dispatches without
+    destroying historical attribution on already-assigned tasks.
+    """
+
+    __tablename__ = "agent_prompt_variants"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4,
+    )
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    weight: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_control: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False,
+    )
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class AgentPromptVariantStat(Base):
+    """Per-(variant, dimension) score rollup maintained by the aggregator.
+
+    Refreshed by ``ai_driven.evaluation.variant_stats.refresh_stats()``.
+    The authoritative source stays ``task_evaluations``; this table is a
+    materialized snapshot so the admin UI doesn't run a GROUP BY on
+    every page load.
+    """
+
+    __tablename__ = "agent_prompt_variant_stats"
+
+    variant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_prompt_variants.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    dimension: Mapped[str] = mapped_column(String(64), primary_key=True)
+    n_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_score: Mapped[float] = mapped_column(Numeric(4, 2), nullable=False)
+    stddev_score: Mapped[float | None] = mapped_column(Numeric(4, 2), nullable=True)
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False,
     )

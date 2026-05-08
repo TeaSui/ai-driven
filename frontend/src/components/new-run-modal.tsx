@@ -112,6 +112,15 @@ export function NewRunModal({ open, onClose }: NewRunModalProps) {
       setError('Message is required')
       return
     }
+    // Require repo whenever the selected agent lists it as a field.
+    // Without a repo_full_name the backend can't instantiate an SCM
+    // client, the CodingAgent hits "SCM client not configured" on
+    // every repo.* tool call, and it either stalls or pauses on
+    // ask_clarification asking which repo to use.
+    if (selected.fields.includes('repo') && !repo) {
+      setError('Repository is required for this agent')
+      return
+    }
     setError('')
     setSubmitting(true)
     try {

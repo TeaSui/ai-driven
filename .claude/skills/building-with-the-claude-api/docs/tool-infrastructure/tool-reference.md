@@ -4,7 +4,7 @@ Directory of Anthropic-provided tools and reference for optional tool definition
 
 ---
 
-This page is a reference for the tools Anthropic provides and the optional properties you can set on any tool definition. For a conceptual introduction to tool use, see [Tool use with Claude](/docs/en/agents-and-tools/tool-use/overview). For guidance on implementing tool use in your application, see [Define tools](/docs/en/agents-and-tools/tool-use/define-tools).
+This page is a reference for the tools Anthropic provides and the optional properties you can set on any tool definition. For a conceptual introduction to tool use, see [Tool use with Claude](../tools/tool-use-overview.md). For guidance on implementing tool use in your application, see [Define tools](../tools/define-tools.md).
 
 ## Anthropic-provided tools
 
@@ -12,16 +12,16 @@ Anthropic provides two kinds of tools: **server tools** that execute on Anthropi
 
 | Tool                                                                          | `type`                                                                 | Execution | Status                                                        |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------- | ------------------------------------------------------------- |
-| [Web search tool](/docs/en/agents-and-tools/tool-use/web-search-tool)         | `web_search_20260209`<br/>`web_search_20250305`                        | Server    | GA                                                            |
-| [Web fetch tool](/docs/en/agents-and-tools/tool-use/web-fetch-tool)           | `web_fetch_20260209`<br/>`web_fetch_20250910`                          | Server    | GA                                                            |
-| [Code execution tool](/docs/en/agents-and-tools/tool-use/code-execution-tool) | `code_execution_20260120`<br/>`code_execution_20250825`                | Server    | GA                                                            |
-| [Advisor tool](/docs/en/agents-and-tools/tool-use/advisor-tool)               | `advisor_20260301`                                                     | Server    | Beta: `advisor-tool-2026-03-01`                               |
-| [Tool search tool](/docs/en/agents-and-tools/tool-use/tool-search-tool)       | `tool_search_tool_regex_20251119`<br/>`tool_search_tool_bm25_20251119` | Server    | GA                                                            |
-| [MCP connector](/docs/en/agents-and-tools/mcp-connector)                      | `mcp_toolset`                                                          | Server    | Beta: `mcp-client-2025-11-20`                                 |
-| [Memory tool](/docs/en/agents-and-tools/tool-use/memory-tool)                 | `memory_20250818`                                                      | Client    | GA                                                            |
-| [Bash tool](/docs/en/agents-and-tools/tool-use/bash-tool)                     | `bash_20250124`                                                        | Client    | GA                                                            |
-| [Text editor tool](/docs/en/agents-and-tools/tool-use/text-editor-tool)       | `text_editor_20250728`<br/>`text_editor_20250124`                      | Client    | GA                                                            |
-| [Computer use tool](/docs/en/agents-and-tools/tool-use/computer-use-tool)     | `computer_20251124`<br/>`computer_20250124`                            | Client    | Beta: `computer-use-2025-11-24`<br/>`computer-use-2025-01-24` |
+| [Web search tool](../tools/web-search-tool.md)         | `web_search_20260209`<br/>`web_search_20250305`                        | Server    | GA                                                            |
+| [Web fetch tool](../tools/web-fetch-tool.md)           | `web_fetch_20260209`<br/>`web_fetch_20250910`                          | Server    | GA                                                            |
+| [Code execution tool](../tools/code-execution-tool.md) | `code_execution_20260120`<br/>`code_execution_20250825`                | Server    | GA                                                            |
+| [Advisor tool](../tools/advisor-tool.md)               | `advisor_20260301`                                                     | Server    | Beta: `advisor-tool-2026-03-01`                               |
+| [Tool search tool](tool-search-tool.md)       | `tool_search_tool_regex_20251119`<br/>`tool_search_tool_bm25_20251119` | Server    | GA                                                            |
+| [MCP connector](../mcp/mcp-connector.md)                      | `mcp_toolset`                                                          | Server    | Beta: `mcp-client-2025-11-20`                                 |
+| [Memory tool](../tools/memory-tool.md)                 | `memory_20250818`                                                      | Client    | GA                                                            |
+| [Bash tool](../tools/bash-tool.md)                     | `bash_20250124`                                                        | Client    | GA                                                            |
+| [Text editor tool](../tools/text-editor-tool.md)       | `text_editor_20250728`<br/>`text_editor_20250124`                      | Client    | GA                                                            |
+| [Computer use tool](../tools/computer-use-tool.md)     | `computer_20251124`<br/>`computer_20250124`                            | Client    | Beta: `computer-use-2025-11-24`<br/>`computer-use-2025-01-24` |
 
 For model compatibility, see each tool's page. Supported models vary by tool and by tool version.
 
@@ -37,7 +37,7 @@ Most Anthropic-provided tools carry a `_YYYYMMDD` suffix in the `type` string. A
 
 When a tool has multiple active versions, the relationship between them varies:
 
-- **Capability-keyed:** `web_search_20260209` and `web_fetch_20260209` add dynamic content filtering over their predecessors. `code_execution_20260120` adds [programmatic tool calling](/docs/en/agents-and-tools/tool-use/programmatic-tool-calling) from within the sandbox. In each case, both the new and old versions are current; which one you use depends on whether you need the new capability.
+- **Capability-keyed:** `web_search_20260209` and `web_fetch_20260209` add dynamic content filtering over their predecessors. `code_execution_20260120` adds [programmatic tool calling](programmatic-tool-calling.md) from within the sandbox. In each case, both the new and old versions are current; which one you use depends on whether you need the new capability.
 - **Model-keyed:** `text_editor_20250728` is for Claude 4 models and `text_editor_20250124` is for earlier models. The version you use depends on the model you target.
 - **Variant, not version:** `tool_search_tool_regex_20251119` and `tool_search_tool_bm25_20251119` are two search algorithms released together. Neither supersedes the other.
 - **Legacy:** `code_execution_20250522` supports only Python. `code_execution_20250825` adds Bash and file operations.
@@ -50,12 +50,12 @@ Every tool in the `tools` array, including user-defined tools, accepts optional 
 
 | Property                | Purpose                                                                                                               | Available on                                                                                                               | Detailed guide                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `cache_control`         | Set a prompt-cache breakpoint at this tool definition                                                                 | All tools                                                                                                                  | [Prompt caching](/docs/en/build-with-claude/prompt-caching)                                                         |
-| `strict`                | Guarantee schema validation on tool names and inputs                                                                  | All tools except `mcp_toolset`                                                                                             | [Strict tool use](/docs/en/agents-and-tools/tool-use/strict-tool-use)                                               |
-| `defer_loading`         | Exclude the tool from the initial system prompt; load it on demand when tool search returns a `tool_reference` for it | All tools (for `mcp_toolset`, see [tool configuration](/docs/en/agents-and-tools/mcp-connector#mcp-toolset-configuration)) | [Tool search tool](/docs/en/agents-and-tools/tool-use/tool-search-tool)                                             |
-| `allowed_callers`       | Restrict which callers can call the tool                                                                              | All tools except `mcp_toolset`                                                                                             | [Programmatic tool calling](/docs/en/agents-and-tools/tool-use/programmatic-tool-calling#the-allowed-callers-field) |
-| `input_examples`        | Provide example input objects to help Claude understand how to call the tool                                          | User-defined and Anthropic-schema client tools. Not available on server tools.                                             | [Define tools](/docs/en/agents-and-tools/tool-use/define-tools#providing-tool-use-examples)                         |
-| `eager_input_streaming` | Enable fine-grained input streaming (`true`) or keep standard buffered streaming (`false`) for this tool              | User-defined tools only                                                                                                    | [Fine-grained tool streaming](/docs/en/agents-and-tools/tool-use/fine-grained-tool-streaming)                       |
+| `cache_control`         | Set a prompt-cache breakpoint at this tool definition                                                                 | All tools                                                                                                                  | [Prompt caching](../context-management/prompt-caching.md)                                                         |
+| `strict`                | Guarantee schema validation on tool names and inputs                                                                  | All tools except `mcp_toolset`                                                                                             | [Strict tool use](../tools/strict-tool-use.md)                                               |
+| `defer_loading`         | Exclude the tool from the initial system prompt; load it on demand when tool search returns a `tool_reference` for it | All tools (for `mcp_toolset`, see [tool configuration](../mcp/mcp-connector.md#mcp-toolset-configuration)) | [Tool search tool](tool-search-tool.md)                                             |
+| `allowed_callers`       | Restrict which callers can call the tool                                                                              | All tools except `mcp_toolset`                                                                                             | [Programmatic tool calling](programmatic-tool-calling.md#the-allowed-callers-field) |
+| `input_examples`        | Provide example input objects to help Claude understand how to call the tool                                          | User-defined and Anthropic-schema client tools. Not available on server tools.                                             | [Define tools](../tools/define-tools.md#providing-tool-use-examples)                         |
+| `eager_input_streaming` | Enable fine-grained input streaming (`true`) or keep standard buffered streaming (`false`) for this tool              | User-defined tools only                                                                                                    | [Fine-grained tool streaming](fine-grained-tool-streaming.md)                       |
 
 ### `allowed_callers` values
 
@@ -66,7 +66,7 @@ Every tool in the `tools` array, including user-defined tools, accepts optional 
 | `"direct"`                  | The model can call this tool directly in a `tool_use` block. This is the default if `allowed_callers` is omitted. |
 | `"code_execution_20260120"` | Code running inside a `code_execution_20260120` sandbox can call this tool.                                       |
 
-Omitting `"direct"` from the array (for example, `"allowed_callers": ["code_execution_20260120"]`) means the tool is callable only from within code execution. The response's `tool_use` block includes a `caller` field that identifies which caller called the tool. See [Programmatic tool calling](/docs/en/agents-and-tools/tool-use/programmatic-tool-calling#the-allowed-callers-field) for the full treatment, including the `caller` response shape and error behavior.
+Omitting `"direct"` from the array (for example, `"allowed_callers": ["code_execution_20260120"]`) means the tool is callable only from within code execution. The response's `tool_use` block includes a `caller` field that identifies which caller called the tool. See [Programmatic tool calling](programmatic-tool-calling.md#the-allowed-callers-field) for the full treatment, including the `caller` response shape and error behavior.
 
 ### `defer_loading` and prompt caching
 
@@ -74,4 +74,4 @@ Tools with `defer_loading: true` are stripped from the rendered tools section be
 
 This means `defer_loading: true` preserves your prompt cache. You can add deferred tools to a request without invalidating an existing cache entry, and the cache remains valid across the turn where the tool is discovered and the turn where it's called.
 
-For how to combine `defer_loading` with `cache_control` breakpoints, see the [Tool search tool prompt caching guidance](/docs/en/agents-and-tools/tool-use/tool-search-tool#prompt-caching).
+For how to combine `defer_loading` with `cache_control` breakpoints, see the [Tool search tool prompt caching guidance](tool-search-tool.md#prompt-caching).

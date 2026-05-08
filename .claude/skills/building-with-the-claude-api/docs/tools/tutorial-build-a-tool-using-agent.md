@@ -14,7 +14,7 @@ Every ring runs standalone. Copy any ring into a fresh file and it will execute 
 
 ## Ring 1: Single tool, single turn
 
-The smallest possible tool-using program: one tool, one user message, one tool call, one result. The code is heavily commented so you can map each line to the [tool use lifecycle](/docs/en/agents-and-tools/tool-use/how-tool-use-works).
+The smallest possible tool-using program: one tool, one user message, one tool call, one result. The code is heavily commented so you can map each line to the [tool use lifecycle](how-tool-use-works.md).
 
 The request sends a `tools` array alongside the user message. When Claude decides to call a tool, the response comes back with `stop_reason: "tool_use"` and a `tool_use` content block containing the tool name, a unique `id`, and the structured `input`. Your code executes the tool, then sends the result back in a `tool_result` block whose `tool_use_id` matches the `id` from the call.
 
@@ -1222,7 +1222,7 @@ for (const block of response.content) {
 I checked your calendar for next Monday and found an existing meeting from 2pm to 3pm. I've scheduled the planning session for 10am to 11am to avoid the conflict.
 ```
 
-For more on concurrent execution and ordering guarantees, see [Parallel tool use](/docs/en/agents-and-tools/tool-use/parallel-tool-use).
+For more on concurrent execution and ordering guarantees, see [Parallel tool use](parallel-tool-use.md).
 
 ## Ring 4: Error handling
 
@@ -1667,7 +1667,7 @@ for (const block of response.content) {
 I tried to schedule the all-hands but the calendar only allows 10 attendees per event. I can split this into two sessions, or you can let me know which 10 people to prioritize.
 ```
 
-The `is_error` flag is the only difference from a successful result. Claude sees the flag and the error text, and responds accordingly. See [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls) for the full error-handling reference.
+The `is_error` flag is the only difference from a successful result. Claude sees the flag and the error text, and responds accordingly. See [Handle tool calls](handle-tool-calls.md) for the full error-handling reference.
 
 ## Ring 5: The Tool Runner SDK abstraction
 

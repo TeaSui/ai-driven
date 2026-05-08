@@ -226,11 +226,12 @@ test.describe('Sprint 14 — session-token login', () => {
     ])
 
     // Use a wide viewport so the sidebar renders in the full (non-collapsed)
-    // state — the Sign out button only exists in that branch.
+    // state.
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/dashboard')
 
-    // Sidebar renders — click sign-out by testid (robust to layout shifts).
+    // Open the avatar menu, then click sign-out by testid.
+    await page.getByRole('button', { name: /menu$/ }).click()
     await page.getByTestId('sidebar-sign-out').click()
 
     // Eventually lands on /login.

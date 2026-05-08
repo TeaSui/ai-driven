@@ -370,11 +370,11 @@ After creating a session, send a `user.define_outcome` event. The agent begins w
 
 ## Outcome events
 
-Progress on an outcome-oriented session is surfaced on the events [stream](/docs/en/managed-agents/events-and-streaming).
+Progress on an outcome-oriented session is surfaced on the events [stream](session-event-stream.md).
 
 - `agent.*` events (messages, tool use, etc.) show progress towards the outcome.
 - `span.outcome_evaluation_*` events are only emitted for outcome-oriented sessions and show the number of iteration loops and the grader's feedback process.
-- You can also send `user.message` [events](/docs/en/managed-agents/events-and-streaming#user-events) to an outcome-oriented session, to direct the agent's work as it progresses, but these are not as necessary; the agent knows to work until it has exhausted its iterations or achieved the outcome.
+- You can also send `user.message` [events](session-event-stream.md#user-events) to an outcome-oriented session, to direct the agent's work as it progresses, but these are not as necessary; the agent knows to work until it has exhausted its iterations or achieved the outcome.
 - A `user.interrupt` event will pause work on the current outcome and mark the `span.outcome_evaluation_end.result` as `interrupted`, allowing you to kick off a new outcome.
 - After the final outcome evaluation, the session can be continued as a conversational session, or a new outcome can be kicked off. The session will retain history of the prior outcome.
 
@@ -454,7 +454,7 @@ Emitted after the grader finishes evaluating one iteration. The `result` field i
 
 ## Checking on outcome status
 
-You can either listen on the [event stream](/docs/en/managed-agents/events-and-streaming) for `span.outcome_evaluation_end`, or poll `GET /v1/sessions/:id` and read `outcome_evaluations[].result`:
+You can either listen on the [event stream](session-event-stream.md) for `span.outcome_evaluation_end`, or poll `GET /v1/sessions/:id` and read `outcome_evaluations[].result`:
 
 <CodeGroup>
   
@@ -534,7 +534,7 @@ You can either listen on the [event stream](/docs/en/managed-agents/events-and-s
 
 ## Retrieving deliverables
 
-The agent writes output files to `/mnt/session/outputs/` inside the container. Once the session is idle, fetch them via the [Files API](/docs/en/build-with-claude/files) scoped to the session:
+The agent writes output files to `/mnt/session/outputs/` inside the container. Once the session is idle, fetch them via the [Files API](../files/files-api.md) scoped to the session:
 
 <CodeGroup>
   ```bash curl

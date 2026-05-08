@@ -97,7 +97,7 @@ Here are the key tasks associated with the example insurance interaction above:
 
 ### Establish success criteria
 
-Work with your support team to [define success criteria and write detailed evaluations](/docs/en/test-and-evaluate/develop-tests) with measurable benchmarks and goals.
+Work with your support team to [define success criteria and write detailed evaluations](../evaluation/define-success-criteria.md) with measurable benchmarks and goals.
 
 Here are criteria and benchmarks that can be used to evaluate how successfully Claude performs the defined tasks:
 
@@ -181,7 +181,7 @@ Acme's insurance offerings, which include car insurance and electric car
 insurance. You can also help customers get quotes for their insurance needs."""
 ```
 
-<Tip>While you may be tempted to put all your information inside a system prompt as a way to separate instructions from the user conversation, Claude actually works best with the bulk of its prompt content written inside the first `User` turn (with the only exception being role prompting). Read more at [Giving Claude a role with a system prompt](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#give-claude-a-role).</Tip>
+<Tip>While you may be tempted to put all your information inside a system prompt as a way to separate instructions from the user conversation, Claude actually works best with the bulk of its prompt content written inside the first `User` turn (with the only exception being role prompting). Read more at [Giving Claude a role with a system prompt](../prompt-engineering/prompting-best-practices.md#give-claude-a-role).</Tip>
 
 It's best to break down complex prompts into subsections and write one part at a time. For each task, you might find greater success by following a step by step process to define the parts of the prompt Claude would need to do the task well. For this car insurance customer support example, you'll be writing piecemeal all the parts for a prompt starting with the "Greeting and general guidance" task. This also makes debugging your prompt easier as you can more quickly adjust individual parts of the overall prompt.
 
@@ -398,7 +398,7 @@ def get_quote(make, model, year, mileage, driver_age):
 
 ### Deploy your prompts
 
-It's hard to know how well your prompt works without deploying it in a test production setting and [running evaluations](/docs/en/test-and-evaluate/develop-tests) so let's build a small application using the prompt, the Anthropic SDK, and streamlit for a user interface.
+It's hard to know how well your prompt works without deploying it in a test production setting and [running evaluations](../evaluation/define-success-criteria.md) so let's build a small application using the prompt, the Anthropic SDK, and streamlit for a user interface.
 
 In a file called `chatbot.py`, start by setting up the ChatBot class, which will encapsulate the interactions with the Anthropic SDK.
 
@@ -552,19 +552,19 @@ streamlit run app.py
 
 ### Evaluate your prompts
 
-Prompting often requires testing and optimization for it to be production ready. To determine the readiness of your solution, evaluate the chatbot performance using a systematic process combining quantitative and qualitative methods. Creating a [strong empirical evaluation](/docs/en/test-and-evaluate/develop-tests#building-evals-and-test-cases) based on your defined success criteria will allow you to optimize your prompts.
+Prompting often requires testing and optimization for it to be production ready. To determine the readiness of your solution, evaluate the chatbot performance using a systematic process combining quantitative and qualitative methods. Creating a [strong empirical evaluation](../evaluation/define-success-criteria.md#building-evals-and-test-cases) based on your defined success criteria will allow you to optimize your prompts.
 
 <Tip>The [Claude Console](/dashboard) now features an Evaluation tool that allows you to test your prompts under various scenarios.</Tip>
 
 ### Improve performance
 
-In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](/docs/en/build-with-claude/prompt-engineering/overview) & [guardrail implementation strategies](/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations). Here are some common scenarios:
+In complex scenarios, it may be helpful to consider additional strategies to improve performance beyond standard [prompt engineering techniques](../prompt-engineering/overview.md) & [guardrail implementation strategies](../guardrails/reduce-hallucinations.md). Here are some common scenarios:
 
 #### Reduce long context latency with RAG
 
 When dealing with large amounts of static and dynamic context, including all information in the prompt can lead to high costs, slower response times, and reaching context window limits. In this scenario, implementing Retrieval Augmented Generation (RAG) techniques can significantly improve performance and efficiency.
 
-By using [embedding models like Voyage](/docs/en/build-with-claude/embeddings) to convert information into vector representations, you can create a more scalable and responsive system. This approach allows for dynamic retrieval of relevant information based on the current query, rather than including all possible context in every prompt.
+By using [embedding models like Voyage](../../model-capabilities/embeddings.md) to convert information into vector representations, you can create a more scalable and responsive system. This approach allows for dynamic retrieval of relevant information based on the current query, rather than including all possible context in every prompt.
 
 Implementing RAG for support use cases [RAG recipe](https://platform.claude.com/cookbook/capabilities-retrieval-augmented-generation-guide) has been shown to increase accuracy, reduce response times, and reduce API costs in systems with extensive context requirements.
 
@@ -578,12 +578,12 @@ This approach, [outlined in the tool use: customer service agent recipe](https:/
 
 When deploying a chatbot, especially in customer service scenarios, it's crucial to prevent risks associated with misuse, out-of-scope queries, and inappropriate responses. While Claude is inherently resilient to such scenarios, here are additional steps to strengthen your chatbot guardrails:
 
-- [Reduce hallucination](/docs/en/test-and-evaluate/strengthen-guardrails/reduce-hallucinations): Implement fact-checking mechanisms and [citations](https://platform.claude.com/cookbook/misc-using-citations) to ground responses in provided information.
+- [Reduce hallucination](../guardrails/reduce-hallucinations.md): Implement fact-checking mechanisms and [citations](https://platform.claude.com/cookbook/misc-using-citations) to ground responses in provided information.
 - Cross-check information: Verify that the agent's responses align with your company's policies and known facts.
 - Avoid contractual commitments: Ensure the agent doesn't make promises or enter into agreements it's not authorized to make.
-- [Mitigate jailbreaks](/docs/en/test-and-evaluate/strengthen-guardrails/mitigate-jailbreaks): Use methods like harmlessness screens and input validation to prevent users from exploiting model vulnerabilities, aiming to generate inappropriate content.
+- [Mitigate jailbreaks](../guardrails/mitigate-jailbreaks-and-prompt-injections.md): Use methods like harmlessness screens and input validation to prevent users from exploiting model vulnerabilities, aiming to generate inappropriate content.
 - Avoid mentioning competitors: Implement a competitor mention filter to maintain brand focus and not mention any competitor's products or services.
-- [Increase output consistency](/docs/en/test-and-evaluate/strengthen-guardrails/increase-consistency): Prevent Claude from changing style or going out of character, even during long, complex interactions.
+- [Increase output consistency](../guardrails/increase-output-consistency.md): Prevent Claude from changing style or going out of character, even during long, complex interactions.
 - Remove Personally Identifiable Information (PII): Unless explicitly required and authorized, strip out any PII from responses.
 
 #### Reduce perceived response time with streaming
@@ -591,7 +591,7 @@ When deploying a chatbot, especially in customer service scenarios, it's crucial
 When dealing with potentially lengthy responses, implementing streaming can significantly improve user engagement and satisfaction. In this scenario, users receive the answer progressively instead of waiting for the entire response to be generated.
 
 Here is how to implement streaming:
-1. Use the [Anthropic Streaming API](/docs/en/build-with-claude/streaming) to support streaming responses.
+1. Use the [Anthropic Streaming API](../../model-capabilities/streaming-messages.md) to support streaming responses.
 2. Set up your frontend to handle incoming chunks of text.
 3. Display each chunk as it arrives, simulating real-time typing.
 4. Implement a mechanism to save the full response, allowing users to view it if they navigate away and return.
@@ -602,8 +602,8 @@ In some cases, streaming enables the use of more advanced models with higher bas
 
 As the complexity of your Chatbot grows, your application architecture can evolve to match. Before you add further layers to your architecture, consider the following less exhaustive options:
 
-- Ensure that you are making the most out of your prompts and optimizing through prompt engineering. Use the [prompt engineering guides](/docs/en/build-with-claude/prompt-engineering/overview) to write the most effective prompts.
-- Add additional [tools](/docs/en/build-with-claude/tool-use) to the prompt (which can include [prompt chains](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#chain-complex-prompts)) and see if you can achieve the functionality required.
+- Ensure that you are making the most out of your prompts and optimizing through prompt engineering. Use the [prompt engineering guides](../prompt-engineering/overview.md) to write the most effective prompts.
+- Add additional [tools](../../tools/tool-use-overview.md) to the prompt (which can include [prompt chains](../prompt-engineering/prompting-best-practices.md#chain-complex-prompts)) and see if you can achieve the functionality required.
 
 If your Chatbot handles incredibly varied tasks, you may want to consider adding a [separate intent classifier](https://platform.claude.com/cookbook/capabilities-classification-guide) to route the initial customer query. For the existing application, this would involve creating a decision tree that would route customer queries through the classifier and then to specialized conversations (with their own set of tools and system prompts). Note, this method requires an additional call to Claude that can increase latency.
 

@@ -15,6 +15,7 @@ from ai_driven.db.postgres.models import (
     Repository,
     Review,
     Task,
+    TaskSpecialistState,
     Team,
 )
 
@@ -160,6 +161,15 @@ class TaskRepository:
         result = await self._session.execute(
             select(Task)
             .where(Task.team_id == team_id)
+            .order_by(Task.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all())
+
+    async def list_all(self, limit: int = 50, offset: int = 0) -> list[Task]:
+        result = await self._session.execute(
+            select(Task)
             .order_by(Task.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -350,3 +360,120 @@ class ConversationRepository:
         await self._session.execute(
             update(ConversationRecord).where(ConversationRecord.id == conv_id).values(**kwargs)
         )
+
+
+class SpecialistStateRepository:
+    """HITL async-continuation state for a running specialist.
+
+    One row per (task_id, role) while a specialist is mid-conversation.
+    Writers are: (a) the SQS wrapper when a specialist raises
+    AwaitingHumanInput; (b) ``POST /api/chat/tasks/:id/respond`` when
+    the user answers; (c) the ``specialist_resume`` consumer path when
+    the specialist finally returns a terminal verdict.
+
+    No silent partial writes — every method commits a complete row or
+    raises. The SQS flow depends on atomicity to avoid the
+    re-delivery double-run hazard called out in the HITL design.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, task_id: uuid.UUID, role: str
+    ) -> TaskSpecialistState | None:
+        result = await self._session.execute(
+            select(TaskSpecialistState).where(
+                TaskSpecialistState.task_id == task_id,
+                TaskSpecialistState.role == role,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert_pending(
+        self,
+        task_id: uuid.UUID,
+        role: str,
+        conversation: list,
+        pending_question: dict,
+    ) -> TaskSpecialistState:
+        """Write a specialist row that is awaiting human input.
+
+        Called by the SQS wrapper when a specialist raises
+        AwaitingHumanInput. ``rounds`` is preserved across upserts so
+        the cap in ``/respond`` can enforce the per-task ceiling.
+        """
+        existing = await self.get(task_id, role)
+        if existing is None:
+            row = TaskSpecialistState(
+                task_id=task_id,
+                role=role,
+                conversation=conversation,
+                pending_question=pending_question,
+                last_answer=None,
+                rounds=0,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            self._session.add(row)
+            await self._session.flush()
+            return row
+        existing.conversation = conversation
+        existing.pending_question = pending_question
+        existing.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        return existing
+
+    async def record_answer(
+        self,
+        task_id: uuid.UUID,
+        role: str,
+        round_id: str,
+        answers: dict[str, str],
+    ) -> TaskSpecialistState | None:
+        """Apply a user answer to an open pending round.
+
+        Returns the updated row, or ``None`` if no row exists OR the
+        round_id mismatches (stale form submission). The caller
+        distinguishes the two via ``get`` before calling.
+        """
+        row = await self.get(task_id, role)
+        if row is None or row.pending_question is None:
+            return None
+        stored_round = (row.pending_question or {}).get("round_id")
+        if stored_round != round_id:
+            return None
+        row.last_answer = {
+            "answers": answers,
+            "round_id": round_id,
+            "answered_at": datetime.now(timezone.utc).isoformat(),
+        }
+        row.pending_question = None
+        row.rounds = (row.rounds or 0) + 1
+        row.updated_at = datetime.now(timezone.utc)
+        await self._session.flush()
+        return row
+
+    async def clear(self, task_id: uuid.UUID, role: str) -> None:
+        """Delete the state row on terminal verdict (success path).
+
+        The artifact is the durable record of the specialist's output.
+        Keeping conversation + Q&A forever balloons storage without
+        adding audit value beyond what task_artifacts already provides.
+        """
+        await self._session.execute(
+            delete(TaskSpecialistState).where(
+                TaskSpecialistState.task_id == task_id,
+                TaskSpecialistState.role == role,
+            )
+        )
+
+    async def list_stuck_pending(self, older_than: datetime) -> list[TaskSpecialistState]:
+        """Reaper source — rows with OPEN pending_question older than threshold."""
+        result = await self._session.execute(
+            select(TaskSpecialistState).where(
+                TaskSpecialistState.pending_question.isnot(None),
+                TaskSpecialistState.updated_at < older_than,
+            )
+        )
+        return list(result.scalars().all())

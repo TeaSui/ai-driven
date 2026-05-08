@@ -11,7 +11,7 @@ Two types of skill are supported. Both work the same way: your agent invokes the
 - **Pre-built Anthropic skills:** Common document tasks such as PowerPoint, Excel, Word, and PDF handling.
 - **Custom skills:** Skills you author and upload to your organization.
 
-To learn how to author custom skills, see the [Agent Skills overview](/docs/en/agents-and-tools/agent-skills/overview) and [best practices](/docs/en/agents-and-tools/agent-skills/best-practices). This page assumes you already have skills available in your organization or are using Anthropic pre-built skills.
+To learn how to author custom skills, see the [Agent Skills overview](../skills/agent-skills-overview.md) and [best practices](../skills/authoring-best-practices.md). This page assumes you already have skills available in your organization or are using Anthropic pre-built skills.
 
 <Note>
 All Managed Agents API requests require the `managed-agents-2026-04-01` beta header. The SDK sets the beta header automatically.
@@ -19,7 +19,7 @@ All Managed Agents API requests require the `managed-agents-2026-04-01` beta hea
 
 ## Enable skills on a session
 
-Attach skills when creating an agent. A maximum of 20 skills per session is supported - this includes skills across all agents for the session, if you are working with [multiple agents](/docs/en/managed-agents/multi-agent).
+Attach skills when creating an agent. A maximum of 20 skills per session is supported - this includes skills across all agents for the session, if you are working with [multiple agents](multiagent-sessions.md).
 
 <CodeGroup>
 ```bash curl

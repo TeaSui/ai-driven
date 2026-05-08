@@ -9,7 +9,7 @@ The Claude Console offers a suite of tools to help you build and refine prompts.
 ## Prompt generator
 
 <Note>
-The prompt generator is compatible with all Claude models, including those with extended thinking capabilities. For prompting tips specific to extended thinking models, see the [extended thinking prompting tips](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#leverage-thinking-and-interleaved-thinking-capabilities).
+The prompt generator is compatible with all Claude models, including those with extended thinking capabilities. For prompting tips specific to extended thinking models, see the [extended thinking prompting tips](prompting-best-practices.md#leverage-thinking-and-interleaved-thinking-capabilities).
 </Note>
 
 Sometimes, the hardest part of using an AI model is figuring out how to prompt it effectively. The prompt generator guides Claude to create high-quality prompt templates tailored to your specific tasks, following many of our prompt engineering best practices.
@@ -46,7 +46,7 @@ Prompt templates offer several benefits:
 The Console uses prompt templates and variables to power its tooling:
 - **Prompt generator:** Decides what variables your prompt needs and includes them in the template it outputs
 - **Prompt improver:** Takes your existing template, including all variables, and maintains them in the improved template it outputs
-- **[Evaluation tool](/docs/en/test-and-evaluate/eval-tool):** Allows you to easily test, scale, and track versions of your prompts by separating the variable and fixed portions of your prompt template
+- **[Evaluation tool](../evaluation/using-the-evaluation-tool.md):** Allows you to easily test, scale, and track versions of your prompts by separating the variable and fixed portions of your prompt template
 
 ### Example prompt template
 
@@ -56,14 +56,14 @@ Consider a simple application that translates English text to Spanish. The trans
 Translate this text from English to Spanish: {{text}}
 ```
 
-<Tip>To level up your prompt variables, wrap them in [XML tags](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags) for clearer structure.</Tip>
+<Tip>To level up your prompt variables, wrap them in [XML tags](prompting-best-practices.md#structure-prompts-with-xml-tags) for clearer structure.</Tip>
 
 ---
 
 ## Prompt improver
 
 <Note>
-The prompt improver is compatible with all Claude models, including those with extended thinking capabilities. For prompting tips specific to extended thinking models, see the [extended thinking prompting tips](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#leverage-thinking-and-interleaved-thinking-capabilities).
+The prompt improver is compatible with all Claude models, including those with extended thinking capabilities. For prompting tips specific to extended thinking models, see the [extended thinking prompting tips](prompting-best-practices.md#leverage-thinking-and-interleaved-thinking-capabilities).
 </Note>
 
 The prompt improver helps you quickly iterate and improve your prompts through automated analysis and enhancement. It excels at making prompts more robust for complex tasks that require high accuracy.
@@ -111,7 +111,7 @@ While examples appear separately in the Workbench UI, they're included at the st
 
 ### Generate test examples
 
-Don't have examples yet? Use the [Test Case Generator](/docs/en/test-and-evaluate/eval-tool#creating-test-cases) to:
+Don't have examples yet? Use the [Test Case Generator](../evaluation/using-the-evaluation-tool.md#creating-test-cases) to:
 1. Generate sample inputs
 2. Get Claude's responses
 3. Edit the responses to match your ideal outputs

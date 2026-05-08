@@ -47,7 +47,7 @@ A rule defines match conditions, a target, and the authorization scope and token
 
 - **Match:** The conditions an incoming JWT must satisfy. You can match on a `subject_prefix` (for example, `system:serviceaccount:prod:worker`, or with a trailing `*` for a prefix match), an exact `audience`, a map of exact claim values, a [CEL](https://cel.dev/) `condition` expression for complex logic, or any combination. At least one of `subject_prefix`, `claims`, or `condition` must be set, and all configured matchers must pass for the JWT to be accepted.
 - **Target:** The service account the matched JWT maps to.
-- **Authorization:** The OAuth `scope` granted on the minted token. At launch this is always `workspace:developer`, which grants the same access as an API key issued for that workspace (see [OAuth scopes](/docs/en/api/authentication/wif-reference#oauth-scopes)). The rule also sets `token_lifetime_seconds` (60 to 86400, default 3600).
+- **Authorization:** The OAuth `scope` granted on the minted token. At launch this is always `workspace:developer`, which grants the same access as an API key issued for that workspace (see [OAuth scopes](wif-reference.md#oauth-scopes)). The rule also sets `token_lifetime_seconds` (60 to 86400, default 3600).
 
 A single issuer can have many rules: one per team, namespace, or permission level. Rules are evaluated by ID: the client specifies which rule to use in the exchange request, and Anthropic verifies the JWT satisfies that rule's match criteria. There is no implicit rule search.
 
@@ -86,7 +86,7 @@ In the Claude Console, go to **Settings → Workload identity**.
     | Basic info | A name and optional description. Select the issuer you registered in step 1. |
     | Match | Choose **Static** for subject prefix, audience, and exact-claim matching, or **CEL** for an expression. Be as specific as your IdP's claims allow: a rule that matches too broadly grants more access than you intend. |
     | Target | Select the service account you created in step 2. |
-    | Authorization | OAuth scope (`workspace:developer` at launch; see [OAuth scopes](/docs/en/api/authentication/wif-reference#oauth-scopes)) and token lifetime in seconds. |
+    | Authorization | OAuth scope (`workspace:developer` at launch; see [OAuth scopes](wif-reference.md#oauth-scopes)) and token lifetime in seconds. |
 
     Note the rule's ID (`fdrl_...`). Your workload passes this ID in every token-exchange request.
   </Step>
@@ -310,7 +310,7 @@ puts message.content.first.text
 
 </CodeGroup>
 
-The token-exchange response follows [RFC 6749 §5.1](https://www.rfc-editor.org/rfc/rfc6749#section-5.1). See [Token exchange response](/docs/en/api/authentication/wif-reference#token-exchange-response) for the field reference.
+The token-exchange response follows [RFC 6749 §5.1](https://www.rfc-editor.org/rfc/rfc6749#section-5.1). See [Token exchange response](wif-reference.md#token-exchange-response) for the field reference.
 
 ## Credential precedence
 
@@ -324,7 +324,7 @@ Every SDK resolves credentials in the same five-tier order: constructor argument
   command reports which source won.
 </Warning>
 
-For the full precedence table, the per-tier semantics, and the profile file schema, see [Credential precedence](/docs/en/api/authentication/wif-reference#credential-precedence) in the WIF reference.
+For the full precedence table, the per-tier semantics, and the profile file schema, see [Credential precedence](wif-reference.md#credential-precedence) in the WIF reference.
 
 ## Migrate from API keys
 
@@ -373,5 +373,5 @@ Each guide covers where the JWT comes from on that platform, what its claims loo
 
 ## See also
 
-- [WIF reference](/docs/en/api/authentication/wif-reference): environment variables, profile file schema, validation rules, and error codes
-- [Authentication](/docs/en/api/authentication/overview): all authentication options across the Anthropic SDKs
+- [WIF reference](wif-reference.md): environment variables, profile file schema, validation rules, and error codes
+- [Authentication](overview.md): all authentication options across the Anthropic SDKs

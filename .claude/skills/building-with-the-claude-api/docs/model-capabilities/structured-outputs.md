@@ -12,11 +12,11 @@ Structured outputs constrain Claude's responses to follow a specific schema, ens
 You can use these features independently or together in the same request.
 
 <Note>
-Structured outputs are generally available on the Claude API for [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Opus 4.5, and Claude Haiku 4.5. On Amazon Bedrock, structured outputs are generally available for Claude Opus 4.6, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Opus 4.5, and Claude Haiku 4.5; Claude Opus 4.7 and Claude Mythos Preview are available through [Claude in Amazon Bedrock](/docs/en/build-with-claude/claude-in-amazon-bedrock) (the Messages-API Bedrock endpoint). Structured outputs are in beta on Microsoft Foundry. Structured outputs are not supported on Google Cloud's Vertex AI for Claude Mythos Preview.
+Structured outputs are generally available on the Claude API for [Claude Mythos Preview](https://anthropic.com/glasswing), Claude Opus 4.7, Claude Opus 4.6, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Opus 4.5, and Claude Haiku 4.5. On Amazon Bedrock, structured outputs are generally available for Claude Opus 4.6, Claude Sonnet 4.6, Claude Sonnet 4.5, Claude Opus 4.5, and Claude Haiku 4.5; Claude Opus 4.7 and Claude Mythos Preview are available through [Claude in Amazon Bedrock](../third-party-platforms/amazon-bedrock.md) (the Messages-API Bedrock endpoint). Structured outputs are in beta on Microsoft Foundry. Structured outputs are not supported on Google Cloud's Vertex AI for Claude Mythos Preview.
 </Note>
 
 <Note>
-This feature qualifies for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention) with limited technical retention. See the [Data retention](#data-retention) section for details on what is retained and why.
+This feature qualifies for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md) with limited technical retention. See the [Data retention](#data-retention) section for details on what is retained and why.
 </Note>
 
 <Tip>
@@ -1002,7 +1002,7 @@ func main() {
 </Tab>
 <Tab title="Java">
 
-Java examples on this page use [JDK 25 compact source file](https://openjdk.org/jeps/512) syntax; see the [Java SDK requirements](/docs/en/api/sdks/java#requirements) for the substitution on earlier JDKs.
+Java examples on this page use [JDK 25 compact source file](https://openjdk.org/jeps/512) syntax; see the [Java SDK requirements](https://docs.claude.com/en/docs/api/sdks/java#requirements) for the substitution on earlier JDKs.
 
 **`outputConfig(Class<T>)` method**
 
@@ -1054,7 +1054,7 @@ If an error occurs while converting a JSON response to a Java class instance, th
 
 <section title="Local schema validation">
 
-Structured outputs support a [subset of the JSON Schema language](/docs/en/build-with-claude/structured-outputs#json-schema-limitations). The SDK generates schemas automatically from classes to align with this subset. The `outputConfig(Class<T>)` method performs a validation check on the schema derived from the specified class.
+Structured outputs support a [subset of the JSON Schema language](structured-outputs.md#json-schema-limitations). The SDK generates schemas automatically from classes to align with this subset. The `outputConfig(Class<T>)` method performs a validation check on the schema derived from the specified class.
 
 Key points:
 
@@ -2518,7 +2518,7 @@ puts message.parsed_output
 
 ## Strict tool use
 
-For enforcing JSON Schema compliance on tool inputs with grammar-constrained sampling, see [Strict tool use](/docs/en/agents-and-tools/tool-use/strict-tool-use).
+For enforcing JSON Schema compliance on tool inputs with grammar-constrained sampling, see [Strict tool use](../tools/strict-tool-use.md).
 
 ## Using both features together
 
@@ -2955,7 +2955,7 @@ When using structured outputs, Claude automatically receives an additional syste
 
 - Your input token count is slightly higher
 - The injected prompt costs you tokens like any other system prompt
-- Changing the `output_config.format` parameter will invalidate any [prompt cache](/docs/en/build-with-claude/prompt-caching) for that conversation thread
+- Changing the `output_config.format` parameter will invalidate any [prompt cache](../context-management/prompt-caching.md) for that conversation thread
 
 ### JSON Schema limitations
 
@@ -3116,20 +3116,20 @@ Prompts and responses are processed with ZDR when using structured outputs. Howe
 
 Structured outputs are HIPAA eligible, but **PHI must not be included in JSON schema definitions**. The API compiles JSON schemas into grammars that are cached separately from message content, and these cached schemas do not receive the same PHI protections as prompts and responses. Do not include PHI in schema property names, `enum` values, `const` values, or `pattern` regular expressions. PHI should only appear in message content (prompts and responses), where it is protected under HIPAA safeguards.
 
-For ZDR and HIPAA eligibility across all features, see [API and data retention](/docs/en/build-with-claude/api-and-data-retention).
+For ZDR and HIPAA eligibility across all features, see [API and data retention](../admin/data-compliance/api-and-data-retention.md).
 
 ## Feature compatibility
 
 **Works with:**
-- **[Batch processing](/docs/en/build-with-claude/batch-processing)**: Process structured outputs at scale with 50% discount
-- **[Token counting](/docs/en/build-with-claude/token-counting)**: Count tokens without compilation
-- **[Streaming](/docs/en/build-with-claude/streaming)**: Stream structured outputs like normal responses
+- **[Batch processing](batch-processing.md)**: Process structured outputs at scale with 50% discount
+- **[Token counting](../context-management/token-counting.md)**: Count tokens without compilation
+- **[Streaming](streaming-messages.md)**: Stream structured outputs like normal responses
 - **Combined usage**: Use JSON outputs (`output_config.format`) and strict tool use (`strict: true`) together in the same request
 
 **Incompatible with:**
-- **[Citations](/docs/en/build-with-claude/citations)**: Citations require interleaving citation blocks with text, which conflicts with strict JSON schema constraints. Returns 400 error if citations enabled with `output_config.format`.
+- **[Citations](citations.md)**: Citations require interleaving citation blocks with text, which conflicts with strict JSON schema constraints. Returns 400 error if citations enabled with `output_config.format`.
 - **Message Prefilling**: Incompatible with JSON outputs
 
 <Tip>
-**Grammar scope**: Grammars apply only to Claude's direct output, not to tool use calls, tool results, or thinking tags (when using [Extended Thinking](/docs/en/build-with-claude/extended-thinking)). Grammar state resets between sections, allowing Claude to think freely while still producing structured output in the final response.
+**Grammar scope**: Grammars apply only to Claude's direct output, not to tool use calls, tool results, or thinking tags (when using [Extended Thinking](extended-thinking.md)). Grammar state resets between sections, allowing Claude to think freely while still producing structured output in the final response.
 </Tip>

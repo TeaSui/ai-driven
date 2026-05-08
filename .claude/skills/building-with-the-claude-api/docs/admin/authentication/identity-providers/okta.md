@@ -16,7 +16,7 @@ There are many ways to configure and authenticate to Okta that are outside the s
 
 ## Prerequisites
 
-- Familiarity with [WIF concepts](/docs/en/build-with-claude/workload-identity-federation#concepts): service accounts, federation issuers, and federation rules.
+- Familiarity with [WIF concepts](../workload-identity-federation.md#concepts): service accounts, federation issuers, and federation rules.
 - An Okta organization with API Access Management enabled (required for custom authorization servers).
 - Permission to create service accounts, federation issuers, and federation rules in the Claude Console for your Anthropic organization.
 - A workload that can request a token from Okta's `/v1/token` endpoint and reach `api.anthropic.com`.
@@ -41,7 +41,7 @@ For a service app using `client_credentials`, Okta sets the `sub` claim of the i
 
 ## Configure Anthropic
 
-Follow the [setup walkthrough](/docs/en/build-with-claude/workload-identity-federation#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these Okta-specific values.
+Follow the [setup walkthrough](../workload-identity-federation.md#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. Use these Okta-specific values.
 
 **Federation issuer:** Use your Okta custom authorization server URL and discovery mode. Anthropic reads Okta's `.well-known/openid-configuration` discovery document and fetches the JWKS from the `jwks_uri` it advertises.
 
@@ -468,7 +468,7 @@ Each SDK tab shows the callable pattern: the Anthropic SDK calls your identity-t
 
 ## Verify the setup
 
-A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](/docs/en/api/authentication/wif-reference#troubleshoot-a-failed-exchange); the most common Okta-side cause is an `issuer_url` mismatch (it must include the `/oauth2/<auth-server-id>` path; the Okta org authorization server is not usable).
+A successful exchange returns an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](../wif-reference.md#troubleshoot-a-failed-exchange); the most common Okta-side cause is an `issuer_url` mismatch (it must include the `/oauth2/<auth-server-id>` path; the Okta org authorization server is not usable).
 
 ## Scope your rule
 
@@ -488,5 +488,5 @@ Lock the rule's `match` block to the narrowest scope that fits your use case:
 
 ## Next steps
 
-- Review the [WIF reference](/docs/en/api/authentication/wif-reference) for the full credential resolution order and profile configuration.
-- See the [WIF reference](/docs/en/api/authentication/wif-reference#rule-matching-semantics) to match on custom Okta claims with CEL expressions.
+- Review the [WIF reference](../wif-reference.md) for the full credential resolution order and profile configuration.
+- See the [WIF reference](../wif-reference.md#rule-matching-semantics) to match on custom Okta claims with CEL expressions.

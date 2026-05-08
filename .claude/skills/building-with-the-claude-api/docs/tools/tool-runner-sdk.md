@@ -4,7 +4,7 @@ Use the SDK's Tool Runner abstraction to handle the agentic loop, error wrapping
 
 ---
 
-Tool Runner handles the agentic loop, error wrapping, and type safety so you don't have to. Use the [manual loop](/docs/en/agents-and-tools/tool-use/handle-tool-calls) only when you need human-in-the-loop approval, custom logging, or conditional execution. Available in Python, TypeScript, and Ruby SDKs.
+Tool Runner handles the agentic loop, error wrapping, and type safety so you don't have to. Use the [manual loop](handle-tool-calls.md) only when you need human-in-the-loop approval, custom logging, or conditional execution. Available in Python, TypeScript, and Ruby SDKs.
 
 The tool runner provides an out-of-the-box solution for executing tools with Claude. Instead of manually handling tool calls, tool results, and conversation management, the tool runner automatically:
 
@@ -22,7 +22,7 @@ The tool runner is currently in beta and available in the [Python](https://githu
 <Tip>
 **Automatic context management with compaction**
 
-The tool runner supports automatic [compaction](/docs/en/build-with-claude/context-editing#client-side-compaction-sdk), which generates summaries when token usage exceeds a threshold. This allows long-running agentic tasks to continue beyond context window limits.
+The tool runner supports automatic [compaction](../context-management/context-editing.md#client-side-compaction-sdk), which generates summaries when token usage exceeds a threshold. This allows long-running agentic tasks to continue beyond context window limits.
 </Tip>
 
 ## Basic usage
@@ -650,7 +650,7 @@ end
 
 ### Modifying tool results
 
-You can modify tool results before they're sent back to Claude. This is useful for adding metadata like `cache_control` to enable [prompt caching](/docs/en/build-with-claude/prompt-caching) on tool results, or for transforming the tool output.
+You can modify tool results before they're sent back to Claude. This is useful for adding metadata like `cache_control` to enable [prompt caching](../context-management/prompt-caching.md) on tool results, or for transforming the tool output.
 
 Use the tool response method to get the tool result, then modify it before the runner proceeds. Whether you explicitly append the modified result or mutate it in place depends on the SDK; see the code comments in each tab.
 
@@ -793,7 +793,7 @@ end
 </Tabs>
 
 <Tip>
-Adding `cache_control` to tool results is particularly useful when tools return large amounts of data (like document search results) that you want to cache for subsequent API calls. See [Prompt caching](/docs/en/build-with-claude/prompt-caching) for more details on caching strategies.
+Adding `cache_control` to tool results is particularly useful when tools return large amounts of data (like document search results) that you want to cache for subsequent API calls. See [Prompt caching](../context-management/prompt-caching.md) for more details on caching strategies.
 </Tip>
 
 ## Streaming
@@ -914,6 +914,6 @@ end
 
 ## Next steps
 
-- For manual control over the tool-call loop, see [Handle tool calls](/docs/en/agents-and-tools/tool-use/handle-tool-calls).
-- For running multiple tools concurrently, see [Parallel tool use](/docs/en/agents-and-tools/tool-use/parallel-tool-use).
-- For the full tool-use workflow, see [Define tools](/docs/en/agents-and-tools/tool-use/define-tools).
+- For manual control over the tool-call loop, see [Handle tool calls](handle-tool-calls.md).
+- For running multiple tools concurrently, see [Parallel tool use](parallel-tool-use.md).
+- For the full tool-use workflow, see [Define tools](define-tools.md).

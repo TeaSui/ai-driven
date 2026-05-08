@@ -29,6 +29,9 @@ class CodingAgent(BaseAgent):
     """AI Coding Agent that implements features from Jira tickets."""
 
     agent_type = "coding"
+    # HITL role identifier. Used by task_specialist_state.role to
+    # distinguish a paused coding run from a paused specialist.
+    hitl_role = "coding"
 
     def __init__(
         self,
@@ -822,6 +825,13 @@ class CodingAgent(BaseAgent):
         Without this forward, CodingAgent silently dropped the kwarg with
         a TypeError (smoke-tested 2026-05-01 on KAN-17).
         """
+        # Pick up the prompt variant stamped by the dispatcher. The
+        # consumer stashes it onto the payload under `_variant_prompt`
+        # + `_variant_id` so we avoid a second DB round-trip here.
+        # Absence → use the compiled-in CODING_AGENT_SYSTEM_PROMPT.
+        self._variant_prompt = (task_input or {}).get("_variant_prompt") or None
+        self._variant_id = (task_input or {}).get("_variant_id") or None
+
         # Register MCP tools (async, must be done here)
         await self._register_mcp_tools()
 
@@ -886,6 +896,18 @@ class CodingAgent(BaseAgent):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("repo.overview pre-load failed: %s", exc)
 
+        # Enable async HITL unless the kill switch is off. When async,
+        # human.ask_clarification raises AwaitingHumanInput instead of
+        # polling Redis; the exception propagates up through
+        # run_agent_loop (which attaches the pending tool_use_id and
+        # full messages list) and out of BaseAgent.run. The SQS
+        # _process_message catches it and persists state.
+        settings = get_settings()
+        if settings.hitl_coding_enabled and (
+            (task_input or {}).get("triggered_by") != "jira_transition"
+        ):
+            self._hitl_mode = "async"
+
         return await super().run(
             task_input,
             task_id=task_id,
@@ -896,15 +918,111 @@ class CodingAgent(BaseAgent):
             initial_cost=initial_cost,
         )
 
-    def _get_system_prompt(self, context: dict[str, Any]) -> str:
-        # Start from the static coding-agent system prompt, then layer on
-        # specialist artifact blocks loaded by run() (Phase 2 orchestrator
-        # composition). compose_coding_prompt with an empty dict is a
-        # no-op, so the base prompt path stays byte-identical when no
-        # artifacts exist.
-        prompt = compose_coding_prompt(
-            CODING_AGENT_SYSTEM_PROMPT, self._prior_artifacts
+    async def resume_with_answer(
+        self,
+        task_input: dict[str, Any],
+        *,
+        task_id: str,
+        prior_messages: list[dict[str, Any]],
+        tool_use_id: str,
+        answers: dict[str, str],
+        rounds_used: int,
+        rounds_cap: int,
+        model: str | None = None,
+        max_iterations: int | None = None,
+        initial_cost: float = 0.0,
+    ) -> Any:
+        """Continue a coding run that paused on human.ask_clarification.
+
+        Rebuilds the Claude conversation with the user's answer as a
+        tool_result block and re-enters run_agent_loop. Hides the
+        ask_clarification tool when the round cap has been reached —
+        the model's next turn has no choice but to continue without
+        asking.
+
+        Shares the BaseAgent-level HITL plumbing with SpecialistBase's
+        resume path. The key differences vs SpecialistBase are:
+          * CodingAgent runs a full multi-iteration tool loop, so we
+            just re-enter run_agent_loop with the rebuilt message list.
+          * Prior artifacts + repo_map are not rebuilt (they live in
+            the persisted conversation's first user turn already).
+        """
+        from xml.sax.saxutils import escape as _xml_escape
+
+        # Prior artifacts are already baked into the persisted system
+        # prompt; still re-populate for prompt_composer to work.
+        if task_id and get_settings().orchestrator_mode != "off":
+            try:
+                async with async_session_factory() as session:
+                    repo = ArtifactRepository(session)
+                    self._prior_artifacts = await repo.list_for_task(
+                        uuid.UUID(task_id)
+                    )
+            except Exception:  # noqa: BLE001
+                self._prior_artifacts = {}
+
+        # Re-register tools (registry was rebuilt on a fresh agent).
+        await self._register_mcp_tools()
+
+        # Build the XML-escaped answer block. Matches the specialist
+        # path's anti-injection wrapper so coding-side answers are
+        # treated as data, not instructions.
+        escaped: list[str] = []
+        for qid, text in (answers or {}).items():
+            escaped.append(
+                f'<user_answer id="{_xml_escape(str(qid))}">'
+                f'{_xml_escape(str(text))}</user_answer>'
+            )
+        answer_block = "\n".join(escaped) or '<user_answer id="_empty"></user_answer>'
+
+        # Splice the answer as a tool_result for the pending tool_use.
+        messages = list(prior_messages) + [{
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": answer_block,
+            }],
+        }]
+
+        # If the cap was reached, forbid further ask_clarification calls.
+        if rounds_used >= rounds_cap:
+            self._hitl_mode = "poll"  # legacy fallback would still raise
+            # Add a nudge so the model knows the budget is exhausted.
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Clarification budget exhausted for this coding run. "
+                    "Do not call human.ask_clarification again. Continue "
+                    "the workflow using best-guess defaults for anything "
+                    "still unclear; note assumptions in the PR description."
+                ),
+            })
+        else:
+            # Cap not reached — keep async mode on for follow-ups.
+            self._hitl_mode = "async"
+
+        # Re-enter the tool loop. run_agent_loop will catch another
+        # AwaitingHumanInput if the model asks a follow-up.
+        settings = get_settings()
+        return await self._claude.run_agent_loop(
+            messages,
+            system=self._get_system_prompt({}),
+            model=model or settings.claude_default_model,
+            max_tokens=settings.claude_max_tokens,
+            tools=self._get_tool_names(),
+            thinking={"type": "enabled", "budget_tokens": 16000},
+            max_iterations=max_iterations or settings.claude_max_tool_iterations,
         )
+
+    def _get_system_prompt(self, context: dict[str, Any]) -> str:
+        # Start from the dispatched prompt variant when present,
+        # otherwise the compiled-in default. The variant text already
+        # carries whatever revisions the A/B registry is testing, so
+        # composition logic below (specialist artifacts + MCP tools)
+        # still layers on top identically.
+        base = getattr(self, "_variant_prompt", None) or CODING_AGENT_SYSTEM_PROMPT
+        prompt = compose_coding_prompt(base, self._prior_artifacts)
         mcp_section = self._build_mcp_tools_section()
         if mcp_section:
             prompt += f"\n\n{mcp_section}"
@@ -1027,10 +1145,16 @@ class CodingAgent(BaseAgent):
                      "path repo.list_files when you need to dig into one subtree.")
         parts.append("3. PLAN: pick an approach that matches existing conventions and "
                      "the test strategy already in the repo.")
-        parts.append("4. IMPLEMENT: call git.create_branch, then commit changes. "
-                     "When writing 2+ files for the same logical change, call "
-                     "file.write_batch ONCE with all files (produces one commit). "
-                     "Only use file.write for a single isolated change. Run tests "
+        parts.append("4. IMPLEMENT: call git.create_branch FIRST (with "
+                     "from_ref=\"main\" or whichever default branch the "
+                     "<repository> block names). This is non-negotiable: "
+                     "calling file.write* on a non-existent branch silently "
+                     "creates an orphan branch with no ancestry, which makes "
+                     "the resulting PR unmergeable. ONLY AFTER the branch "
+                     "is created, commit changes. When writing 2+ files "
+                     "for the same logical change, call file.write_batch "
+                     "ONCE with all files (produces one commit). Only use "
+                     "file.write for a single isolated change. Run tests "
                      "via sandbox.execute.")
         parts.append(f"5. DELIVER: call {pr_tool} to open the PR. Post a Jira comment "
                      "with the PR link if a ticket exists.")

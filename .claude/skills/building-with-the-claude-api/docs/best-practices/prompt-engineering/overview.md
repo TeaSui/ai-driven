@@ -9,7 +9,7 @@ This guide assumes that you have:
 2. Some ways to empirically test against those criteria
 3. A first draft prompt you want to improve
 
-If not, we highly suggest you spend time establishing that first. Check out [Define success criteria and build evaluations](/docs/en/test-and-evaluate/develop-tests) for tips and guidance.
+If not, we highly suggest you spend time establishing that first. Check out [Define success criteria and build evaluations](../evaluation/define-success-criteria.md) for tips and guidance.
 
 <CardGroup cols={2}>
   <Card title="Prompt generator" icon="link" href="/dashboard">
@@ -31,9 +31,9 @@ If not, we highly suggest you spend time establishing that first. Check out [Def
 
 ## How to prompt engineer
 
-All prompting techniques — from clarity and examples to XML structuring, role prompting, thinking, and prompt chaining — are covered in [Prompting best practices](/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices). That's the living reference; start there.
+All prompting techniques — from clarity and examples to XML structuring, role prompting, thinking, and prompt chaining — are covered in [Prompting best practices](prompting-best-practices.md). That's the living reference; start there.
 
-The [Claude Console](/dashboard) also offers [prompting tools](/docs/en/build-with-claude/prompt-engineering/prompting-tools)—prompt generator, templates and variables, and prompt improver—to help you build and refine prompts quickly.
+The [Claude Console](/dashboard) also offers [prompting tools](console-prompting-tools.md)—prompt generator, templates and variables, and prompt improver—to help you build and refine prompts quickly.
 
 ***
 

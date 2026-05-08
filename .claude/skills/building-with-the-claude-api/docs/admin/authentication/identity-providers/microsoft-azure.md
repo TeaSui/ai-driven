@@ -12,12 +12,12 @@ Azure workloads authenticate to the Claude API by presenting a JSON Web Token (J
 In both cases the Entra-issued token you present to Anthropic has the tenant-specific issuer `https://login.microsoftonline.com/<TENANT_ID>/v2.0` and carries the managed identity's object ID in the `sub` and `oid` claims. You register that issuer with Anthropic once, write a federation rule that matches the expected claims, and your workload exchanges its Entra token for an `sk-ant-oat01-...` access token at runtime.
 
 <Tip>
-AKS pods can alternatively skip the Entra exchange and present the Kubernetes-projected service account token to Anthropic directly. That path registers your AKS cluster's OIDC issuer with Anthropic instead of your Entra tenant. See [Kubernetes](/docs/en/build-with-claude/wif-providers/kubernetes) for that flow.
+AKS pods can alternatively skip the Entra exchange and present the Kubernetes-projected service account token to Anthropic directly. That path registers your AKS cluster's OIDC issuer with Anthropic instead of your Entra tenant. See [Kubernetes](kubernetes.md) for that flow.
 </Tip>
 
 ## Prerequisites
 
-- Familiarity with [WIF concepts](/docs/en/build-with-claude/workload-identity-federation#concepts): service accounts, federation issuers, and federation rules.
+- Familiarity with [WIF concepts](../workload-identity-federation.md#concepts): service accounts, federation issuers, and federation rules.
 - An Azure subscription with permission to assign managed identities (or configure Entra Workload Identity on AKS).
 - Your Microsoft Entra tenant ID. Find it in the Azure portal under **Microsoft Entra ID → Overview → Tenant ID**.
 - Permission to create service accounts, federation issuers, and federation rules in the Claude Console for your Anthropic organization.
@@ -70,7 +70,7 @@ An Entra-issued token for a managed identity carries these claims:
 
 ## Configure Anthropic
 
-Follow the [setup walkthrough](/docs/en/build-with-claude/workload-identity-federation#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. In the Console, choose the **OIDC** provider option and supply the Entra-specific values that follow.
+Follow the [setup walkthrough](../workload-identity-federation.md#set-up-federation) to register a federation issuer, create an Anthropic service account, and create a federation rule in the Claude Console. In the Console, choose the **OIDC** provider option and supply the Entra-specific values that follow.
 
 **Federation issuer:** Entra publishes an OIDC discovery document at the per-tenant issuer URL, so use discovery mode. Each Azure tenant you federate needs its own issuer record.
 
@@ -881,11 +881,11 @@ ant messages create \
 
 </CodeGroup>
 
-Alternatively, register your AKS cluster's OIDC issuer with Anthropic directly and skip the Entra hop. See [Kubernetes](/docs/en/build-with-claude/wif-providers/kubernetes) for that pattern.
+Alternatively, register your AKS cluster's OIDC issuer with Anthropic directly and skip the Entra hop. See [Kubernetes](kubernetes.md) for that pattern.
 
 ## Verify the setup
 
-From your Azure resource, run the cURL exchange shown earlier and confirm that `POST /v1/oauth/token` returns a `200` with an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](/docs/en/api/authentication/wif-reference#troubleshoot-a-failed-exchange); the most common Azure-side cause is a mismatch between the `issuer_url` you registered and the `iss` claim in your decoded token. They must match exactly. For managed-identity tokens the `iss` value is either `https://login.microsoftonline.com/<TENANT_ID>/v2.0` or `https://sts.windows.net/<TENANT_ID>/`.
+From your Azure resource, run the cURL exchange shown earlier and confirm that `POST /v1/oauth/token` returns a `200` with an `access_token` beginning with `sk-ant-oat01-` and an `expires_in` value in seconds. On `400 invalid_grant`, see [Troubleshoot a failed exchange](../wif-reference.md#troubleshoot-a-failed-exchange); the most common Azure-side cause is a mismatch between the `issuer_url` you registered and the `iss` claim in your decoded token. They must match exactly. For managed-identity tokens the `iss` value is either `https://login.microsoftonline.com/<TENANT_ID>/v2.0` or `https://sts.windows.net/<TENANT_ID>/`.
 
 ## Scope your rule
 
@@ -905,6 +905,6 @@ Lock the rule's `match` block to the narrowest scope that fits your use case:
 
 ## Next steps
 
-- Review the full configuration model in [Workload Identity Federation](/docs/en/build-with-claude/workload-identity-federation).
-- See the [provider guides](/docs/en/build-with-claude/workload-identity-federation#identity-providers) for AWS, Google Cloud, GitHub Actions, and Kubernetes.
-- For environment variables, profile files, and credential precedence, see the [WIF reference](/docs/en/api/authentication/wif-reference).
+- Review the full configuration model in [Workload Identity Federation](../workload-identity-federation.md).
+- See the [provider guides](../workload-identity-federation.md#identity-providers) for AWS, Google Cloud, GitHub Actions, and Kubernetes.
+- For environment variables, profile files, and credential precedence, see the [WIF reference](../wif-reference.md).

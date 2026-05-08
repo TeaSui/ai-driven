@@ -46,6 +46,11 @@ class BusinessAnalystSpecialist(SpecialistBase):
 
     agent_type = "specialist_business_analyst"
     role = "business_analyst"
+    # HITL opt-in. When team/global HITL is enabled, BA runs through
+    # the tool-loop path and MAY invoke human.ask_clarification when a
+    # ticket is too vague to proceed. Falls back to verdict=block with
+    # blocking_questions when HITL is disabled.
+    supports_hitl = True
 
     def _system_prompt(self) -> str:
         return BUSINESS_ANALYST_SYSTEM_PROMPT

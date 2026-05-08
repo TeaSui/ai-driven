@@ -666,4 +666,4 @@ client.beta.environments.delete(environment.id)
 
 ## Pre-installed runtimes
 
-Cloud containers include common runtimes out of the box. See [Container reference](/docs/en/managed-agents/cloud-containers) for the full list of pre-installed languages, databases, and utilities.
+Cloud containers include common runtimes out of the box. See [Container reference](cloud-environment-setup.md) for the full list of pre-installed languages, databases, and utilities.

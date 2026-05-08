@@ -18,7 +18,7 @@ To connect to a remote MCP server:
 2. Ensure you have the necessary authentication credentials.
 3. Follow the server-specific connection instructions provided by each company.
 
-For more information about using remote MCP servers with the Claude API, see the [MCP connector docs](/docs/en/agents-and-tools/mcp-connector).
+For more information about using remote MCP servers with the Claude API, see the [MCP connector docs](mcp-connector.md).
 
 ## Remote MCP server examples
 

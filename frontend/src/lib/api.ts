@@ -519,6 +519,7 @@ export async function stopTask(taskId: string): Promise<void> {
 
 // ── Human-in-the-loop clarification ──────────────────────────────────────────
 
+/** Legacy single-answer submission (CodingAgent poll-mode flow). */
 export async function respondToTask(taskId: string, answer: string): Promise<void> {
   await authFetch(`/api/chat/tasks/${taskId}/respond`, {
     method: 'POST',
@@ -527,14 +528,52 @@ export async function respondToTask(taskId: string, answer: string): Promise<voi
   })
 }
 
-export interface PendingQuestion {
+/** Returns the open HITL round for a task, or null if none is pending. */
+export async function getPendingClarification(
+  taskId: string,
+): Promise<{ role: string; round_id: string; questions: ClarificationQuestion[]; asked_at?: string; rounds: number } | null> {
+  const r = await f(`/api/admin/tasks/${taskId}/pending-clarification`)
+  return (r?.pending ?? null) as any
+}
+
+/** HITL-v1 batched-answer submission (BusinessAnalyst async-continuation flow). */
+export async function respondToClarification(
+  taskId: string,
+  roundId: string,
+  answers: Record<string, string>,
+): Promise<void> {
+  const r = await authFetch(`/api/chat/tasks/${taskId}/respond`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ round_id: roundId, answers }),
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({}))
+    throw new Error(
+      err?.error?.message ?? err?.detail ?? `Request failed: ${r.status}`,
+    )
+  }
+}
+
+export interface ClarificationQuestion {
+  id: string
   question: string
+  options?: string[]
+  why?: string
+}
+
+export interface PendingQuestion {
+  question: string           // legacy single-question label (equals questions[0].question if batch)
   context?: string
   options?: string[]
   timeout?: number
+  // HITL-v1 batched shape
+  roundId?: string
+  role?: string
+  questions?: ClarificationQuestion[]
 }
 
-/** Extract the latest unanswered question from the event stream. */
+/** Extract the latest unanswered clarification from the event stream. */
 export function extractPendingQuestion(
   events: AgentEvent[],
   taskStatus?: string,
@@ -542,11 +581,24 @@ export function extractPendingQuestion(
   if (taskStatus && !['awaiting_input', 'running', 'coding', 'planning'].includes(taskStatus)) {
     return null
   }
-  // Walk events backwards. A `human_response` after a `human_input_required`
-  // means the question was already answered.
+  // Walk events forward. Latest pending wins; a matching answered event
+  // clears it.
   let pending: PendingQuestion | null = null
   for (const e of events) {
-    if (e.type === 'human_input_required') {
+    if (e.type === 'specialist.clarification_requested') {
+      const d = e.data as Record<string, unknown>
+      const qs = (d.questions as ClarificationQuestion[] | undefined) ?? []
+      pending = {
+        question: qs[0]?.question || '',
+        context: (d.why as string | undefined) ?? qs[0]?.why,
+        options: qs[0]?.options ?? [],
+        roundId: d.round_id as string | undefined,
+        role: d.role as string | undefined,
+        questions: qs,
+      }
+    } else if (e.type === 'specialist.clarification_answered') {
+      pending = null
+    } else if (e.type === 'human_input_required') {
       const d = e.data as Record<string, unknown>
       pending = {
         question: (d.question as string) || '',

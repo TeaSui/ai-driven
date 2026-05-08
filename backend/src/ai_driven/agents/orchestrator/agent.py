@@ -101,8 +101,15 @@ class OrchestratorAgent(BaseAgent):
         task_id = payload["task_id"]
         ticket = payload.get("ticket", {})
         repo = payload.get("repo", {})
+        # HITL needs team settings (per-team opt-in) + triggered_by (to
+        # force off for Jira-webhook paths). Both are best-effort —
+        # missing fields degrade to "HITL off" which is safe.
+        team_settings = await self._load_team_settings_for_task(task_id)
 
         self._task_id = task_id
+        # Tracked by _dispatch_specialist so the SQS wrapper can
+        # attribute AwaitingHumanInput raises to the correct role.
+        self._current_specialist_role: str | None = None
         await self._publish_event("orchestrator.started",
                                   {"task_id": task_id})
 
@@ -145,12 +152,29 @@ class OrchestratorAgent(BaseAgent):
         # flag is defaulted True for lenient shipping; flip False under
         # controlled smoke tests / T0 reruns to re-measure the raw error
         # rate without fallback masking. See docs/phase2-error-audit.md.
+        # Preload any artifacts already persisted for this task. This
+        # is the HITL resume path: the BA just finished and wrote its
+        # artifact; the orchestrator replays for downstream specialists
+        # but MUST skip any role whose artifact is already present.
         artifacts: dict[str, Artifact] = {}
+        try:
+            async with async_session_factory() as session:
+                preloaded = await ArtifactRepository(session).list_for_task(
+                    uuid.UUID(task_id)
+                )
+                artifacts.update(preloaded)
+        except Exception:  # noqa: BLE001
+            logger.debug("artifact preload failed; continuing with empty set")
         halted_on: str | None = None
         treat_errors_as_pass = get_settings().orchestrator_treat_errors_as_pass
         fallback_activated_roles: list[str] = []
 
         for role in plan.full_sequence():
+            # Skip if a prior run already produced this specialist's
+            # artifact (HITL resume path, or crash-recovery replay).
+            if role in artifacts and artifacts[role].verdict != "error":
+                # Still accumulate token usage zero — already persisted.
+                continue
             # UX is conditional on stacks
             if role == "ux_designer":
                 sa = artifacts.get("stack_analyst")
@@ -172,7 +196,7 @@ class OrchestratorAgent(BaseAgent):
                 repo=repo,
                 tier=tier,
                 prior_artifacts=relevant_artifacts_for(role, fan_out_source),
-                team_settings={},
+                team_settings=team_settings,
             )
             artifact = await self._dispatch_specialist(role, ctx)
             artifacts[role] = artifact
@@ -222,6 +246,28 @@ class OrchestratorAgent(BaseAgent):
         classifier = TierClassifier(claude_client=self._claude)
         return await classifier.classify(ticket, repo)
 
+    async def _load_team_settings_for_task(self, task_id: str) -> dict:
+        """Return the owning team's ``settings_json`` dict, or {} on miss.
+
+        Used to resolve per-team HITL opt-in without hard-coding the
+        team id. Best-effort — if the task or team can't be loaded we
+        fall back to the global switch.
+        """
+        from sqlalchemy import select
+        from ai_driven.db.postgres.models import Task, Team
+        try:
+            async with async_session_factory() as session:
+                row = await session.execute(
+                    select(Team.settings_json)
+                    .join(Task, Task.team_id == Team.id)
+                    .where(Task.id == uuid.UUID(task_id))
+                )
+                settings_json = row.scalar_one_or_none()
+                return dict(settings_json or {})
+        except Exception:  # noqa: BLE001
+            logger.debug("team settings lookup failed; defaulting to {}")
+            return {}
+
     async def _persist_tier(self, task_id: str, tier: str) -> None:
         from sqlalchemy import update
         from ai_driven.db.postgres.models import Task
@@ -251,7 +297,15 @@ class OrchestratorAgent(BaseAgent):
     ) -> Artifact:
         klass = _SPECIALIST_CLASSES[role]
         specialist = klass()
-        return await specialist.run_specialist(ctx)
+        # Track the role currently running so the SQS wrapper can
+        # attribute an AwaitingHumanInput raise to the right specialist
+        # without having to parse exception state. Cleared after return
+        # on every path (try/finally).
+        self._current_specialist_role = role
+        try:
+            return await specialist.run_specialist(ctx)
+        finally:
+            self._current_specialist_role = None
 
     async def _pick_optional_specialists(
         self, plan: SpecialistPlan, ticket: dict, repo: dict,

@@ -242,3 +242,76 @@ async def reap_stuck_running() -> int:
         except Exception:
             logger.exception("reap_stuck_running: task=%s failed", task.id)
     return reaped
+
+
+async def reap_stuck_awaiting_input() -> int:
+    """Reap tasks stuck in ``awaiting_input`` past the HITL timeout.
+
+    Threshold is configured via
+    ``Settings.hitl_awaiting_input_timeout_hours`` (default 4h, per
+    HITL-v1 design). A task in ``awaiting_input`` is stuck when its
+    ``task_specialist_state.updated_at`` is older than the cutoff AND
+    it still has a ``pending_question``.
+
+    On reap: transitions to ``failed`` with audit row + clears the
+    ``task_specialist_state`` row so a retrigger (override rerun or
+    a fresh /respond with a stale round_id) can't accidentally revive
+    a dead conversation.
+    """
+    from ai_driven.config import get_settings as _get_settings
+    from ai_driven.db.postgres.models import TaskSpecialistState
+    from sqlalchemy import delete as _delete
+
+    settings = _get_settings()
+    hours = int(settings.hitl_awaiting_input_timeout_hours or 4)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(TaskSpecialistState).where(
+                TaskSpecialistState.pending_question.isnot(None),
+                TaskSpecialistState.updated_at < cutoff,
+            )
+        )
+        stuck_rows = list(result.scalars().all())
+
+    reaped = 0
+    for row in stuck_rows:
+        # Load the task — skip if no longer in awaiting_input (user
+        # may have cancelled or pressed resume concurrently).
+        async with async_session_factory() as session:
+            task = await session.get(Task, row.task_id)
+            if task is None or task.status != "awaiting_input":
+                # Stale state — still clean the row so we don't scan
+                # it again next tick.
+                await session.execute(
+                    _delete(TaskSpecialistState).where(
+                        TaskSpecialistState.task_id == row.task_id,
+                        TaskSpecialistState.role == row.role,
+                    )
+                )
+                await session.commit()
+                continue
+        try:
+            if await _reap_one(
+                task,
+                new_failure_reason="awaiting_input_timeout",
+                metric_name="reaper.awaiting_input.reaped",
+            ):
+                reaped += 1
+        except Exception:
+            logger.exception(
+                "reap_stuck_awaiting_input: task=%s role=%s failed",
+                row.task_id, row.role,
+            )
+            continue
+        # Clean up the specialist_state row post-reap.
+        async with async_session_factory() as session:
+            await session.execute(
+                _delete(TaskSpecialistState).where(
+                    TaskSpecialistState.task_id == row.task_id,
+                    TaskSpecialistState.role == row.role,
+                )
+            )
+            await session.commit()
+    return reaped

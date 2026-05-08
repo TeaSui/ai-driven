@@ -48,7 +48,7 @@ from xml.sax.saxutils import escape as _saxutils_escape
 
 from pydantic import ValidationError
 
-from ai_driven.agents.base import BaseAgent
+from ai_driven.agents.base import AwaitingHumanInput, BaseAgent
 from ai_driven.agents.orchestrator.artifacts import (
     Artifact,
     validate_payload,
@@ -106,6 +106,20 @@ class SpecialistBase(BaseAgent):
     # specialist; use an attribute name here so a single settings flip
     # propagates to every specialist.
     model_setting_attr: str = "claude_default_model"
+    # HITL opt-in. When True (and global HITL is enabled for the team)
+    # this specialist runs through ``_run_with_hitl`` instead of the
+    # single-shot Claude call. The tool loop can raise
+    # :class:`AwaitingHumanInput` when the model asks a clarification;
+    # the SQS wrapper catches that and persists state. Default False —
+    # specialists must explicitly opt in.
+    supports_hitl: bool = False
+    # Per-task cap on clarification rounds. Matches the design default
+    # (3 rounds). The /respond endpoint enforces the same cap.
+    max_hitl_rounds: int = 3
+    # Per-specialist iteration budget inside the HITL tool loop. The
+    # model may emit ONE ask_clarification call before we stop; anything
+    # past that is either the terminal JSON artifact or an error.
+    max_hitl_iterations: int = 2
     # Advisory; NOT enforced in run_specialist (see module docstring §1).
     # Retained so future QA / cost tooling can reason about specialist
     # intent without rediscovering it.
@@ -285,6 +299,35 @@ class SpecialistBase(BaseAgent):
         cost = (input_cost + output_cost) * regional_multiplier
         return cost.quantize(Decimal("0.000001"))
 
+    # --- HITL helpers ----------------------------------------------------
+
+    def _hitl_active(self, ctx: SpecialistContext) -> bool:
+        """Return True iff this specialist should run in HITL async mode
+        for this specific dispatch.
+
+        Conditions (ALL must hold):
+          * subclass opted in (``supports_hitl = True``)
+          * global + per-team switch is on
+          * role appears in ``settings.hitl_specialists`` allowlist
+          * this is NOT a Jira-webhook triggered run (no human listening)
+        """
+        if not self.supports_hitl:
+            return False
+        from ai_driven.config import get_settings as _get_settings
+        settings = _get_settings()
+        team_settings = ctx.team_settings or {}
+        team_flag = team_settings.get("hitl_enabled")
+        enabled = bool(team_flag) if team_flag is not None else bool(settings.hitl_enabled)
+        if not enabled:
+            return False
+        allowed_roles = {r.strip() for r in (settings.hitl_specialists or "").split(",")}
+        if self.role not in allowed_roles:
+            return False
+        # Jira-webhook flows have no human connected; suppress HITL.
+        if (ctx.ticket or {}).get("triggered_by") == "jira_transition":
+            return False
+        return True
+
     # --- core entry point -----------------------------------------------
 
     async def run_specialist(self, ctx: SpecialistContext) -> Artifact:
@@ -292,6 +335,13 @@ class SpecialistBase(BaseAgent):
 
         Every terminal return path emits ``specialist.completed`` via
         :meth:`_complete` so the orchestrator always sees the outcome.
+
+        When :meth:`_hitl_active` is True the specialist runs through
+        the tool-loop path (``_run_hitl_turn``) instead of the single-
+        shot path. The tool-loop registers ``human.ask_clarification``
+        so the model can pause for user input; if it does,
+        :class:`AwaitingHumanInput` is raised and the SQS wrapper
+        persists state + ACKs the message.
 
         Override in stubs to short-circuit with verdict='not_implemented'.
         """
@@ -302,6 +352,10 @@ class SpecialistBase(BaseAgent):
             "specialist.started",
             {"role": self.role, "task_id": ctx.task_id, "model": model},
         )
+
+        # ── HITL async path ──
+        if self._hitl_active(ctx):
+            return await self._run_hitl(ctx, model)
 
         user_prompt = self._build_user_prompt(ctx)
 
@@ -484,6 +538,248 @@ class SpecialistBase(BaseAgent):
             },
         )
         return artifact
+
+    # --- HITL tool-loop (async-continuation) ----------------------------
+
+    async def _run_hitl(self, ctx: SpecialistContext, model: str) -> Artifact:
+        """Run the specialist through a tool-augmented Claude loop.
+
+        The ``human.ask_clarification`` tool is flipped to async mode so
+        if the model calls it, :class:`AwaitingHumanInput` propagates
+        out — caught by the SQS wrapper. If the model produces a JSON
+        artifact directly, we parse it like the single-shot path.
+
+        Security: any user-supplied content that flows back in from
+        ``/respond`` is wrapped in ``<user_answer id=…>`` tags with XML
+        escaping (see :meth:`resume_with_answer`). The system prompt
+        carries a corresponding "untrusted data" clause.
+        """
+        from decimal import Decimal
+        user_prompt = self._build_user_prompt(ctx)
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": user_prompt},
+        ]
+        return await self._hitl_continue(ctx, model, messages)
+
+    async def resume_with_answer(
+        self,
+        ctx: SpecialistContext,
+        *,
+        model: str | None = None,
+        prior_messages: list[dict[str, Any]],
+        tool_use_id: str,
+        answers: dict[str, str],
+        rounds_used: int,
+        rounds_cap: int,
+    ) -> Artifact:
+        """Continue a specialist that was paused on ask_clarification.
+
+        Called by the ``specialist_resume`` consumer path. Appends the
+        user answer as a ``tool_result`` for the pending ``tool_use_id``
+        and re-enters the tool loop. When ``rounds_used >= rounds_cap``
+        the tool is hidden (the model MUST emit a terminal verdict).
+
+        ``prior_messages`` comes straight from
+        ``task_specialist_state.conversation`` — it already contains
+        the original user prompt and the assistant's prior turn(s).
+        """
+        resolved_model = model or self._resolve_model()
+        # Build the tool_result block. Every answer is XML-escaped and
+        # wrapped so prompt-injection attempts from the user can't close
+        # our envelope.
+        escaped: list[str] = []
+        for qid, text in (answers or {}).items():
+            safe_qid = _xml_escape(str(qid))
+            safe_text = _xml_escape(str(text))
+            escaped.append(f'<user_answer id="{safe_qid}">{safe_text}</user_answer>')
+        answer_block = "\n".join(escaped) or "<user_answer id=\"_empty\"></user_answer>"
+
+        messages = list(prior_messages) + [{
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": answer_block,
+            }],
+        }]
+        # Hide the tool once the cap is reached — the model's next turn
+        # has no choice but to emit a terminal verdict.
+        allow_ask = rounds_used < rounds_cap
+        if not allow_ask:
+            # Nudge: tell the model explicitly that the clarification
+            # budget is exhausted; combined with `tools=None` below this
+            # forces a JSON artifact.
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Clarification budget exhausted. Emit your final "
+                    "BusinessAnalyst artifact JSON now, using the "
+                    "answers above plus best-guess defaults for "
+                    "anything still unclear. Note remaining "
+                    "ambiguities in `ambiguities_resolved`."
+                ),
+            })
+        return await self._hitl_continue(
+            ctx, resolved_model, messages, allow_ask=allow_ask,
+        )
+
+    async def _hitl_continue(
+        self,
+        ctx: SpecialistContext,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        allow_ask: bool = True,
+    ) -> Artifact:
+        """Shared tool-loop body for both initial HITL run and resume.
+
+        Flips ``self._hitl_mode = "async"`` for the duration so the
+        registered ``human.ask_clarification`` tool raises on use. If
+        ``allow_ask=False``, the tool is NOT passed to Claude — the
+        model must emit a terminal JSON artifact.
+        """
+        from decimal import Decimal
+        # Flip HITL mode. Caller runs this once per specialist dispatch
+        # so resetting after is safe even on exception paths.
+        self._hitl_mode = "async"
+        prev_task = self._task_id
+        self._task_id = ctx.task_id
+        tools = ["human.ask_clarification"] if allow_ask else None
+        input_tokens = 0
+        output_tokens = 0
+        raw_text = ""
+        try:
+            # Single-turn: we don't want the generic run_agent_loop
+            # because HITL interruption would otherwise be caught by
+            # _execute_tool_calls. Call provider directly.
+            from ai_driven.claude.tools.registry import ToolRegistry
+            # Provider call — same shape as run_agent_loop's internals.
+            resp = await self._claude._provider.create_message(
+                model=model,
+                max_tokens=self.max_output_tokens,
+                messages=messages,
+                system=[{
+                    "type": "text",
+                    "text": self._system_prompt(),
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                tools=self._claude._tool_registry.get_schemas(tools) if tools else None,
+                temperature=0.0,
+            )
+            usage = getattr(resp, "usage", None)
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+
+            if resp.has_tool_use and tools:
+                for block in resp.tool_use_blocks:
+                    if block.name != "human.ask_clarification":
+                        continue
+                    # Normalize batch shape from the block input.
+                    raw_input = block.input or {}
+                    batch: list[dict[str, Any]] = []
+                    if isinstance(raw_input.get("questions"), list):
+                        for q in raw_input["questions"]:
+                            if not isinstance(q, dict):
+                                continue
+                            qtext = str(q.get("question") or "").strip()
+                            if not qtext:
+                                continue
+                            batch.append({
+                                "id": str(q.get("id") or f"q{len(batch)+1}"),
+                                "question": qtext,
+                                "options": list(q.get("options") or []),
+                                "why": str(q.get("why") or "").strip(),
+                            })
+                    elif raw_input.get("question"):
+                        batch.append({
+                            "id": "q1",
+                            "question": str(raw_input["question"]),
+                            "options": list(raw_input.get("options") or []),
+                            "why": str(raw_input.get("context") or ""),
+                        })
+                    if not batch:
+                        # Malformed tool call — fall through to a JSON
+                        # error artifact instead of another loop round.
+                        break
+                    import uuid as _uuid
+                    round_id = _uuid.uuid4().hex[:12]
+                    # Snapshot full conversation INCLUDING the assistant's
+                    # latest tool_use turn so resume can attach a
+                    # tool_result with the matching tool_use_id.
+                    snapshot = list(messages) + [
+                        {"role": "assistant", "content": resp.raw_content}
+                    ]
+                    raise AwaitingHumanInput(
+                        questions=batch,
+                        round_id=round_id,
+                        messages=snapshot,
+                        tool_use_id=block.id,
+                    )
+
+            # Not a tool call (or tools disabled) → parse artifact.
+            raw_text = resp.text or ""
+        finally:
+            self._hitl_mode = "poll"
+            self._task_id = prev_task
+
+        cost_usd = self._compute_cost_usd(model, input_tokens, output_tokens)
+        # Fall through to the same JSON-extraction logic as the single-
+        # shot path. No prefill here — Bedrock and Direct agree on the
+        # plain JSON fence that the BA system prompt instructs.
+        from types import SimpleNamespace
+        result = SimpleNamespace(output=raw_text, metadata={})
+        await self._repair_or_escalate_json(
+            result,
+            validator=self._validate_text,
+            schema_reminder=self._schema_reminder(),
+            system_prompt=self._system_prompt(),
+            model=model,
+            task_id=ctx.task_id,
+            event_prefix=f"specialist_{self.role}",
+        )
+        if (result.metadata or {}).get("escalated"):
+            return await self._complete(ctx, Artifact(
+                role=self.role, verdict="error",
+                reasoning="JSON invalid after 2 repair rounds (HITL path)",
+                payload={}, model_used=model,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
+            ))
+        try:
+            parsed = self._extract_json(result.output)
+        except (json.JSONDecodeError, ValueError) as exc:
+            return await self._complete(ctx, Artifact(
+                role=self.role, verdict="error",
+                reasoning=f"JSON parse failed post-repair: {exc}",
+                payload={}, model_used=model,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
+            ))
+        try:
+            validated = validate_payload(
+                self.role, parsed.get("payload", parsed)
+            )
+        except (ValidationError, ValueError) as exc:
+            err_detail = (
+                exc.errors()[:3] if isinstance(exc, ValidationError) else str(exc)
+            )
+            return await self._complete(ctx, Artifact(
+                role=self.role, verdict="error",
+                reasoning=f"payload schema mismatch: {err_detail}",
+                payload={}, model_used=model,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                cost_usd=cost_usd,
+            ))
+        return await self._complete(ctx, Artifact(
+            role=self.role,
+            verdict=parsed.get("verdict", "error"),
+            reasoning=parsed.get("reasoning", ""),
+            payload=validated.model_dump(),
+            model_used=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd,
+        ))
 
     # --- helpers --------------------------------------------------------
 

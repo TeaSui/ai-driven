@@ -214,7 +214,7 @@ To start with everything off and enable only what you need, set `default_config.
 
 ## Custom tools
 
-In addition to built-in tools, you can define custom tools. Custom tools are analogous to [user-defined client tools](/docs/en/agents-and-tools/tool-use/how-tool-use-works#user-defined-tools-client-executed) in the Messages API.
+In addition to built-in tools, you can define custom tools. Custom tools are analogous to [user-defined client tools](../tools/how-tool-use-works.md#user-defined-tools-client-executed) in the Messages API.
 
 Custom tools allow you to extend Claude's capabilities to perform a wider variety of tasks. Each tool defines a contract: you specify what operations are available and what they return; Claude decides when and how to call them. The model never executes anything on its own. It emits a structured request, your code runs the operation, and the result flows back into the conversation.
 
@@ -452,7 +452,7 @@ agent = client.beta.agents.create(
 ```
 </CodeGroup>
 
-Once you've defined the tool at the agent level, the agent will invoke the tools through the course of a session. See [Session event stream](/docs/en/managed-agents/events-and-streaming#handling-custom-tool-calls) for the full flow.
+Once you've defined the tool at the agent level, the agent will invoke the tools through the course of a session. See [Session event stream](session-event-stream.md#handling-custom-tool-calls) for the full flow.
 
 ### Best practices for custom tool definitions
 

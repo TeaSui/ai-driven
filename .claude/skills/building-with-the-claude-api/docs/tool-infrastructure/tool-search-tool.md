@@ -20,7 +20,7 @@ Share feedback on this feature through the [feedback form](https://forms.gle/Mhc
 </Note>
 
 <Note>
-This feature is eligible for [Zero Data Retention (ZDR)](/docs/en/build-with-claude/api-and-data-retention). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
+This feature is eligible for [Zero Data Retention (ZDR)](../admin/data-compliance/api-and-data-retention.md). When your organization has a ZDR arrangement, data sent through this feature is not stored after the API response is returned.
 </Note>
 
 <Warning>
@@ -681,7 +681,7 @@ The `tool_reference` blocks are automatically expanded into full tool definition
 
 ## MCP integration
 
-For configuring `mcp_toolset` with `defer_loading`, see [MCP connector](/docs/en/agents-and-tools/mcp-connector).
+For configuring `mcp_toolset` with `defer_loading`, see [MCP connector](../mcp/mcp-connector.md).
 
 ## Custom tool search implementation
 
@@ -707,7 +707,7 @@ For a complete example using embeddings, see the [tool search with embeddings co
 
 <Note>
   The tool search tool is not compatible with [tool use
-  examples](/docs/en/agents-and-tools/tool-use/define-tools#providing-tool-use-examples).
+  examples](../tools/define-tools.md#providing-tool-use-examples).
   If you need to provide examples of tool usage, use standard tool calling
   without tool search.
 </Note>
@@ -815,7 +815,7 @@ Errors during tool execution return a 200 response with error information in the
 
 ## Prompt caching
 
-For how `defer_loading` preserves prompt caching, see [Tool use with prompt caching](/docs/en/agents-and-tools/tool-use/tool-use-with-prompt-caching).
+For how `defer_loading` preserves prompt caching, see [Tool use with prompt caching](../tools/tool-use-with-prompt-caching.md).
 
 The system automatically expands `tool_reference` blocks throughout the entire conversation history, so Claude can reuse discovered tools in subsequent turns without re-searching.
 
@@ -842,7 +842,7 @@ data: {"type": "content_block_start", "index": 2, "content_block": {"type": "too
 
 ## Batch requests
 
-You can include the tool search tool in the [Messages Batches API](/docs/en/build-with-claude/batch-processing). Tool search operations through the Messages Batches API are priced the same as those in regular Messages API requests.
+You can include the tool search tool in the [Messages Batches API](../model-capabilities/batch-processing.md). Tool search operations through the Messages Batches API are priced the same as those in regular Messages API requests.
 
 ## Limits and best practices
 

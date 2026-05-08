@@ -29,6 +29,10 @@ class TaskProducer:
             "review": settings.sqs_review_queue_url,
             "devops": settings.sqs_devops_queue_url,
             "orchestrator": settings.sqs_orchestrator_queue_url,
+            # HITL specialist resume messages ride the orchestrator
+            # queue (same worker shape, same heartbeat, same mode
+            # stamping). Dispatch is distinguished by body.agent_type.
+            "specialist_resume": settings.sqs_orchestrator_queue_url,
             # T22: post-coding QA runs on its own queue (longer visibility
             # timeout, independent DLQ tuning). No rerouting — QA tasks
             # are enqueued directly by the Coding worker hook.
