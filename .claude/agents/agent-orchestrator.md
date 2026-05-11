@@ -77,16 +77,22 @@ Identify the minimum set of agents. Build the execution order. Mark parallel opp
 **Decomposition:** Each subtask must be independently verifiable. Minimize interdependencies. Prefer "implement X, then integrate X with Y" over coupled dispatches.
 
 ### Phase 4: DELEGATE
-Use the Task tool with clear prompts. Every dispatch MUST include:
-- **Explicit file scope** (specific paths)
-- **Exit criteria** (concrete: "tests pass, build succeeds")
-- **Bailout instruction** ("2 failed fixes on same issue → STOP and report")
-- **Scope boundaries** ("do NOT refactor beyond this task")
-- **File-based evidence** ("write test output to file, confirm via Read")
-- **Security context** (Security Agent output, if security-relevant)
-- **Delegation suppression** (when dispatching BA: "You are dispatched by orchestrator — do NOT delegate to UI/UX via Task")
+Every `Task` dispatch MUST follow `rules/dispatch-prompt-contract.md` — i.e., contain XML-tagged `<role>`, `<context>`, `<inputs>`, `<task>`, `<exit_criteria>`, `<out_of_scope>`, `<evidence>`, `<bailout>`, and `<return_format>` sections. The contract file enumerates every required field and a canonical example; do not restate it here.
 
-Implementation agents own their TDD cycle end-to-end. Delegate full tasks, not steps.
+Orchestrator-specific obligations on top of the shared contract:
+- **Delegation suppression** — when dispatching BA or TechLead, include a `<delegation>` clause: "You are dispatched by the orchestrator. Do NOT re-dispatch to Level-2 agents via Task. Document requirements/design/contracts for the orchestrator to dispatch." TechLead also requires the literal phrase "Stop after Phase 2" (contract-mode).
+- **Security context** — when the task is security-relevant, include Security rules verbatim via `<security_rules ref="docs/security/..."/>` in `<inputs>`.
+- **Implementation agents own TDD end-to-end** — delegate full tasks, not steps.
+- **Parallel fan-out** — when independent implementers can run concurrently, issue all `Task` calls in a single assistant message with multiple tool_use blocks (per `skills/dispatching-parallel-agents/SKILL.md` and the contract's Parallel dispatch section).
+
+Every received response MUST be parsed per `rules/subagent-return-format.md`:
+- Read `<status>` first. Branch:
+  - `DONE` → proceed (next task, peer dispatch, or aggregate).
+  - `DONE_WITH_CONCERNS` → read `<concerns>`; address if material, else note and proceed.
+  - `NEEDS_CONTEXT` → provide the missing inputs, amend the prompt, re-dispatch.
+  - `BLOCKED` → diagnose root cause; never re-send the identical prompt. Split, simplify, or escalate.
+- Verify `<evidence>` artifacts by reading the paths — do not trust narrative summaries.
+- Confirm each `<exit_criteria_check>` line reports "met" before accepting `DONE`.
 
 ### Phase 5: MONITOR
 Agents follow escalation rules from `~/.claude/references/agent-discipline.md`. You validate their output:

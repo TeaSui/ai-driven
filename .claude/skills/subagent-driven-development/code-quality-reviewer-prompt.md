@@ -23,4 +23,4 @@ Task tool (superpowers:code-reviewer):
 - Is the implementation following the file structure from the plan?
 - Did this implementation create new files that are already large, or significantly grow existing files? (Don't flag pre-existing file sizes — focus on what this change contributed.)
 
-**Code reviewer returns:** Strengths, Issues (Critical/Important/Minor), Assessment
+**Code reviewer returns:** a single `<result>` block per `~/.claude/rules/subagent-return-format.md`. Map outcomes to `<status>`: Critical issues → `BLOCKED` with specifics in `<blocker>`; Important issues → `DONE_WITH_CONCERNS` with items in `<concerns>`; Minor/Suggestions-only or clean review → `DONE`. Include Strengths in `<summary>` and file references in `<evidence>`.

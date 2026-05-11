@@ -42,9 +42,9 @@ Execute these phases in order. Do not skip phases unless explicitly dispatched f
 - Mark each story with priority (P0/P1/P2/P3)
 
 ### Phase 4: DELEGATE (only if UI/UX work is needed)
-- **Standalone mode (no orchestrator):** Use the Task tool to dispatch the ui-ux-designer-subagent. Review output for alignment with user stories before proceeding.
-- **Orchestrator-dispatched mode:** Do NOT dispatch UI/UX yourself. Document design requirements in your output and let the orchestrator own the UI/UX dispatch.
-- Detect mode by checking whether your invocation came from agent-orchestrator.
+- **Mode detection:** check whether your invocation came from agent-orchestrator.
+- **Orchestrator-dispatched mode:** Do NOT dispatch UI/UX (or anyone) via Task. Document design requirements and personas in your `docs/requirements/` output; the orchestrator owns UI/UX dispatch.
+- **Standalone mode (no orchestrator):** Dispatch the ui-ux-designer-subagent using the shared dispatch contract at `rules/dispatch-prompt-contract.md` — the dispatch prompt MUST contain XML-tagged `<role>`, `<context>`, `<inputs>` (user stories path in `docs/requirements/`), `<task>`, `<exit_criteria>`, `<out_of_scope>`, `<evidence>`, `<bailout>`, `<return_format>`. Parse the returned `<result>` block per `rules/subagent-return-format.md`; accept only when `<status>` is `DONE` and `<exit_criteria_check>` all report met. Review output for alignment with user stories before proceeding.
 
 ### Phase 5: REPORT
 - Persist all deliverables to `docs/requirements/` (per strategic-output-persistence rule)

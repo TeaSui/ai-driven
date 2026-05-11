@@ -99,13 +99,15 @@ Task tool (general-purpose):
 
     ## Report Format
 
-    When done, report:
-    - **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-    - What you implemented (or what you attempted, if blocked)
-    - What you tested and test results
-    - Files changed
-    - Self-review findings (if any)
-    - Any issues or concerns
+    Return a single `<result>` block per `~/.claude/rules/subagent-return-format.md`:
+    - `<status>` — one of DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+    - `<summary>` — 1–3 factual sentences
+    - `<evidence>` — files changed, test-output logs (paths), any self-review notes
+    - `<exit_criteria_check>` — one line per criterion from your dispatch prompt
+    - `<concerns>` — required for DONE_WITH_CONCERNS
+    - `<context_needed>` — required for NEEDS_CONTEXT
+    - `<blocker>` — required for BLOCKED
+    - `<next_step_recommendation>`
 
     Use DONE_WITH_CONCERNS if you completed the work but have doubts about correctness.
     Use BLOCKED if you cannot complete the task. Use NEEDS_CONTEXT if you need

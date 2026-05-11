@@ -55,7 +55,8 @@ Task tool (general-purpose):
 
     **Verify by reading code, not by trusting report.**
 
-    Report:
-    - ✅ Spec compliant (if everything matches after code inspection)
-    - ❌ Issues found: [list specifically what's missing or extra, with file:line references]
+    Report as a single `<result>` block per `~/.claude/rules/subagent-return-format.md`:
+    - `<status>DONE</status>` when everything matches after code inspection (spec compliant)
+    - `<status>BLOCKED</status>` with the list of missing/extra items (with file:line references) in `<blocker>` when issues are found
+    - Always include `<summary>` (1–3 sentences) and `<evidence>` (artifact paths for the files you read)
 ```
