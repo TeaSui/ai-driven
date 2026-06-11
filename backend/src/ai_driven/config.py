@@ -90,6 +90,17 @@ class Settings(BaseSettings):
     bedrock_price_multiplier: float = 1.10
     anthropic_api_key: str = ""
 
+    # LangSmith tracing (Phase 0 of docs/design/langgraph-migration.md).
+    # Disabled by default in every environment. Enabling requires BOTH
+    # this flag AND the LANGSMITH_API_KEY env var (read by the langsmith
+    # SDK directly — deliberately not a Settings field per LSMITH-05, so
+    # the key cannot end up in dumps/logs). Masking is ON by default and
+    # MUST stay on in prod/staging until the PII residency decision in
+    # design §4 / LSMITH-08 is signed off.
+    langsmith_enabled: bool = False
+    langsmith_project: str = "ai-driven-dev"
+    langsmith_mask_payloads: bool = True
+
     # AWS
     aws_region: str = "eu-central-1"
     aws_account_id: str = ""
