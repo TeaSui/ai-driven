@@ -40,7 +40,7 @@ def parse_ai_message(msg: AIMessage, *, requested_model: str) -> MessageResponse
             content.append(ThinkingBlock(thinking=block.get("thinking", "")))
         # unknown block types stay in raw_content but are not surfaced
 
-    usage_md = msg.usage_metadata or {}
+    usage_md: dict[str, Any] = dict(msg.usage_metadata or {})
     details = usage_md.get("input_token_details") or {}
     usage = TokenUsage(
         input_tokens=usage_md.get("input_tokens", 0),

@@ -11,7 +11,8 @@ implementation, verified by the Phase 1 shadow-parity gate.
 from __future__ import annotations
 
 import logging
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from langchain_core.messages import SystemMessage
 
@@ -116,7 +117,7 @@ class LangChainProvider(ClaudeProvider):
         )
         if system:
             sys_content = _with_cache_control_system(system)
-            lc_messages.insert(0, SystemMessage(content=sys_content))
+            lc_messages.insert(0, SystemMessage(content=sys_content))  # type: ignore[arg-type]
 
         reply = await chat.ainvoke(lc_messages)
         result = parse_ai_message(reply, requested_model=model)
@@ -133,7 +134,7 @@ class LangChainProvider(ClaudeProvider):
                             f"langchain-{self._provider_type.value}")
         return result
 
-    async def create_message_stream(
+    async def create_message_stream(  # type: ignore[misc,override]
         self,
         *,
         model: str,
@@ -168,7 +169,7 @@ class LangChainProvider(ClaudeProvider):
         )
         if system:
             lc_messages.insert(0, SystemMessage(
-                content=_with_cache_control_system(system)))
+                content=_with_cache_control_system(system)))  # type: ignore[arg-type]
 
         final_chunk = None
         async for chunk in chat.astream(lc_messages):
