@@ -1,11 +1,9 @@
 """backend/src/ai_driven/claude/langchain_provider.py
 
-LangChain-backed implementation of the ClaudeProvider interface —
-Phase 1 of docs/design/langgraph-migration.md. Selected by
-settings.claude_provider_impl == "langchain"; the legacy providers in
-provider.py remain the default. Behavior contract: byte-equivalent
-requests and equivalent MessageResponse objects vs. the legacy
-implementation, verified by the Phase 1 shadow-parity gate.
+LangChain-backed Claude provider — the sole implementation behind the
+ClaudeProvider interface. Handles both Anthropic direct and Bedrock
+backends via ChatAnthropic / ChatBedrockConverse, selected by
+settings.claude_provider (ClaudeProviderType).
 """
 
 from __future__ import annotations
@@ -30,6 +28,69 @@ from ai_driven.observability.langsmith_tracing import traced_llm
 from ai_driven.observability.metrics import emit_claude_metrics
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Bedrock helpers (tool-name encoding, message sanitisation, model ID mapping)
+# ---------------------------------------------------------------------------
+
+_BEDROCK_NAME_SEP = "__"
+
+
+def _encode_bedrock_tool_name(name: str) -> str:
+    return name.replace(".", _BEDROCK_NAME_SEP)
+
+
+def _decode_bedrock_tool_name(name: str) -> str:
+    return name.replace(_BEDROCK_NAME_SEP, ".")
+
+
+def _sanitize_tools_for_bedrock(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for t in tools:
+        new = dict(t)
+        if "name" in new:
+            new["name"] = _encode_bedrock_tool_name(new["name"])
+        out.append(new)
+    return out
+
+
+def _sanitize_messages_for_bedrock(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-encode dotted tool_use / tool_result block names in message history."""
+    out = []
+    for m in messages:
+        new_m = dict(m)
+        content = new_m.get("content")
+        if isinstance(content, list):
+            new_content = []
+            for block in content:
+                if (isinstance(block, dict) and block.get("type") == "tool_use"
+                        and "name" in block):
+                    nb = dict(block)
+                    nb["name"] = _encode_bedrock_tool_name(block["name"])
+                    new_content.append(nb)
+                else:
+                    new_content.append(block)
+            new_m["content"] = new_content
+        out.append(new_m)
+    return out
+
+
+def _resolve_bedrock_model_id(model: str) -> str:
+    """Map short Claude model names to Bedrock cross-region inference profile IDs."""
+    if "." in model:
+        return model
+    model_map = {
+        "claude-opus-4-7": "global.anthropic.claude-opus-4-7",
+        "claude-opus-4-6": "global.anthropic.claude-opus-4-6-v1",
+        "claude-sonnet-4-6": "global.anthropic.claude-sonnet-4-6",
+        "claude-haiku-4-5": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    }
+    return model_map.get(model, model)
+
+
+# ---------------------------------------------------------------------------
+# LangChainProvider
+# ---------------------------------------------------------------------------
 
 
 class LangChainProvider(ClaudeProvider):
@@ -57,19 +118,14 @@ class LangChainProvider(ClaudeProvider):
                 kwargs["stop_sequences"] = stop_sequences
             return ChatAnthropic(**kwargs)
 
-        # Bedrock
         from botocore.config import Config
         from langchain_aws import ChatBedrockConverse
-
-        from ai_driven.claude.provider import BedrockProvider
         settings = get_settings()
         kwargs = {
-            "model": BedrockProvider._resolve_model_id(model),
+            "model": _resolve_bedrock_model_id(model),
             "max_tokens": max_tokens,
             "temperature": temperature,
             "region_name": settings.aws_region,
-            # Same timeout posture as the legacy provider:
-            # 300s read for long agentic iterations, fast connect failure.
             "config": Config(read_timeout=300, connect_timeout=10,
                              retries={"max_attempts": 2, "mode": "standard"}),
         }
@@ -103,18 +159,14 @@ class LangChainProvider(ClaudeProvider):
         )
         if tools:
             if self._provider_type == ClaudeProviderType.BEDROCK:
-                from ai_driven.claude.provider import BedrockProvider
-                tools = BedrockProvider._sanitize_tools_for_bedrock(tools)
+                tools = _sanitize_tools_for_bedrock(tools)
             chat = chat.bind_tools(_with_cache_control_tools(tools))
 
         raw_messages = messages
         if self._provider_type == ClaudeProviderType.BEDROCK:
-            from ai_driven.claude.provider import BedrockProvider
-            raw_messages = BedrockProvider._sanitize_messages_for_bedrock(messages)
+            raw_messages = _sanitize_messages_for_bedrock(messages)
 
-        lc_messages = to_langchain_messages(
-            _with_cache_control_messages(raw_messages)
-        )
+        lc_messages = to_langchain_messages(_with_cache_control_messages(raw_messages))
         if system:
             sys_content = _with_cache_control_system(system)
             lc_messages.insert(0, SystemMessage(content=sys_content))  # type: ignore[arg-type]
@@ -123,15 +175,13 @@ class LangChainProvider(ClaudeProvider):
         result = parse_ai_message(reply, requested_model=model)
 
         if self._provider_type == ClaudeProviderType.BEDROCK:
-            from ai_driven.claude.provider import BedrockProvider as _BP
             for block in result.tool_use_blocks:
-                block.name = _BP._decode_tool_name(block.name)
+                block.name = _decode_bedrock_tool_name(block.name)
             for raw in result.raw_content:
                 if isinstance(raw, dict) and raw.get("type") == "tool_use" and "name" in raw:
-                    raw["name"] = _BP._decode_tool_name(raw["name"])
+                    raw["name"] = _decode_bedrock_tool_name(raw["name"])
 
-        emit_claude_metrics(result.usage, model,
-                            f"langchain-{self._provider_type.value}")
+        emit_claude_metrics(result.usage, model, f"langchain-{self._provider_type.value}")
         return result
 
     async def create_message_stream(  # type: ignore[misc,override]
@@ -146,27 +196,21 @@ class LangChainProvider(ClaudeProvider):
         thinking: dict[str, Any] | None = None,
         stop_sequences: list[str] | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Streaming: emit Bedrock-style dict chunks for text deltas plus the
-        _final_message sentinel — the exact contract client.py's stream
-        iteration consumes."""
+        """Emit text-delta chunks plus _final_message sentinel for client.py."""
         chat = self._build_chat_model(
             model=model, max_tokens=max_tokens, temperature=temperature,
             thinking=thinking, stop_sequences=stop_sequences,
         )
         if tools:
             if self._provider_type == ClaudeProviderType.BEDROCK:
-                from ai_driven.claude.provider import BedrockProvider
-                tools = BedrockProvider._sanitize_tools_for_bedrock(tools)
+                tools = _sanitize_tools_for_bedrock(tools)
             chat = chat.bind_tools(_with_cache_control_tools(tools))
 
         raw_messages = messages
         if self._provider_type == ClaudeProviderType.BEDROCK:
-            from ai_driven.claude.provider import BedrockProvider
-            raw_messages = BedrockProvider._sanitize_messages_for_bedrock(messages)
+            raw_messages = _sanitize_messages_for_bedrock(messages)
 
-        lc_messages = to_langchain_messages(
-            _with_cache_control_messages(raw_messages)
-        )
+        lc_messages = to_langchain_messages(_with_cache_control_messages(raw_messages))
         if system:
             lc_messages.insert(0, SystemMessage(
                 content=_with_cache_control_system(system)))  # type: ignore[arg-type]
@@ -188,11 +232,9 @@ class LangChainProvider(ClaudeProvider):
             )
             result = parse_ai_message(final_msg, requested_model=model)
             if self._provider_type == ClaudeProviderType.BEDROCK:
-                from ai_driven.claude.provider import BedrockProvider as _BP
                 for block in result.tool_use_blocks:
-                    block.name = _BP._decode_tool_name(block.name)
-            emit_claude_metrics(result.usage, model,
-                                f"langchain-{self._provider_type.value}")
+                    block.name = _decode_bedrock_tool_name(block.name)
+            emit_claude_metrics(result.usage, model, f"langchain-{self._provider_type.value}")
             yield {"type": "_final_message", "data": result}
 
 
