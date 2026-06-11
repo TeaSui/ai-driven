@@ -2,7 +2,6 @@
 
 from enum import Enum
 from functools import lru_cache
-from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
@@ -90,13 +89,6 @@ class Settings(BaseSettings):
     # economics.
     bedrock_price_multiplier: float = 1.10
     anthropic_api_key: str = ""
-    # Phase 1 of docs/design/langgraph-migration.md: which implementation
-    # backs create_provider(). "legacy" = the hand-rolled providers in
-    # claude/provider.py; "langchain" = LangChainProvider. The provider
-    # TYPE (anthropic vs bedrock) stays claude_provider — this flag only
-    # selects the implementation behind the same interface.
-    claude_provider_impl: Literal["legacy", "langchain"] = "legacy"
-
     # LangSmith tracing (Phase 0 of docs/design/langgraph-migration.md).
     # Disabled by default in every environment. Enabling requires BOTH
     # this flag AND the LANGSMITH_API_KEY env var (read by the langsmith
