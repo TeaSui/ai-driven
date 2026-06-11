@@ -705,11 +705,16 @@ def create_provider(
     if provider_type is None:
         provider_type = settings.claude_provider
 
-    providers = {
-        ClaudeProviderType.ANTHROPIC: AnthropicProvider,
-        ClaudeProviderType.BEDROCK: BedrockProvider,
-    }
-    provider = providers[provider_type]()
+    if settings.claude_provider_impl == "langchain":
+        from ai_driven.claude.langchain_provider import LangChainProvider
+        provider: ClaudeProvider = LangChainProvider(provider_type)
+    else:
+        providers = {
+            ClaudeProviderType.ANTHROPIC: AnthropicProvider,
+            ClaudeProviderType.BEDROCK: BedrockProvider,
+        }
+        provider = providers[provider_type]()
+
     if resilient:
         return ResilientProvider(provider)
     return provider
