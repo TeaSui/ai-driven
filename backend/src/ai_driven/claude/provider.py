@@ -13,6 +13,7 @@ import anthropic
 import boto3
 
 from ai_driven.config import ClaudeProviderType, get_settings
+from ai_driven.observability.langsmith_tracing import traced_llm
 from ai_driven.observability.metrics import emit_claude_metrics
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,7 @@ class AnthropicProvider(ClaudeProvider):
         settings = get_settings()
         self._client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 
+    @traced_llm(name="anthropic.create_message")
     async def create_message(
         self,
         *,
@@ -387,6 +389,7 @@ class BedrockProvider(ClaudeProvider):
         )
         self._client = boto3.client("bedrock-runtime", **boto_kwargs)
 
+    @traced_llm(name="bedrock.create_message")
     async def create_message(
         self,
         *,
