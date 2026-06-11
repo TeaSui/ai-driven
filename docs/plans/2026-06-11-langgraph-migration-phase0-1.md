@@ -89,6 +89,12 @@ git commit -m "feat(observability): add langsmith dep and disabled-by-default se
 - Create: `backend/src/ai_driven/observability/langsmith_tracing.py`
 - Test: `backend/tests/unit/test_langsmith_tracing.py`
 
+> **SECURITY AMENDMENT (binding — docs/security/langsmith-tracing.md supersedes the code sketches below where they conflict, per rules/security.md):**
+> 1. **LSMITH-03:** `mask_inputs` MUST be allowlist/deny-by-default — emit ONLY the §2 permitted keys (model, max_tokens, temperature, top_p, message roles, redaction-length summaries); any key NOT on the allowlist is dropped/redacted, so a future kwarg cannot leak. The sketch below redacts known keys and passes the rest — rewrite it as an allowlist and add the LSMITH-03 verify tests (unexpected PII kwarg redacted; non-string content redacted).
+> 2. **LSMITH-01:** add env gating — tracing on + masking off in `production`/`staging` MUST refuse (raise at tracer construction). Add the test from the rule's verify line.
+> 3. **LSMITH-12/13:** masking errors fail SECURE (drop the trace, never fall back to raw payload); tracing errors fail OPEN (the LLM call must succeed even if LangSmith is down). Add tests for both.
+> 4. **LSMITH-02:** Phase 0 does NOT trace `create_message_stream` (no span → no unmasked egress). Add the rule's verify test: with tracing enabled and a capturing transport, a streaming call emits NO span containing raw content. Task 3 keeps its "do NOT decorate create_message_stream" instruction; this test makes that choice enforced rather than incidental.
+
 - [ ] **Step 1: Write the failing tests**
 
 ```python
