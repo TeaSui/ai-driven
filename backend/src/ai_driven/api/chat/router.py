@@ -92,10 +92,10 @@ async def send_message(
 
     # Budget hard-stop at dispatch time (RULE-D5)
     try:
-        from ai_driven.observability.cost_tracker import CostTracker
+        from ai_driven.billing.tracker import CostTracker
         tracker = CostTracker()
         budget = await tracker.check_budget(team_id)
-        if budget.get("exceeded") or budget.get("usage_percent", 0) >= 100:
+        if not budget.within_budget:
             return JSONResponse(
                 status_code=429,
                 content={"error": {"code": "BUDGET_EXCEEDED", "message": "Daily budget exceeded", "details": []}},

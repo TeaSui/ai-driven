@@ -61,7 +61,7 @@ The **description is the selector**. 3-4+ sentences covering what / when / param
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024, messages=messages, tools=tools,
+    model="claude-opus-4-8", max_tokens=1024, messages=messages, tools=tools,
 )
 if response.stop_reason == "tool_use":
     # CRITICAL: append the full content list, not response.content[0].text
@@ -111,7 +111,7 @@ messages.append({"role": "user", "content": tool_results})
 def run_conversation(messages, tools, max_iterations=10):
     for _ in range(max_iterations):
         response = client.messages.create(
-            model="claude-opus-4-7", max_tokens=2048, messages=messages, tools=tools,
+            model="claude-opus-4-8", max_tokens=2048, messages=messages, tools=tools,
         )
         messages.append({"role": "assistant", "content": response.content})
 
@@ -146,7 +146,7 @@ def get_weather(location: str, unit: str = "fahrenheit") -> str:
     return json.dumps({"temperature": "20C", "condition": "Sunny"})
 
 runner = client.beta.messages.tool_runner(
-    model="claude-opus-4-7", max_tokens=2048,
+    model="claude-opus-4-8", max_tokens=2048,
     tools=[get_weather],
     messages=[{"role": "user", "content": "Weather in Paris?"}],
 )

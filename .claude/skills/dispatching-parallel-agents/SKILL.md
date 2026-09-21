@@ -73,6 +73,8 @@ Task("Fix tool-approval-race-conditions.test.ts failures")
 // All three run concurrently
 ```
 
+**Per-dispatch model selection:** each `Task` accepts an optional `model` param (`opus`/`sonnet`/`haiku`, plus `fable` where available) to override the target subagent's default. Use it when the specific dispatch is materially lighter or heavier than the agent's typical workload — e.g., a Haiku-tier enumeration task or an Opus-tier greenfield design pass. See `references/model-routing.md` for the three-tier table, the override-justification convention, and the **Model-Specific Steering** section — the prompt's content style must match the resolved model.
+
 ### 4. Review and Integrate
 
 When agents return:
@@ -83,9 +85,11 @@ When agents return:
 
 ## Agent Prompt Structure
 
+Prompt shape is owned by `~/.claude/rules/dispatch-prompt-contract.md`: implementation dispatches carry the nine contract fields (markdown headings or XML — content, not serialization, is the contract); investigation/review dispatches use the lighter role+context+task+return_format minimum. Style the content for the resolved model per `references/model-routing.md` → Model-Specific Steering.
+
 Good agent prompts are:
 1. **Focused** - One clear problem domain
-2. **Self-contained** - All context needed to understand the problem
+2. **Self-contained** - All context needed to understand the problem (agents see neither your session history nor `rules/`/CLAUDE.md)
 3. **Specific about output** - What should the agent return?
 
 ```markdown

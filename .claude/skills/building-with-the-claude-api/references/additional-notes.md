@@ -55,7 +55,7 @@ add_assistant_message(messages, "```code")
 eval_output = chat(messages, stop_sequences=["```"])
 ```
 
-This works on models where prefill is still supported (Sonnet 4.5, Haiku 4.5). For Opus 4.7 / 4.6 / Sonnet 4.6, use structured outputs (`output_config.format` with a JSON schema) instead — see `model-capabilities.md`. The net effect is the same: Claude's output is already shaped for the parser, so the code grader doesn't have to strip explanatory text.
+This works on models where prefill is still supported (Haiku 4.5). For Opus 4.8 / Sonnet 5, use structured outputs (`output_config.format` with a JSON schema) instead — see `model-capabilities.md`. The net effect is the same: Claude's output is already shaped for the parser, so the code grader doesn't have to strip explanatory text.
 
 ### Result-shape narrative
 

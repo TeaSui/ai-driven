@@ -19,7 +19,7 @@ uploaded = client.beta.files.upload(
 )
 
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     betas=["files-api-2025-04-14"],
     messages=[{"role": "user", "content": [
         {"type": "text", "text": "Summarize this."},
@@ -49,7 +49,7 @@ Claude reads PDFs as text + vision (each page is also an image). All active mode
 ```python
 # URL
 message = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": [
         {"type": "document", "source": {"type": "url",
             "url": "https://assets.anthropic.com/.../doc.pdf"}},
@@ -62,7 +62,7 @@ import base64
 with open("r.pdf", "rb") as f:
     pdf_data = base64.standard_b64encode(f.read()).decode()
 message = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": [
         {"type": "document", "source": {"type": "base64",
             "media_type": "application/pdf", "data": pdf_data}},
@@ -96,7 +96,7 @@ import base64, httpx
 data = base64.standard_b64encode(httpx.get(url).content).decode()
 
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": [
         {"type": "image", "source": {"type": "base64",
             "media_type": "image/jpeg", "data": data}},
@@ -108,7 +108,7 @@ response = client.messages.create(
 ```
 
 Gotchas:
-- Most models resize to ≤ 1568 px long edge (1568 tokens). **Opus 4.7** supports 2576 px / 4784 tokens and costs up to 3× more — downsample when fidelity isn't needed.
+- Most models resize to ≤ 1568 px long edge (1568 tokens). **Opus 4.8** supports 2576 px / 4784 tokens and costs up to 3× more — downsample when fidelity isn't needed.
 - Animated GIFs: only the first frame is seen.
 - Coordinates Claude outputs are on the resized / padded image — rescale client-side.
 - Place images **before** text in the content array for best accuracy.

@@ -1,6 +1,6 @@
 # Review Loop Iteration Limits
 
-These limits apply to full workflow and orchestrator paths only. Fast-path changes have no formal review loops per workflow-routing.md.
+These limits apply to full workflow and orchestrator paths only. Fast-path and coordinated-fast-path changes have no formal review loops per workflow-routing.md. Coordinated-fast-path leaf dispatches still honor the per-dispatch bailout in rules/dispatch-prompt-contract.md (max 2 fix attempts on the same issue → BLOCKED).
 
 When using subagent-driven-development or any workflow with review loops:
 

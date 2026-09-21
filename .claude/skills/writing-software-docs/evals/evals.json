@@ -1,0 +1,29 @@
+{
+  "skill_name": "writing-software-docs",
+  "evals": [
+    {
+      "id": 0,
+      "name": "adr-kafka-decision",
+      "prompt": "We had a debate this sprint and landed on Kafka over SQS for our KYC event pipeline. The deciding factor was we need per-customer ordering (state transitions can't arrive out of order) and the decision engine needs to replay events. SQS FIFO's throughput caps were the dealbreaker. Can you write this decision up properly so it's on record for the team? We number our architecture decisions.",
+      "expected_output": "An ADR (Architecture Decision Record): Status + Date header, Context, Decision, Alternatives considered (SQS FIFO and at least one more), and honest Consequences (pros AND cons). Sequence-numbered filename like adr-NNNN-...",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 1,
+      "name": "spec-kyc-upload",
+      "prompt": "I need a spec for our new KYC document upload feature. Flow: customer uploads their ID card from the mobile app, we run OCR to pull the ID number and name, store the document and extracted fields, then emit an event so the decision engine picks it up. It's a brand-new REST endpoint. Make it detailed enough that the backend team (and honestly our AI codegen) can build straight from it.",
+      "expected_output": "A Specification: overview/scope, API contract using the {data,meta}/{error} envelope, event contract, DB schema, business rules, error handling, a Security section (PII: name/ID masked in logs, encrypt at rest), and concrete test cases. Unstated details (OCR provider, auth scheme, file size/format limits) marked [NEEDS INPUT] or [ASSUMED], collected in Open Questions. Crucially: a routing flag noting this is trust-boundary work (new endpoint + PII) that should route to Security/TechLead, not be treated as a finished contract.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": 2,
+      "name": "story-transaction-history",
+      "prompt": "Can you turn this into something the dev team can actually pick up in the next sprint? Customers keep asking to filter their transaction history by a date range instead of scrolling forever. Should work on web and mobile.",
+      "expected_output": "A User Story (As a / I want / So that) plus Given/When/Then acceptance criteria covering the happy path AND edge cases (empty result set, invalid/reversed date range). Unstated details marked rather than invented.",
+      "files": [],
+      "assertions": []
+    }
+  ]
+}

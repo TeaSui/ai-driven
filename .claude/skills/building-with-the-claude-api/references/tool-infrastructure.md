@@ -31,7 +31,7 @@ On-demand tool loading for catalogs up to 10,000 tools. Reduces baseline context
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=2048,
+    model="claude-opus-4-8", max_tokens=2048,
     tools=[
         # The searcher itself must NOT have defer_loading.
         {"type": "tool_search_tool_bm25_20251119", "name": "tool_search"},
@@ -63,7 +63,7 @@ Claude writes Python that calls your tools from inside a code-execution sandbox.
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     tools=[
         {"type": "code_execution_20260120", "name": "code_execution"},
         {"name": "query_database",
@@ -78,7 +78,7 @@ response = client.messages.create(
 )
 ```
 
-Models: Opus 4.7 / 4.6 / 4.5, Sonnet 4.6 / 4.5. Requires `code_execution_20260120`.
+Models: Opus 4.8, Sonnet 5. Requires `code_execution_20260120`.
 
 Gotchas:
 - Tools are **async** in the sandbox — Claude writes `await my_tool(...)`.
@@ -95,7 +95,7 @@ Stream tool-input JSON character-by-character without buffering / validation. Us
 
 ```python
 with client.messages.stream(
-    model="claude-opus-4-7", max_tokens=65536,
+    model="claude-opus-4-8", max_tokens=65536,
     tools=[{
         "name": "make_file",
         "description": "Write a file with many lines",

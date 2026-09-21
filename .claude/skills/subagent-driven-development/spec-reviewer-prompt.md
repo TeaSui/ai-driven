@@ -4,8 +4,11 @@ Use this template when dispatching a spec compliance reviewer subagent.
 
 **Purpose:** Verify implementer built what was requested (nothing more, nothing less)
 
+Reviewers default to literal-class models (sonnet/opus-4.8) — the coverage instruction below is
+load-bearing; do not add "be conservative" or severity filters (see model-routing.md steering).
+
 ```
-Task tool (general-purpose):
+Task tool (general-purpose or code-reviewer):
   description: "Review spec compliance for Task N"
   prompt: |
     You are reviewing whether an implementation matches its specification.
@@ -55,8 +58,12 @@ Task tool (general-purpose):
 
     **Verify by reading code, not by trusting report.**
 
-    Report as a single `<result>` block per `~/.claude/rules/subagent-return-format.md`:
-    - `<status>DONE</status>` when everything matches after code inspection (spec compliant)
-    - `<status>BLOCKED</status>` with the list of missing/extra items (with file:line references) in `<blocker>` when issues are found
-    - Always include `<summary>` (1–3 sentences) and `<evidence>` (artifact paths for the files you read)
+    Report every discrepancy you find, including ones you are uncertain about or consider
+    minor. Do not filter for importance or confidence — the dispatcher filters downstream.
+    Include a confidence level per finding.
+
+    Report per `~/.claude/rules/subagent-return-format.md` (any shape — prose, markdown, or XML):
+    - Status DONE when everything matches after code inspection (spec compliant)
+    - Status BLOCKED with the list of missing/extra items (file:line references) when issues are found
+    - Always include a 1–3 sentence summary and evidence paths for the files you read
 ```

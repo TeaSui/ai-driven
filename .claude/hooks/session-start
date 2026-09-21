@@ -1,10 +1,28 @@
 #!/usr/bin/env bash
-# SessionStart hook: inject the using-superpowers skill into context.
+# SessionStart hook: inject the session-bootstrap skill into context.
 
 set -euo pipefail
 
-skill_path="$(cd "$(dirname "$0")/.." && pwd)/skills/using-superpowers/SKILL.md"
-skill_content=$(cat "$skill_path" 2>&1 || echo "Error reading using-superpowers skill")
+skill_path="$(cd "$(dirname "$0")/.." && pwd)/skills/session-bootstrap/SKILL.md"
+
+if [ ! -r "$skill_path" ]; then
+    # Fail open: emit an empty-context hook payload rather than failing the session.
+    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}\n'
+    exit 0
+fi
+
+skill_content=$(cat "$skill_path")
+
+# Size guard: Claude Code hook payloads are bounded; keep the injected skill under 48 KiB.
+# If the skill ever grows past that, truncate with a marker so the hook still emits valid JSON
+# rather than silently blowing past the hook limit with no error.
+MAX_BYTES=49152
+skill_bytes=${#skill_content}
+if [ "$skill_bytes" -gt "$MAX_BYTES" ]; then
+    skill_content="${skill_content:0:$MAX_BYTES}
+
+[TRUNCATED: session-bootstrap exceeded ${MAX_BYTES}-byte hook budget at ${skill_bytes} bytes. Load the full file via the Skill tool.]"
+fi
 
 # Escape for JSON embedding. Each ${s//old/new} is one C-level pass.
 escape_for_json() {
@@ -18,9 +36,9 @@ escape_for_json() {
 }
 
 skill_escaped=$(escape_for_json "$skill_content")
-session_context="<EXTREMELY_IMPORTANT>\nYou have superpowers.\n\n**Below is the full content of your 'using-superpowers' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${skill_escaped}\n</EXTREMELY_IMPORTANT>"
+session_context="<EXTREMELY_IMPORTANT>\n**Below is the full content of your 'session-bootstrap' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${skill_escaped}\n</EXTREMELY_IMPORTANT>"
 
 # Claude Code SessionStart output shape.
-# printf is used instead of heredoc to avoid a bash 5.3+ heredoc hang.
-# See: https://github.com/obra/superpowers/issues/571
+# printf is used instead of a heredoc: bash 5.3+ can hang on heredoc-fed JSON
+# when the payload contains escaped newlines, so we build the JSON literal here.
 printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"

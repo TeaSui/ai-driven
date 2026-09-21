@@ -2,8 +2,18 @@
 
 Use this template when dispatching an implementer subagent.
 
+Dispatch to the **domain leaf agent** from the registry in `~/.claude/rules/agents.md`
+(backend-engineer-subagent, frontend-engineer-subagent, mobile-engineer-subagent, etc. — pick by the
+task's stack); fall back to `general-purpose` only when no domain agent fits. This template satisfies
+`rules/dispatch-prompt-contract.md` via markdown headings (fields, not tags, are the contract). It is
+written for **literal-class models (sonnet / opus-4.8)** — the default for leaf implementers. Enumerate
+in the Task Description every file and section the instructions apply to; literal models do not
+generalize scope on their own. If you override the dispatch to a frontier model (fable), trim it per
+model-routing.md's steering section — in particular drop the Self-Review section, which frontier
+models perform unprompted.
+
 ```
-Task tool (general-purpose):
+Task tool (domain leaf agent per rules/agents.md):
   description: "Implement Task N: [task name]"
   prompt: |
     You are implementing Task N: [task name]
@@ -99,15 +109,13 @@ Task tool (general-purpose):
 
     ## Report Format
 
-    Return a single `<result>` block per `~/.claude/rules/subagent-return-format.md`:
-    - `<status>` — one of DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
-    - `<summary>` — 1–3 factual sentences
-    - `<evidence>` — files changed, test-output logs (paths), any self-review notes
-    - `<exit_criteria_check>` — one line per criterion from your dispatch prompt
-    - `<concerns>` — required for DONE_WITH_CONCERNS
-    - `<context_needed>` — required for NEEDS_CONTEXT
-    - `<blocker>` — required for BLOCKED
-    - `<next_step_recommendation>`
+    Your return must include three things per `~/.claude/rules/subagent-return-format.md`
+    (prose, markdown, or XML — shape is flexible; the information is what matters):
+    1. A status keyword, verbatim: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+    2. Evidence paths — files changed, test-output logs the dispatcher can Read
+    3. An exit-criteria check — one line per criterion from this prompt, met | not met
+    Plus: concerns (for DONE_WITH_CONCERNS), what's needed (NEEDS_CONTEXT), what was
+    tried and the blocker (BLOCKED), and a next-step recommendation.
 
     Use DONE_WITH_CONCERNS if you completed the work but have doubts about correctness.
     Use BLOCKED if you cannot complete the task. Use NEEDS_CONTEXT if you need

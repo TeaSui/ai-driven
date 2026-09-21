@@ -56,3 +56,72 @@ def test_missing_usage_degrades_to_zero():
     r = parse_ai_message(msg, requested_model="m")
     assert r.usage.input_tokens == 0
     assert r.usage.output_tokens == 0
+
+
+def test_bedrock_stop_reason_key_is_recognized():
+    """ChatBedrockConverse reports stop reason under response_metadata["stopReason"]
+    (AWS Bedrock Converse API's native camelCase key), not the "stop_reason"
+    snake_case key ChatAnthropic uses. Before this fix, parse_ai_message only
+    read "stop_reason", so every Bedrock response silently defaulted to
+    stop_reason="end_turn" — has_tool_use (which is `stop_reason == "tool_use"`)
+    was always False for Bedrock, so run_agent_loop always treated a real
+    tool_use response as "no more tool calls" and returned without ever
+    executing the tool, no matter how many iterations were allowed.
+    """
+    msg = AIMessage(
+        content=[{"type": "tool_use", "id": "t1", "name": "git.create_branch",
+                  "input": {"branch_name": "feature/x"}}],
+        response_metadata={"stopReason": "tool_use", "model_name": "claude-sonnet-4-6"},
+        usage_metadata={"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+    )
+    r = parse_ai_message(msg, requested_model="claude-sonnet-4-6")
+    assert r.stop_reason == "tool_use"
+    assert r.has_tool_use
+    assert r.tool_use_blocks == [ToolUseBlock(id="t1", name="git.create_branch",
+                                              input={"branch_name": "feature/x"})]
+
+
+def test_bedrock_streamed_tool_input_string_is_parsed_to_dict():
+    """ChatBedrockConverse's streamed AIMessageChunk accumulation (via `+`)
+    leaves content[].input as the raw accumulated JSON string — LangChain
+    re-parses args into tool_calls[].args as a dict, but does not also
+    re-parse content[].input. Anthropic direct and Bedrock's non-streaming
+    ainvoke() already hand back a dict here. Without normalizing this,
+    ToolRegistry.execute()'s `tool.handler(**input_data)` raises
+    TypeError("argument of type 'str' is not a mapping") for every
+    Bedrock streamed tool call.
+    """
+    msg = AIMessage(
+        content=[{"type": "tool_use", "id": "t1", "name": "git.create_branch",
+                  "input": '{"branch_name": "feature/x"}'}],
+        response_metadata={"stopReason": "tool_use"},
+    )
+    r = parse_ai_message(msg, requested_model="m")
+    assert r.tool_use_blocks == [ToolUseBlock(id="t1", name="git.create_branch",
+                                              input={"branch_name": "feature/x"})]
+    # raw_content feeds the next turn's assistant-message replay — the
+    # provider API expects `input` as an object there too, not a string.
+    assert r.raw_content[0]["input"] == {"branch_name": "feature/x"}
+
+
+def test_malformed_tool_input_string_degrades_to_empty_dict():
+    msg = AIMessage(
+        content=[{"type": "tool_use", "id": "t1", "name": "git.create_branch",
+                  "input": "not valid json"}],
+        response_metadata={"stopReason": "tool_use"},
+    )
+    r = parse_ai_message(msg, requested_model="m")
+    assert r.tool_use_blocks[0].input == {}
+
+
+def test_anthropic_stop_reason_key_still_takes_precedence_when_both_present():
+    """Belt-and-braces: if a future langchain-anthropic version ever added a
+    "stopReason" key alongside "stop_reason", the existing snake_case key
+    must still win so ChatAnthropic behavior is unchanged.
+    """
+    msg = AIMessage(
+        content=[{"type": "text", "text": "hi"}],
+        response_metadata={"stop_reason": "end_turn", "stopReason": "tool_use"},
+    )
+    r = parse_ai_message(msg, requested_model="m")
+    assert r.stop_reason == "end_turn"

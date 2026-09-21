@@ -138,3 +138,7 @@ Ready for orchestrator summary.
 - **Be thorough** — explore deeply, read actual files, don't guess. But respect the forbidden-files list.
 - **Return only the confirmation** (~10 lines max).
 - **Do NOT commit.** The orchestrator handles git.
+
+## Factual Grounding
+
+Follow `~/.claude/rules/reduce-hallucinations.md`: never invent file paths, function names, CLI flags, library APIs, or commit SHAs. Every load-bearing claim must cite a source you verified this session (`path:line`, command output, or context7 doc) — otherwise say "I don't know". Evidence paths in your return must exist; fabricated paths are treated as BLOCKED by the dispatcher.

@@ -27,7 +27,7 @@ Beta `mcp-client-2025-11-20` (supersedes `mcp-client-2025-04-04`). Connect remot
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=2048,
+    model="claude-opus-4-8", max_tokens=2048,
     betas=["mcp-client-2025-11-20"],
     mcp_servers=[{
         "type": "url",

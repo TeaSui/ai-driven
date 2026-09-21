@@ -1,0 +1,554 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - heading "eval-upgrade" [level=1] [ref=e4]
+      - paragraph [ref=e5]: Evaluate & upgrade Claude Code assets — ~/.claude
+    - generic [ref=e6]:
+      - 'generic "Master toggle: when off, evaluation runs are refused" [ref=e7] [cursor=pointer]':
+        - generic [ref=e9]: System
+      - button "Run evaluation" [ref=e10] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - heading "Scope" [level=2] [ref=e13]
+      - generic [ref=e14]:
+        - generic "LLM review adds a model-based audit for low-scoring artifacts (costs tokens)" [ref=e15] [cursor=pointer]:
+          - generic [ref=e17]: LLM review
+        - button "Save config" [disabled] [ref=e18]
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e23] [cursor=pointer]: agents
+        - generic [ref=e24]: 17 items · avg 100
+      - generic [ref=e25]:
+        - generic [ref=e28] [cursor=pointer]: commands
+        - generic [ref=e29]: 6 items · avg 99
+      - generic [ref=e30]:
+        - generic [ref=e33] [cursor=pointer]: hooks
+        - generic [ref=e34]: 1 items · avg 100
+      - generic [ref=e35]:
+        - generic [ref=e38] [cursor=pointer]: rules
+        - generic [ref=e39]: 12 items · avg 100
+      - generic [ref=e40]:
+        - generic [ref=e43] [cursor=pointer]: skills
+        - generic [ref=e44]: 32 items · avg 100
+    - paragraph [ref=e45]:
+      - text: Toggles are staged locally —
+      - strong [ref=e46]: Save config
+      - text: persists them to config.json. A type toggled off is excluded from the next run (not scored, not aggregated).
+  - generic [ref=e47]:
+    - generic [ref=e48]:
+      - heading "Summary" [level=2] [ref=e49]
+      - generic [ref=e50]: last run 7/8/2026, 3:57:08 PM · target /Users/tungnguyen/.claude
+    - generic [ref=e51]:
+      - generic [ref=e52]:
+        - generic [ref=e53]: "100"
+        - generic [ref=e54]: average score
+      - generic [ref=e55]:
+        - generic [ref=e56]: "68"
+        - generic [ref=e57]: evaluated
+      - generic [ref=e58]:
+        - generic [ref=e59]: "0"
+        - generic [ref=e60]: excluded
+      - generic [ref=e61]:
+        - generic [ref=e62]: "100"
+        - generic [ref=e63]: agents
+      - generic [ref=e64]:
+        - generic [ref=e65]: "99"
+        - generic [ref=e66]: commands
+      - generic [ref=e67]:
+        - generic [ref=e68]: "100"
+        - generic [ref=e69]: hooks
+      - generic [ref=e70]:
+        - generic [ref=e71]: "100"
+        - generic [ref=e72]: rules
+      - generic [ref=e73]:
+        - generic [ref=e74]: "100"
+        - generic [ref=e75]: skills
+  - generic [ref=e76]:
+    - generic [ref=e77]:
+      - heading "Artifacts" [level=2] [ref=e78]
+      - searchbox "Filter by name / type / finding…" [ref=e79]
+    - table [ref=e80]:
+      - rowgroup [ref=e81]:
+        - row "Score Artifact Type Findings" [ref=e82]:
+          - columnheader "Score" [ref=e83] [cursor=pointer]
+          - columnheader "Artifact" [ref=e84] [cursor=pointer]
+          - columnheader "Type" [ref=e85] [cursor=pointer]
+          - columnheader "Findings" [ref=e86] [cursor=pointer]
+          - columnheader [ref=e87] [cursor=pointer]
+      - rowgroup [ref=e88]:
+        - row "92 commands/new-project commands 1 warn Propose upgrade" [ref=e89]:
+          - cell "92" [ref=e90]
+          - cell "commands/new-project" [ref=e91]
+          - cell "commands" [ref=e92]
+          - cell "1 warn" [ref=e93]
+          - cell "Propose upgrade" [ref=e94]:
+            - button "Propose upgrade" [ref=e95] [cursor=pointer]
+        - row "92 skills/backend-languages skills 1 warn Propose upgrade" [ref=e96]:
+          - cell "92" [ref=e97]
+          - cell "skills/backend-languages" [ref=e98]
+          - cell "skills" [ref=e99]
+          - cell "1 warn" [ref=e100]
+          - cell "Propose upgrade" [ref=e101]:
+            - button "Propose upgrade" [ref=e102] [cursor=pointer]
+        - row "100 agents/agent-orchestrator agents clean Propose upgrade" [ref=e103]:
+          - cell "100" [ref=e104]
+          - cell "agents/agent-orchestrator" [ref=e105]
+          - cell "agents" [ref=e106]
+          - cell "clean" [ref=e107]
+          - cell "Propose upgrade" [ref=e108]:
+            - button "Propose upgrade" [ref=e109] [cursor=pointer]
+        - row "100 agents/ai-engineer-subagent agents clean Propose upgrade" [ref=e110]:
+          - cell "100" [ref=e111]
+          - cell "agents/ai-engineer-subagent" [ref=e112]
+          - cell "agents" [ref=e113]
+          - cell "clean" [ref=e114]
+          - cell "Propose upgrade" [ref=e115]:
+            - button "Propose upgrade" [ref=e116] [cursor=pointer]
+        - row "100 agents/api-test-agent agents clean Propose upgrade" [ref=e117]:
+          - cell "100" [ref=e118]
+          - cell "agents/api-test-agent" [ref=e119]
+          - cell "agents" [ref=e120]
+          - cell "clean" [ref=e121]
+          - cell "Propose upgrade" [ref=e122]:
+            - button "Propose upgrade" [ref=e123] [cursor=pointer]
+        - row "100 agents/aws-infrastructure-subagent agents clean Propose upgrade" [ref=e124]:
+          - cell "100" [ref=e125]
+          - cell "agents/aws-infrastructure-subagent" [ref=e126]
+          - cell "agents" [ref=e127]
+          - cell "clean" [ref=e128]
+          - cell "Propose upgrade" [ref=e129]:
+            - button "Propose upgrade" [ref=e130] [cursor=pointer]
+        - row "100 agents/backend-engineer-subagent agents clean Propose upgrade" [ref=e131]:
+          - cell "100" [ref=e132]
+          - cell "agents/backend-engineer-subagent" [ref=e133]
+          - cell "agents" [ref=e134]
+          - cell "clean" [ref=e135]
+          - cell "Propose upgrade" [ref=e136]:
+            - button "Propose upgrade" [ref=e137] [cursor=pointer]
+        - row "100 agents/business-analyst-subagent agents clean Propose upgrade" [ref=e138]:
+          - cell "100" [ref=e139]
+          - cell "agents/business-analyst-subagent" [ref=e140]
+          - cell "agents" [ref=e141]
+          - cell "clean" [ref=e142]
+          - cell "Propose upgrade" [ref=e143]:
+            - button "Propose upgrade" [ref=e144] [cursor=pointer]
+        - row "100 agents/code-reviewer agents clean Propose upgrade" [ref=e145]:
+          - cell "100" [ref=e146]
+          - cell "agents/code-reviewer" [ref=e147]
+          - cell "agents" [ref=e148]
+          - cell "clean" [ref=e149]
+          - cell "Propose upgrade" [ref=e150]:
+            - button "Propose upgrade" [ref=e151] [cursor=pointer]
+        - row "100 agents/codebase-mapper agents 1 info Propose upgrade" [ref=e152]:
+          - cell "100" [ref=e153]
+          - cell "agents/codebase-mapper" [ref=e154]
+          - cell "agents" [ref=e155]
+          - cell "1 info" [ref=e156]
+          - cell "Propose upgrade" [ref=e157]:
+            - button "Propose upgrade" [ref=e158] [cursor=pointer]
+        - row "100 agents/data-engineer-subagent agents clean Propose upgrade" [ref=e159]:
+          - cell "100" [ref=e160]
+          - cell "agents/data-engineer-subagent" [ref=e161]
+          - cell "agents" [ref=e162]
+          - cell "clean" [ref=e163]
+          - cell "Propose upgrade" [ref=e164]:
+            - button "Propose upgrade" [ref=e165] [cursor=pointer]
+        - row "100 agents/devops-engineer-subagent agents clean Propose upgrade" [ref=e166]:
+          - cell "100" [ref=e167]
+          - cell "agents/devops-engineer-subagent" [ref=e168]
+          - cell "agents" [ref=e169]
+          - cell "clean" [ref=e170]
+          - cell "Propose upgrade" [ref=e171]:
+            - button "Propose upgrade" [ref=e172] [cursor=pointer]
+        - row "100 agents/frontend-engineer-subagent agents clean Propose upgrade" [ref=e173]:
+          - cell "100" [ref=e174]
+          - cell "agents/frontend-engineer-subagent" [ref=e175]
+          - cell "agents" [ref=e176]
+          - cell "clean" [ref=e177]
+          - cell "Propose upgrade" [ref=e178]:
+            - button "Propose upgrade" [ref=e179] [cursor=pointer]
+        - row "100 agents/growth-marketer-subagent agents clean Propose upgrade" [ref=e180]:
+          - cell "100" [ref=e181]
+          - cell "agents/growth-marketer-subagent" [ref=e182]
+          - cell "agents" [ref=e183]
+          - cell "clean" [ref=e184]
+          - cell "Propose upgrade" [ref=e185]:
+            - button "Propose upgrade" [ref=e186] [cursor=pointer]
+        - row "100 agents/mobile-engineer-subagent agents clean Propose upgrade" [ref=e187]:
+          - cell "100" [ref=e188]
+          - cell "agents/mobile-engineer-subagent" [ref=e189]
+          - cell "agents" [ref=e190]
+          - cell "clean" [ref=e191]
+          - cell "Propose upgrade" [ref=e192]:
+            - button "Propose upgrade" [ref=e193] [cursor=pointer]
+        - row "100 agents/qa-subagent agents clean Propose upgrade" [ref=e194]:
+          - cell "100" [ref=e195]
+          - cell "agents/qa-subagent" [ref=e196]
+          - cell "agents" [ref=e197]
+          - cell "clean" [ref=e198]
+          - cell "Propose upgrade" [ref=e199]:
+            - button "Propose upgrade" [ref=e200] [cursor=pointer]
+        - row "100 agents/security-engineer-subagent agents clean Propose upgrade" [ref=e201]:
+          - cell "100" [ref=e202]
+          - cell "agents/security-engineer-subagent" [ref=e203]
+          - cell "agents" [ref=e204]
+          - cell "clean" [ref=e205]
+          - cell "Propose upgrade" [ref=e206]:
+            - button "Propose upgrade" [ref=e207] [cursor=pointer]
+        - row "100 agents/tech-lead-subagent agents clean Propose upgrade" [ref=e208]:
+          - cell "100" [ref=e209]
+          - cell "agents/tech-lead-subagent" [ref=e210]
+          - cell "agents" [ref=e211]
+          - cell "clean" [ref=e212]
+          - cell "Propose upgrade" [ref=e213]:
+            - button "Propose upgrade" [ref=e214] [cursor=pointer]
+        - row "100 agents/ui-ux-designer-subagent agents clean Propose upgrade" [ref=e215]:
+          - cell "100" [ref=e216]
+          - cell "agents/ui-ux-designer-subagent" [ref=e217]
+          - cell "agents" [ref=e218]
+          - cell "clean" [ref=e219]
+          - cell "Propose upgrade" [ref=e220]:
+            - button "Propose upgrade" [ref=e221] [cursor=pointer]
+        - row "100 commands/debug-parallel commands clean Propose upgrade" [ref=e222]:
+          - cell "100" [ref=e223]
+          - cell "commands/debug-parallel" [ref=e224]
+          - cell "commands" [ref=e225]
+          - cell "clean" [ref=e226]
+          - cell "Propose upgrade" [ref=e227]:
+            - button "Propose upgrade" [ref=e228] [cursor=pointer]
+        - row "100 commands/map-codebase commands clean Propose upgrade" [ref=e229]:
+          - cell "100" [ref=e230]
+          - cell "commands/map-codebase" [ref=e231]
+          - cell "commands" [ref=e232]
+          - cell "clean" [ref=e233]
+          - cell "Propose upgrade" [ref=e234]:
+            - button "Propose upgrade" [ref=e235] [cursor=pointer]
+        - row "100 commands/prompt-builder commands clean Propose upgrade" [ref=e236]:
+          - cell "100" [ref=e237]
+          - cell "commands/prompt-builder" [ref=e238]
+          - cell "commands" [ref=e239]
+          - cell "clean" [ref=e240]
+          - cell "Propose upgrade" [ref=e241]:
+            - button "Propose upgrade" [ref=e242] [cursor=pointer]
+        - row "100 commands/prove-it commands clean Propose upgrade" [ref=e243]:
+          - cell "100" [ref=e244]
+          - cell "commands/prove-it" [ref=e245]
+          - cell "commands" [ref=e246]
+          - cell "clean" [ref=e247]
+          - cell "Propose upgrade" [ref=e248]:
+            - button "Propose upgrade" [ref=e249] [cursor=pointer]
+        - row "100 commands/tdd-feature commands clean Propose upgrade" [ref=e250]:
+          - cell "100" [ref=e251]
+          - cell "commands/tdd-feature" [ref=e252]
+          - cell "commands" [ref=e253]
+          - cell "clean" [ref=e254]
+          - cell "Propose upgrade" [ref=e255]:
+            - button "Propose upgrade" [ref=e256] [cursor=pointer]
+        - row "100 rules/agents rules clean Propose upgrade" [ref=e257]:
+          - cell "100" [ref=e258]
+          - cell "rules/agents" [ref=e259]
+          - cell "rules" [ref=e260]
+          - cell "clean" [ref=e261]
+          - cell "Propose upgrade" [ref=e262]:
+            - button "Propose upgrade" [ref=e263] [cursor=pointer]
+        - row "100 rules/dispatch-prompt-contract rules clean Propose upgrade" [ref=e264]:
+          - cell "100" [ref=e265]
+          - cell "rules/dispatch-prompt-contract" [ref=e266]
+          - cell "rules" [ref=e267]
+          - cell "clean" [ref=e268]
+          - cell "Propose upgrade" [ref=e269]:
+            - button "Propose upgrade" [ref=e270] [cursor=pointer]
+        - row "100 rules/patterns rules clean Propose upgrade" [ref=e271]:
+          - cell "100" [ref=e272]
+          - cell "rules/patterns" [ref=e273]
+          - cell "rules" [ref=e274]
+          - cell "clean" [ref=e275]
+          - cell "Propose upgrade" [ref=e276]:
+            - button "Propose upgrade" [ref=e277] [cursor=pointer]
+        - row "100 rules/reduce-hallucinations rules clean Propose upgrade" [ref=e278]:
+          - cell "100" [ref=e279]
+          - cell "rules/reduce-hallucinations" [ref=e280]
+          - cell "rules" [ref=e281]
+          - cell "clean" [ref=e282]
+          - cell "Propose upgrade" [ref=e283]:
+            - button "Propose upgrade" [ref=e284] [cursor=pointer]
+        - row "100 rules/review-loop-limits rules clean Propose upgrade" [ref=e285]:
+          - cell "100" [ref=e286]
+          - cell "rules/review-loop-limits" [ref=e287]
+          - cell "rules" [ref=e288]
+          - cell "clean" [ref=e289]
+          - cell "Propose upgrade" [ref=e290]:
+            - button "Propose upgrade" [ref=e291] [cursor=pointer]
+        - row "100 rules/security rules clean Propose upgrade" [ref=e292]:
+          - cell "100" [ref=e293]
+          - cell "rules/security" [ref=e294]
+          - cell "rules" [ref=e295]
+          - cell "clean" [ref=e296]
+          - cell "Propose upgrade" [ref=e297]:
+            - button "Propose upgrade" [ref=e298] [cursor=pointer]
+        - row "100 rules/session-scope rules clean Propose upgrade" [ref=e299]:
+          - cell "100" [ref=e300]
+          - cell "rules/session-scope" [ref=e301]
+          - cell "rules" [ref=e302]
+          - cell "clean" [ref=e303]
+          - cell "Propose upgrade" [ref=e304]:
+            - button "Propose upgrade" [ref=e305] [cursor=pointer]
+        - row "100 rules/single-source-of-truth rules clean Propose upgrade" [ref=e306]:
+          - cell "100" [ref=e307]
+          - cell "rules/single-source-of-truth" [ref=e308]
+          - cell "rules" [ref=e309]
+          - cell "clean" [ref=e310]
+          - cell "Propose upgrade" [ref=e311]:
+            - button "Propose upgrade" [ref=e312] [cursor=pointer]
+        - row "100 rules/strategic-output-persistence rules clean Propose upgrade" [ref=e313]:
+          - cell "100" [ref=e314]
+          - cell "rules/strategic-output-persistence" [ref=e315]
+          - cell "rules" [ref=e316]
+          - cell "clean" [ref=e317]
+          - cell "Propose upgrade" [ref=e318]:
+            - button "Propose upgrade" [ref=e319] [cursor=pointer]
+        - row "100 rules/subagent-return-format rules clean Propose upgrade" [ref=e320]:
+          - cell "100" [ref=e321]
+          - cell "rules/subagent-return-format" [ref=e322]
+          - cell "rules" [ref=e323]
+          - cell "clean" [ref=e324]
+          - cell "Propose upgrade" [ref=e325]:
+            - button "Propose upgrade" [ref=e326] [cursor=pointer]
+        - row "100 rules/user-facing-output rules clean Propose upgrade" [ref=e327]:
+          - cell "100" [ref=e328]
+          - cell "rules/user-facing-output" [ref=e329]
+          - cell "rules" [ref=e330]
+          - cell "clean" [ref=e331]
+          - cell "Propose upgrade" [ref=e332]:
+            - button "Propose upgrade" [ref=e333] [cursor=pointer]
+        - row "100 rules/workflow-routing rules clean Propose upgrade" [ref=e334]:
+          - cell "100" [ref=e335]
+          - cell "rules/workflow-routing" [ref=e336]
+          - cell "rules" [ref=e337]
+          - cell "clean" [ref=e338]
+          - cell "Propose upgrade" [ref=e339]:
+            - button "Propose upgrade" [ref=e340] [cursor=pointer]
+        - row "100 hooks/session-start hooks clean Propose upgrade" [ref=e341]:
+          - cell "100" [ref=e342]
+          - cell "hooks/session-start" [ref=e343]
+          - cell "hooks" [ref=e344]
+          - cell "clean" [ref=e345]
+          - cell "Propose upgrade" [ref=e346]:
+            - button "Propose upgrade" [ref=e347] [cursor=pointer]
+        - row "100 skills/api-contract-testing skills clean Propose upgrade" [ref=e348]:
+          - cell "100" [ref=e349]
+          - cell "skills/api-contract-testing" [ref=e350]
+          - cell "skills" [ref=e351]
+          - cell "clean" [ref=e352]
+          - cell "Propose upgrade" [ref=e353]:
+            - button "Propose upgrade" [ref=e354] [cursor=pointer]
+        - row "100 skills/architecture-docs skills clean Propose upgrade" [ref=e355]:
+          - cell "100" [ref=e356]
+          - cell "skills/architecture-docs" [ref=e357]
+          - cell "skills" [ref=e358]
+          - cell "clean" [ref=e359]
+          - cell "Propose upgrade" [ref=e360]:
+            - button "Propose upgrade" [ref=e361] [cursor=pointer]
+        - row "100 skills/bdd-cucumber skills clean Propose upgrade" [ref=e362]:
+          - cell "100" [ref=e363]
+          - cell "skills/bdd-cucumber" [ref=e364]
+          - cell "skills" [ref=e365]
+          - cell "clean" [ref=e366]
+          - cell "Propose upgrade" [ref=e367]:
+            - button "Propose upgrade" [ref=e368] [cursor=pointer]
+        - row "100 skills/brainstorming skills clean Propose upgrade" [ref=e369]:
+          - cell "100" [ref=e370]
+          - cell "skills/brainstorming" [ref=e371]
+          - cell "skills" [ref=e372]
+          - cell "clean" [ref=e373]
+          - cell "Propose upgrade" [ref=e374]:
+            - button "Propose upgrade" [ref=e375] [cursor=pointer]
+        - row "100 skills/building-with-the-claude-api skills clean Propose upgrade" [ref=e376]:
+          - cell "100" [ref=e377]
+          - cell "skills/building-with-the-claude-api" [ref=e378]
+          - cell "skills" [ref=e379]
+          - cell "clean" [ref=e380]
+          - cell "Propose upgrade" [ref=e381]:
+            - button "Propose upgrade" [ref=e382] [cursor=pointer]
+        - row "100 skills/cdk-testing skills clean Propose upgrade" [ref=e383]:
+          - cell "100" [ref=e384]
+          - cell "skills/cdk-testing" [ref=e385]
+          - cell "skills" [ref=e386]
+          - cell "clean" [ref=e387]
+          - cell "Propose upgrade" [ref=e388]:
+            - button "Propose upgrade" [ref=e389] [cursor=pointer]
+        - row "100 skills/data-pipeline-patterns skills clean Propose upgrade" [ref=e390]:
+          - cell "100" [ref=e391]
+          - cell "skills/data-pipeline-patterns" [ref=e392]
+          - cell "skills" [ref=e393]
+          - cell "clean" [ref=e394]
+          - cell "Propose upgrade" [ref=e395]:
+            - button "Propose upgrade" [ref=e396] [cursor=pointer]
+        - row "100 skills/database-patterns skills clean Propose upgrade" [ref=e397]:
+          - cell "100" [ref=e398]
+          - cell "skills/database-patterns" [ref=e399]
+          - cell "skills" [ref=e400]
+          - cell "clean" [ref=e401]
+          - cell "Propose upgrade" [ref=e402]:
+            - button "Propose upgrade" [ref=e403] [cursor=pointer]
+        - row "100 skills/dispatching-parallel-agents skills clean Propose upgrade" [ref=e404]:
+          - cell "100" [ref=e405]
+          - cell "skills/dispatching-parallel-agents" [ref=e406]
+          - cell "skills" [ref=e407]
+          - cell "clean" [ref=e408]
+          - cell "Propose upgrade" [ref=e409]:
+            - button "Propose upgrade" [ref=e410] [cursor=pointer]
+        - row "100 skills/executing-plans skills clean Propose upgrade" [ref=e411]:
+          - cell "100" [ref=e412]
+          - cell "skills/executing-plans" [ref=e413]
+          - cell "skills" [ref=e414]
+          - cell "clean" [ref=e415]
+          - cell "Propose upgrade" [ref=e416]:
+            - button "Propose upgrade" [ref=e417] [cursor=pointer]
+        - row "100 skills/finishing-a-development-branch skills clean Propose upgrade" [ref=e418]:
+          - cell "100" [ref=e419]
+          - cell "skills/finishing-a-development-branch" [ref=e420]
+          - cell "skills" [ref=e421]
+          - cell "clean" [ref=e422]
+          - cell "Propose upgrade" [ref=e423]:
+            - button "Propose upgrade" [ref=e424] [cursor=pointer]
+        - row "100 skills/fintech-mobile skills clean Propose upgrade" [ref=e425]:
+          - cell "100" [ref=e426]
+          - cell "skills/fintech-mobile" [ref=e427]
+          - cell "skills" [ref=e428]
+          - cell "clean" [ref=e429]
+          - cell "Propose upgrade" [ref=e430]:
+            - button "Propose upgrade" [ref=e431] [cursor=pointer]
+        - row "100 skills/fintech-security skills clean Propose upgrade" [ref=e432]:
+          - cell "100" [ref=e433]
+          - cell "skills/fintech-security" [ref=e434]
+          - cell "skills" [ref=e435]
+          - cell "clean" [ref=e436]
+          - cell "Propose upgrade" [ref=e437]:
+            - button "Propose upgrade" [ref=e438] [cursor=pointer]
+        - row "100 skills/frontend-react skills clean Propose upgrade" [ref=e439]:
+          - cell "100" [ref=e440]
+          - cell "skills/frontend-react" [ref=e441]
+          - cell "skills" [ref=e442]
+          - cell "clean" [ref=e443]
+          - cell "Propose upgrade" [ref=e444]:
+            - button "Propose upgrade" [ref=e445] [cursor=pointer]
+        - row "100 skills/goal skills clean Propose upgrade" [ref=e446]:
+          - cell "100" [ref=e447]
+          - cell "skills/goal" [ref=e448]
+          - cell "skills" [ref=e449]
+          - cell "clean" [ref=e450]
+          - cell "Propose upgrade" [ref=e451]:
+            - button "Propose upgrade" [ref=e452] [cursor=pointer]
+        - row "100 skills/grounding-claims skills clean Propose upgrade" [ref=e453]:
+          - cell "100" [ref=e454]
+          - cell "skills/grounding-claims" [ref=e455]
+          - cell "skills" [ref=e456]
+          - cell "clean" [ref=e457]
+          - cell "Propose upgrade" [ref=e458]:
+            - button "Propose upgrade" [ref=e459] [cursor=pointer]
+        - row "100 skills/messaging-patterns skills clean Propose upgrade" [ref=e460]:
+          - cell "100" [ref=e461]
+          - cell "skills/messaging-patterns" [ref=e462]
+          - cell "skills" [ref=e463]
+          - cell "clean" [ref=e464]
+          - cell "Propose upgrade" [ref=e465]:
+            - button "Propose upgrade" [ref=e466] [cursor=pointer]
+        - row "100 skills/observability skills clean Propose upgrade" [ref=e467]:
+          - cell "100" [ref=e468]
+          - cell "skills/observability" [ref=e469]
+          - cell "skills" [ref=e470]
+          - cell "clean" [ref=e471]
+          - cell "Propose upgrade" [ref=e472]:
+            - button "Propose upgrade" [ref=e473] [cursor=pointer]
+        - row "100 skills/receiving-code-review skills clean Propose upgrade" [ref=e474]:
+          - cell "100" [ref=e475]
+          - cell "skills/receiving-code-review" [ref=e476]
+          - cell "skills" [ref=e477]
+          - cell "clean" [ref=e478]
+          - cell "Propose upgrade" [ref=e479]:
+            - button "Propose upgrade" [ref=e480] [cursor=pointer]
+        - row "100 skills/refactor-with-rollback skills clean Propose upgrade" [ref=e481]:
+          - cell "100" [ref=e482]
+          - cell "skills/refactor-with-rollback" [ref=e483]
+          - cell "skills" [ref=e484]
+          - cell "clean" [ref=e485]
+          - cell "Propose upgrade" [ref=e486]:
+            - button "Propose upgrade" [ref=e487] [cursor=pointer]
+        - row "100 skills/requesting-code-review skills clean Propose upgrade" [ref=e488]:
+          - cell "100" [ref=e489]
+          - cell "skills/requesting-code-review" [ref=e490]
+          - cell "skills" [ref=e491]
+          - cell "clean" [ref=e492]
+          - cell "Propose upgrade" [ref=e493]:
+            - button "Propose upgrade" [ref=e494] [cursor=pointer]
+        - row "100 skills/session-bootstrap skills clean Propose upgrade" [ref=e495]:
+          - cell "100" [ref=e496]
+          - cell "skills/session-bootstrap" [ref=e497]
+          - cell "skills" [ref=e498]
+          - cell "clean" [ref=e499]
+          - cell "Propose upgrade" [ref=e500]:
+            - button "Propose upgrade" [ref=e501] [cursor=pointer]
+        - row "100 skills/skill-creator skills clean Propose upgrade" [ref=e502]:
+          - cell "100" [ref=e503]
+          - cell "skills/skill-creator" [ref=e504]
+          - cell "skills" [ref=e505]
+          - cell "clean" [ref=e506]
+          - cell "Propose upgrade" [ref=e507]:
+            - button "Propose upgrade" [ref=e508] [cursor=pointer]
+        - row "100 skills/subagent-driven-development skills clean Propose upgrade" [ref=e509]:
+          - cell "100" [ref=e510]
+          - cell "skills/subagent-driven-development" [ref=e511]
+          - cell "skills" [ref=e512]
+          - cell "clean" [ref=e513]
+          - cell "Propose upgrade" [ref=e514]:
+            - button "Propose upgrade" [ref=e515] [cursor=pointer]
+        - row "100 skills/systematic-debugging skills clean Propose upgrade" [ref=e516]:
+          - cell "100" [ref=e517]
+          - cell "skills/systematic-debugging" [ref=e518]
+          - cell "skills" [ref=e519]
+          - cell "clean" [ref=e520]
+          - cell "Propose upgrade" [ref=e521]:
+            - button "Propose upgrade" [ref=e522] [cursor=pointer]
+        - row "100 skills/test-driven-development skills clean Propose upgrade" [ref=e523]:
+          - cell "100" [ref=e524]
+          - cell "skills/test-driven-development" [ref=e525]
+          - cell "skills" [ref=e526]
+          - cell "clean" [ref=e527]
+          - cell "Propose upgrade" [ref=e528]:
+            - button "Propose upgrade" [ref=e529] [cursor=pointer]
+        - row "100 skills/validate-feature skills clean Propose upgrade" [ref=e530]:
+          - cell "100" [ref=e531]
+          - cell "skills/validate-feature" [ref=e532]
+          - cell "skills" [ref=e533]
+          - cell "clean" [ref=e534]
+          - cell "Propose upgrade" [ref=e535]:
+            - button "Propose upgrade" [ref=e536] [cursor=pointer]
+        - row "100 skills/verification-before-completion skills clean Propose upgrade" [ref=e537]:
+          - cell "100" [ref=e538]
+          - cell "skills/verification-before-completion" [ref=e539]
+          - cell "skills" [ref=e540]
+          - cell "clean" [ref=e541]
+          - cell "Propose upgrade" [ref=e542]:
+            - button "Propose upgrade" [ref=e543] [cursor=pointer]
+        - row "100 skills/writing-plans skills clean Propose upgrade" [ref=e544]:
+          - cell "100" [ref=e545]
+          - cell "skills/writing-plans" [ref=e546]
+          - cell "skills" [ref=e547]
+          - cell "clean" [ref=e548]
+          - cell "Propose upgrade" [ref=e549]:
+            - button "Propose upgrade" [ref=e550] [cursor=pointer]
+        - row "100 skills/writing-software-docs skills clean Propose upgrade" [ref=e551]:
+          - cell "100" [ref=e552]
+          - cell "skills/writing-software-docs" [ref=e553]
+          - cell "skills" [ref=e554]
+          - cell "clean" [ref=e555]
+          - cell "Propose upgrade" [ref=e556]:
+            - button "Propose upgrade" [ref=e557] [cursor=pointer]
+        - row "100 skills/writing-tests skills clean Propose upgrade" [ref=e558]:
+          - cell "100" [ref=e559]
+          - cell "skills/writing-tests" [ref=e560]
+          - cell "skills" [ref=e561]
+          - cell "clean" [ref=e562]
+          - cell "Propose upgrade" [ref=e563]:
+            - button "Propose upgrade" [ref=e564] [cursor=pointer]

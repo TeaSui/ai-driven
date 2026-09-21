@@ -47,7 +47,7 @@ Pre-built IDs: `pptx`, `xlsx`, `docx`, `pdf`. Use when you need doc generation w
 skills = client.beta.skills.list(source="anthropic")
 
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     betas=["code-execution-2025-08-25", "skills-2025-10-02", "files-api-2025-04-14"],
     container={"skills": [{"type": "anthropic", "skill_id": "pptx", "version": "latest"}]},
     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
@@ -80,7 +80,7 @@ skill = client.beta.skills.create(
 )
 
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     betas=["code-execution-2025-08-25", "skills-2025-10-02", "files-api-2025-04-14"],
     container={"skills": [
         {"type": "custom",    "skill_id": skill.id, "version": "latest"},

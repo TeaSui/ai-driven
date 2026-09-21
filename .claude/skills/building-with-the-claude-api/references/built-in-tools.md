@@ -25,7 +25,7 @@ Real-time web with built-in citations. $10/1000 searches + tokens. Org admin mus
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     tools=[{
         "type": "web_search_20250305", "name": "web_search",
         "max_uses": 5,
@@ -57,7 +57,7 @@ Fetch specific URLs (text + PDF) already seen in the conversation. No extra cost
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     tools=[{
         "type": "web_fetch_20250910", "name": "web_fetch",
         "max_uses": 5,
@@ -82,7 +82,7 @@ Python/Bash in a sandboxed Linux container (Python 3.11.12, 5GiB RAM, 1 CPU, **n
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     betas=["files-api-2025-04-14"],
     tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
     messages=[{"role": "user", "content": "Calculate mean of [1..10]"}],
@@ -91,7 +91,7 @@ response = client.beta.messages.create(
 # With file upload + container reuse:
 file = client.beta.files.upload(file=open("data.csv", "rb"))
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     betas=["files-api-2025-04-14"],
     messages=[{"role": "user", "content": [
         {"type": "text", "text": "Analyze"},
@@ -123,11 +123,11 @@ Beta: pair a fast executor model with a stronger advisor that receives the full 
 
 ```python
 response = client.beta.messages.create(
-    model="claude-sonnet-4-6", max_tokens=4096,
+    model="claude-sonnet-5", max_tokens=4096,
     betas=["advisor-tool-2026-03-01"],
     tools=[{
         "type": "advisor_20260301", "name": "advisor",
-        "model": "claude-opus-4-7",
+        "model": "claude-opus-4-8",
         "max_uses": 5,
         "caching": {"type": "ephemeral", "ttl": "5m"},  # worth it at 3+ calls
     }],
@@ -135,7 +135,7 @@ response = client.beta.messages.create(
 )
 ```
 
-Valid pairs: advisor ≥ executor capability (Haiku/Sonnet/Opus executors with Opus 4.7 advisor).
+Valid pairs: advisor ≥ executor capability (Haiku/Sonnet/Opus executors with Opus 4.8 advisor).
 
 Gotchas:
 - `max_tokens` bounds executor output only; advisor has its own budget.
@@ -222,7 +222,7 @@ Beta. Screenshot + mouse + keyboard control, typically alongside bash + text_edi
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     betas=["computer-use-2025-11-24"],
     tools=[
         {"type": "computer_20251124", "name": "computer",
@@ -235,7 +235,7 @@ response = client.beta.messages.create(
 ```
 
 Beta headers:
-- `computer-use-2025-11-24` — Opus 4.7 / 4.6 / Sonnet 4.6 / Opus 4.5.
+- `computer-use-2025-11-24` — Opus 4.8, Sonnet 5.
 - `computer-use-2025-01-24` — older models.
 
 Security stance:

@@ -4,8 +4,8 @@ Thinking (adaptive / manual), effort, task budgets, structured outputs, citation
 
 ## Contents
 
-- [Adaptive thinking (Opus 4.7 default)](#adaptive-thinking)
-- [Manual extended thinking (Sonnet 4.6 / Opus 4.6 and older)](#manual-extended-thinking)
+- [Adaptive thinking (Opus 4.8 default)](#adaptive-thinking)
+- [Manual extended thinking (Sonnet 5)](#manual-extended-thinking)
 - [Effort](#effort)
 - [Task budgets](#task-budgets)
 - [Structured outputs](#structured-outputs)
@@ -19,13 +19,13 @@ Thinking (adaptive / manual), effort, task budgets, structured outputs, citation
 
 ## Adaptive thinking
 
-Required on **Opus 4.7** (manual mode returns 400). Recommended on Opus 4.6 / Sonnet 4.6. Claude decides when and how deeply to think; you control with `effort`.
+Recommended on **Opus 4.8** and **Sonnet 5**. Claude decides when and how deeply to think; you control with `effort`.
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7",
+    model="claude-opus-4-8",
     max_tokens=16000,
-    thinking={"type": "adaptive", "display": "summarized"},  # 4.7 defaults to "omitted"
+    thinking={"type": "adaptive", "display": "summarized"},
     output_config={"effort": "xhigh"},  # coding/agentic workloads
     messages=[{"role": "user", "content": "Refactor this module..."}],
 )
@@ -35,18 +35,18 @@ for b in response.content:
 ```
 
 Gotchas:
-- On Opus 4.7, `display` defaults to `"omitted"` (silent change from 4.6). Set `"summarized"` to see reasoning; tokens are billed either way.
+- `display` defaults to `"omitted"`. Set `"summarized"` to see reasoning; tokens are billed either way.
 - `signature` on thinking blocks must round-trip **unchanged** when you replay the assistant turn (tool-use multi-turn). Stripping it breaks reasoning and rejects follow-up requests.
 - Switching between `adaptive` / `enabled` / `disabled` invalidates message-level prompt cache.
 - At `high` / `max` effort, `stop_reason: "max_tokens"` is more likely — raise `max_tokens` (≥64k recommended) or lower effort.
 
 ## Manual extended thinking
 
-For **Sonnet 4.6 / Opus 4.6 and older**. Rejected by Opus 4.7.
+For **Sonnet 5**. Prefer adaptive thinking on Opus 4.8 for agentic/coding work.
 
 ```python
 response = client.messages.create(
-    model="claude-sonnet-4-6",
+    model="claude-sonnet-5",
     max_tokens=16000,
     thinking={"type": "enabled", "budget_tokens": 10000},  # must be < max_tokens, min 1024
     messages=[{"role": "user", "content": "Prove sqrt(2) is irrational."}],
@@ -60,29 +60,29 @@ Gotchas:
 
 ## Effort
 
-Cross-cutting knob for total token spend (thinking + text + tool calls). GA on Opus 4.7 / 4.6 / 4.5, Sonnet 4.6, Mythos.
+Cross-cutting knob for total token spend (thinking + text + tool calls). GA on Opus 4.8, Sonnet 5.
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
-    output_config={"effort": "medium"},  # low | medium | high (default) | xhigh (Opus 4.7) | max
+    model="claude-opus-4-8", max_tokens=4096,
+    output_config={"effort": "medium"},  # low | medium | high | xhigh | max
     messages=[...],
 )
 ```
 
 Guidance:
-- Opus 4.7 agentic / coding: start at `xhigh`, pair with `max_tokens ≥ 64000`.
-- Sonnet 4.6's default is `high` — set explicitly to `medium` for most apps to avoid unexpected latency.
+- Opus 4.8 agentic / coding: start at `xhigh`, pair with `max_tokens ≥ 64000`.
+- Sonnet 5: set `effort` explicitly rather than relying on the default — avoids surprise latency.
 - `max` can cause overthinking on trivial / structured tasks; stick to `high`/`xhigh` in most cases.
 - Effort is behavioral, not a hard cap. For hard caps use `max_tokens` + `task_budget`.
 
 ## Task budgets
 
-**Public beta, Opus 4.7 only.** Advisory total-token budget for an agentic loop, injected as a live countdown so Claude paces itself.
+**Public beta, Opus 4.8 only.** Advisory total-token budget for an agentic loop, injected as a live countdown so Claude paces itself.
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-7",
+    model="claude-opus-4-8",
     max_tokens=128000,
     output_config={
         "effort": "high",
@@ -97,15 +97,15 @@ Gotchas:
 - Advisory — Claude may exceed. Pair with `max_tokens` for a hard ceiling.
 - Budget < 20,000 returns 400.
 - Don't mutate `remaining` per request — kills prompt-cache prefix and the countdown drifts from real spend. Set once; let the server track.
-- Opus 4.7 only. Not Sonnet 4.6, not Haiku 4.5, not on Claude Code.
+- Opus 4.8 only. Not Sonnet 5, not Haiku 4.5, not on Claude Code.
 
 ## Structured outputs
 
-Grammar-constrained decoding guarantees schema-valid JSON (`output_config.format`) or schema-valid tool inputs (`strict: true`). GA on Mythos, Opus 4.7/4.6/4.5, Sonnet 4.6/4.5, Haiku 4.5. No beta header.
+Grammar-constrained decoding guarantees schema-valid JSON (`output_config.format`) or schema-valid tool inputs (`strict: true`). GA on Opus 4.8, Sonnet 5, Haiku 4.5. No beta header.
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": "Extract: Alice (alice@x.com), Enterprise demo Tue 2pm"}],
     output_config={
         "format": {
@@ -139,7 +139,7 @@ Inline, grounded citations on provided documents. Response interleaves `text` bl
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": [
         {"type": "document",
          "source": {"type": "text", "media_type": "text/plain",
@@ -173,7 +173,7 @@ RAG-quality citations on your own corpora. Return as tool results or inline in u
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     messages=[{"role": "user", "content": [
         {"type": "search_result",
          "source": "https://docs.example/auth", "title": "Auth Guide",
@@ -198,7 +198,7 @@ from anthropic.types.messages.batch_create_params import Request
 
 batch = client.messages.batches.create(requests=[
     Request(custom_id="r1", params=MessageCreateParamsNonStreaming(
-        model="claude-opus-4-7", max_tokens=1024,
+        model="claude-opus-4-8", max_tokens=1024,
         messages=[{"role": "user", "content": "Hello"}])),
     # ... up to 100k
 ])
@@ -222,11 +222,11 @@ Gotchas:
 
 ## Fast mode
 
-**Opus 4.6 only** — ~2.5× OTPS boost. Waitlisted beta. 6× price ($30/$150 per MTok).
+**Opus 4.8 only** — ~2.5× OTPS boost. Waitlisted beta. 6× price ($30/$150 per MTok).
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-6", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     speed="fast",
     betas=["fast-mode-2026-02-01"],
     messages=[{"role": "user", "content": "Refactor this..."}],

@@ -7,13 +7,13 @@ description: |
   correlating traces with logs, or monitoring DataBricks jobs.
   Triggers on: DataDog, DD, APM, traces, custom metrics, DogStatsD, monitors, dashboard, DataBricks monitoring,
   log correlation, observability, alerting, SLO.
-  Complements ~/.claude/references/observability-patterns.md which covers general standards (log format, metric naming, alert severity).
+  Complements references/observability-patterns.md which covers general standards (log format, metric naming, alert severity).
 ---
 
 # DataDog Observability
 
 General observability standards (structured logging format, metric naming convention, alert severity levels)
-are defined in `~/.claude/references/observability-patterns.md`. This skill covers DataDog-specific implementation.
+are defined in `references/observability-patterns.md`. This skill covers DataDog-specific implementation.
 
 ## APM Setup
 

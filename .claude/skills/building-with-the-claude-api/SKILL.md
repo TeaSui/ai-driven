@@ -1,6 +1,6 @@
 ---
 name: building-with-the-claude-api
-description: Use when writing or debugging Python code that calls the Claude API through the Anthropic Python SDK — messages.create requests, multi-turn conversations, system prompts, temperature, streaming, structured JSON output (output_config.format with json_schema on 4.6/4.7; prefill + stop_sequences on 4.5 and earlier), tool use (tool_use / tool_result blocks, multi-turn tool loops, fine-grained streaming, built-in text-editor / web-search / code-execution tools), extended thinking, vision, PDF input, citations, prompt caching with cache_control (5m default or 1h TTL), Files API, RAG pipelines (chunking, VoyageAI embeddings, BM25 lexical search, multi-index hybrid retrieval with reciprocal rank fusion), prompt engineering techniques (clarity, specificity, XML tags, one/multi-shot examples), eval workflows (datasets, model-based grading, code-based grading), MCP client/server integration including resources and prompts, or agent vs workflow design (parallelization, chaining, routing, evaluator-optimizer, composable tools, environment inspection). Covers the flat Obsidian-graph curriculum in docs/ (messages-api, model-capabilities, tools, tool-infrastructure, context-management, files, skills, mcp, third-party-platforms, managed-agents, best-practices, admin). Not for Claude Code CLI usage, Computer Use, or general agent frameworks.
+description: Use when writing or debugging Python code that calls the Claude API through the Anthropic Python SDK — messages.create requests, multi-turn conversations, system prompts, temperature, streaming, structured JSON output (output_config.format with json_schema on Sonnet 5 / Opus 4.8), tool use (tool_use / tool_result blocks, multi-turn tool loops, fine-grained streaming, built-in text-editor / web-search / code-execution tools), extended thinking, vision, PDF input, citations, prompt caching with cache_control (5m default or 1h TTL), Files API, RAG pipelines (chunking, VoyageAI embeddings, BM25 lexical search, multi-index hybrid retrieval with reciprocal rank fusion), prompt engineering techniques (clarity, specificity, XML tags, one/multi-shot examples), eval workflows (datasets, model-based grading, code-based grading), MCP client/server integration including resources and prompts, or agent vs workflow design (parallelization, chaining, routing, evaluator-optimizer, composable tools, environment inspection). Covers the flat Obsidian-graph curriculum in docs/ (messages-api, model-capabilities, tools, tool-infrastructure, context-management, files, skills, mcp, third-party-platforms, managed-agents, best-practices, admin). Not for Claude Code CLI usage, Computer Use, or general agent frameworks.
 ---
 
 # Building with the Claude API
@@ -27,7 +27,7 @@ from anthropic import Anthropic
 client = Anthropic()  # reads ANTHROPIC_API_KEY from env
 
 response = client.messages.create(
-    model="claude-opus-4-7",  # or claude-sonnet-4-6, claude-haiku-4-5
+    model="claude-opus-4-8",  # or claude-sonnet-5, claude-haiku-4-5
     max_tokens=1024,
     messages=[{"role": "user", "content": "Hello"}],
 )
@@ -46,12 +46,11 @@ Core invariants every call respects:
 
 | Model ID | Best for | Notes |
 |---|---|---|
-| `claude-opus-4-7` | Hard reasoning, agentic coding | **Adaptive thinking required** (manual `thinking.type="enabled"` returns 400); start effort at `xhigh` |
-| `claude-sonnet-4-6` | Balanced quality/cost; most apps | Default `effort="high"` — set explicitly to avoid surprise latency |
+| `claude-opus-4-8` | Hard reasoning, agentic coding, fast mode | Adaptive thinking available (`thinking={"type": "adaptive"}`); start effort at `xhigh` |
+| `claude-sonnet-5` | Balanced quality/cost; most apps | Set `effort` explicitly to avoid surprise latency |
 | `claude-haiku-4-5` | Cheap/fast: classification, graders, bulk | 200k context; drops on low-resource languages |
-| `claude-opus-4-6` | Only path to Fast mode | 6× price when `speed="fast"` |
 
-**Prefill is deprecated on Opus 4.7 / Opus 4.6 / Sonnet 4.6 and Mythos Preview** — sending an assistant-prefix message returns 400. Use `output_config.format` (see [references/model-capabilities.md](references/model-capabilities.md#structured-outputs)) for guaranteed JSON. Prefill still works on Sonnet 4.5 and Haiku 4.5.
+**Prefill is deprecated on Opus 4.8 and Sonnet 5** — sending an assistant-prefix message returns 400. Use `output_config.format` (see [references/model-capabilities.md](references/model-capabilities.md#structured-outputs)) for guaranteed JSON. Prefill still works on Haiku 4.5.
 
 ## Navigation
 
@@ -97,10 +96,10 @@ Route to the reference for the task. Each file is self-contained.
 - **Append the full `content` list for assistant turns with tool_use** — not `response.content[0].text`. Dropping it loses the `tool_use.id` the next `tool_result` must reference.
 - **`tool_result` blocks come FIRST in the next user message** — text after, not before. Violating the ordering returns 400 `"tool_use ids were found without tool_result blocks immediately after"`.
 - **Batch parallel tool results into one user message.** Splitting across turns teaches Claude to stop parallelizing.
-- **Prefill doesn't work on Opus 4.7 / 4.6 / Sonnet 4.6.** Use structured outputs (`output_config.format` with `json_schema`) or `strict: true` on tools.
+- **Prefill doesn't work on Opus 4.8 / Sonnet 5.** Use structured outputs (`output_config.format` with `json_schema`) or `strict: true` on tools.
 - **Cache invalidates on any byte change** in the prefix. Processing order: `tools → system → messages`. Changing tools kills everything. Min 1024 tokens (2048 Haiku), max 4 breakpoints, 5m or 1h TTL.
 - **Structured outputs and citations are mutually exclusive** — enabling both returns 400.
-- **Opus 4.7 rejects manual thinking.** Use `thinking={"type": "adaptive"}` + `output_config={"effort": "xhigh"}`. Thinking blocks with `display: "omitted"` (the 4.7 default) emit nothing visible but are still billed.
+- **Use adaptive thinking on Opus 4.8 / Sonnet 5.** `thinking={"type": "adaptive"}` + `output_config={"effort": "xhigh"}`. Thinking blocks with `display: "omitted"` emit nothing visible but are still billed.
 - **Fine-grained tool streaming disables JSON validation.** Handle partial/malformed JSON in `input_json_delta` application code.
 - **Code execution has no internet.** Move data in/out via the Files API (`container_upload` blocks in, `code_execution_output` out).
 - **MCP connector ≠ MCP client you build.** The connector is a Messages-API beta that reaches remote MCP servers directly — only `tool_use` supported, no resources/prompts.

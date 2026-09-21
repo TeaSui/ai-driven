@@ -130,6 +130,10 @@ From 24 failure memories:
 - Implications of success
 - ANY communication suggesting completion/correctness
 
+## Related
+
+- **`grounding-claims`** — this skill applies to *success* claims (tests pass, build works, bug fixed). `grounding-claims` applies to *all* factual claims (file paths, function names, library APIs, commit SHAs). Both enforce: evidence before assertion.
+
 ## The Bottom Line
 
 **No shortcuts for verification.**

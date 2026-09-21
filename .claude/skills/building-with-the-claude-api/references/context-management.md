@@ -15,8 +15,7 @@ Context window limits, server-side compaction, context editing (clear tool_uses 
 
 | Model | Context | Max output |
 |---|---|---|
-| Opus 4.7 / 4.6, Sonnet 4.6 | 1M | 64k (128k with streaming) |
-| Sonnet 4.5 | 200k | 64k |
+| Opus 4.8, Sonnet 5 | 1M | 64k (128k with streaming) |
 | Haiku 4.5 | 200k | 64k |
 
 Quirks:
@@ -24,13 +23,13 @@ Quirks:
 - Inside a tool-use loop, you MUST return thinking blocks verbatim on the follow-up (cryptographic `signature` on each block).
 - Newer models return 400 when input exceeds context rather than silently truncating — use `count_tokens` to check ahead.
 - Max 600 images / PDF pages per request (100 on 200k models).
-- Sonnet 4.6 / 4.5 / Haiku 4.5 see a `<budget:token_budget>` system warning near the limit — they self-regulate.
+- Sonnet 5 / Haiku 4.5 see a `<budget:token_budget>` system warning near the limit — they self-regulate.
 
 ## Token counting
 
 ```python
 count = client.messages.count_tokens(
-    model="claude-opus-4-7",
+    model="claude-opus-4-8",
     system="You are a scientist",
     tools=[{"name": "get_weather", "input_schema": {...}}],
     messages=[{"role": "user", "content": "Hello"}],
@@ -54,7 +53,7 @@ Two modes:
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7", max_tokens=1024,
+    model="claude-opus-4-8", max_tokens=1024,
     system=[{"type": "text", "text": LONG_SYSTEM_PROMPT,
              "cache_control": {"type": "ephemeral"}}],
     tools=[
@@ -75,7 +74,7 @@ print(response.usage.input_tokens)                 # non-cached portion
 - **Byte-identical** prefix required — one whitespace change invalidates.
 - Min cacheable length: **1024 tokens** (Opus / Sonnet), **2048 tokens** (Haiku).
 - Max **4 explicit breakpoints**. Automatic mode uses 1.
-- Cache is **per-model, per-org** — switching `speed="fast"` on 4.6 also breaks it.
+- Cache is **per-model, per-org** — switching `speed="fast"` on Opus 4.8 also breaks it.
 
 ### 1-hour cache
 
@@ -113,12 +112,12 @@ See [tool-use.md#prompt-caching-with-tools](tool-use.md#prompt-caching-with-tool
 
 ## Compaction
 
-Server-side conversation summarization when input exceeds a threshold. Recommended default for long chats / agents. Beta header `compact-2026-01-12`. Models: Opus 4.7 / 4.6, Sonnet 4.6.
+Server-side conversation summarization when input exceeds a threshold. Recommended default for long chats / agents. Beta header `compact-2026-01-12`. Models: Opus 4.8, Sonnet 5.
 
 ```python
 response = client.beta.messages.create(
     betas=["compact-2026-01-12"],
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     messages=messages,
     context_management={"edits": [{
         "type": "compact_20260112",
@@ -144,7 +143,7 @@ Surgical clearing strategies. Beta: `context-management-2025-06-27`.
 
 ```python
 response = client.beta.messages.create(
-    model="claude-opus-4-7", max_tokens=4096,
+    model="claude-opus-4-8", max_tokens=4096,
     betas=["context-management-2025-06-27"],
     messages=messages, tools=tools,
     context_management={"edits": [

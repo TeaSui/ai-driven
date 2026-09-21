@@ -1,11 +1,12 @@
 # Dispatch Prompt Contract
 
-**Scope:** This contract governs every `Task` dispatch made by a delegating agent. Fast-path work does not dispatch subagents — the main session edits directly — so there is no "fast path" case for this contract to exempt. See `rules/workflow-routing.md` for when a task dispatches at all.
+**Scope:** This contract governs every `Task` dispatch made by a delegating agent — including the **main session** when it dispatches implementers (coordinated fast path leaf dispatches, and full-workflow dispatches via `subagent-driven-development`). Fast-path work does not dispatch subagents — the main session edits directly — so there is no "fast path" case for this contract to exempt. See `rules/workflow-routing.md` for when a task dispatches at all.
 
 **Delegating agents bound by this contract:**
 - `agent-orchestrator` (Phase 4: DELEGATE)
 - `tech-lead-subagent` (Phase 3: DELEGATE — full mode only; `(contract)` / "Stop after Phase 2" dispatches do not delegate)
 - `business-analyst-subagent` (Phase 4: DELEGATE — standalone mode only; orchestrator-dispatched BA MUST NOT re-dispatch)
+- **main session** (coordinated fast path: direct leaf dispatches; full workflow: implementer dispatches after TechLead contract-mode, per `rules/workflow-routing.md`)
 
 **Leaf subagents (backend, frontend, mobile, devops, data, AI, AWS, UI/UX, security, QA, api-test, code-reviewer) are consumers:** they read this shape on input and return per `rules/subagent-return-format.md` on output. They do not dispatch.
 
@@ -32,7 +33,13 @@ Existing conventions preserved (do not restate — cite):
 
 ## Required prompt shape
 
-Every dispatch prompt MUST contain the following XML-tagged sections, in this order. Omit a section only when explicitly marked optional.
+Every **implementation dispatch** prompt MUST contain the following sections, in this order. Omit a section only when explicitly marked optional.
+
+**Shape is content-first:** the nine fields are the contract; XML tags are the *recommended* serialization, but markdown headings carrying the same fields are compliant. Empirically (see `rules/subagent-return-format.md`), field completeness drives subagent behavior, not the angle brackets. The detection signal for a contract dispatch remains an explicit return-format section referencing `rules/subagent-return-format.md` (tagged `<return_format>` or a heading).
+
+**Review / advisory dispatches** (spec review, code-quality review, QA, threat-model, requirements) use a lighter minimum: `role`, `context`, `task`, and `return_format`. Add `inputs`/`exit_criteria`/`out_of_scope` only when they carry real content — a review has no file-mutation scope to fence.
+
+**Model-aware steering:** before issuing any dispatch, consult the "Model-Specific Steering" section of `skills/dispatching-parallel-agents/references/model-routing.md` for the dispatch's RESOLVED model (override > agent frontmatter > dispatching agent's own model) and style the prompt accordingly — explicit enumerated scope for literal models (sonnet/opus-4.8), coverage-not-filtering language in reviewer dispatches to literal models, full slot-filling for haiku, terse with no verification instructions for frontier overrides. Subagents cannot see `rules/` or user CLAUDE.md — the dispatch prompt is the only channel, so steering content must be written into it, not referenced.
 
 ```xml
 <role>
@@ -45,6 +52,9 @@ Minimum facts the subagent needs to act:
 - Upstream agents and their outputs (Security rules? TechLead contract? BA stories?)
 - Who dispatched you (orchestrator / tech-lead / BA-standalone)
 Do NOT paste conversation history. Construct exactly what they need.
+Ordering: put load-bearing facts (IDs, amounts, contract paths, hard constraints) at the TOP of a
+long context — models process the beginning and end of long inputs reliably but can drop the middle.
+Trim verbose upstream tool output to the relevant fields before pasting it in.
 </context>
 
 <inputs>
@@ -52,7 +62,18 @@ Do NOT paste conversation history. Construct exactly what they need.
   <contract ref="docs/contracts/..."/>  <!-- Optional; include when TechLead contract applies -->
   <security_rules ref="docs/security/..."/>  <!-- Optional; verbatim or by reference when trust-boundary -->
   <requirements ref="docs/requirements/..."/> <!-- Optional; BA stories -->
+  <domain_model ref="docs/domain/..."/>       <!-- Optional; glossary/domain model — use its terms verbatim, do not redefine them -->
 </inputs>
+<!--
+  Dispatcher obligation (anti-fabrication): before issuing the Task call, the
+  dispatcher MUST verify every <file path>, <contract ref>, <security_rules ref>,
+  <requirements ref>, and <domain_model ref> exists via Read or Glob. If a path is planned-but-not-
+  yet-created (e.g., a new file the subagent will author), mark it `status="new"`
+  and do NOT try to Read it — but every path without that marker MUST resolve.
+  Fabricated input paths propagate into subagent work; per rules/reduce-hallucinations.md
+  they are defects with the same severity as fabricated evidence paths.
+-->
+
 
 <task>
 A single imperative instruction. Literal phrasing. No "please consider" or "it might be nice to". State scope explicitly — do not assume the model will generalize.

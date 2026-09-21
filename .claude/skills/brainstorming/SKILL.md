@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation."
+description: "You MUST use this before creative work — creating features, building components, adding functionality, or modifying behavior — on full-workflow and orchestrator tiers (rules/workflow-routing.md), or on any tier when the design is genuinely unclear. Fast-path changes with a clear design skip it. Explores user intent, requirements and design before implementation."
 ---
 
 # Brainstorming Ideas Into Designs
@@ -10,12 +10,12 @@ Help turn ideas into fully formed designs and specs through natural collaborativ
 Start by understanding the current project context, then ask questions one at a time to refine the idea. Once you understand what you're building, present the design and get user approval.
 
 <HARD-GATE>
-Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to EVERY project regardless of perceived simplicity.
+Do NOT invoke any implementation skill, write any code, scaffold any project, or take any implementation action until you have presented a design and the user has approved it. This applies to every task on the full-workflow or orchestrator tiers, and to any task whose design is genuinely unclear. Exception: fast-path changes per rules/workflow-routing.md (no trust boundary, single domain, design clear) proceed directly with TDD + verification — routing tier wins over this gate.
 </HARD-GATE>
 
 ## Anti-Pattern: "This Is Too Simple To Need A Design"
 
-Every project goes through this process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval.
+Once this skill is invoked, every project goes through the full process. A todo list, a single-function utility, a config change — all of them. "Simple" projects are where unexamined assumptions cause the most wasted work. The design can be short (a few sentences for truly simple projects), but you MUST present it and get approval. (Whether to invoke at all is decided by the routing tier — see the description and HARD-GATE above; do not use "it's simple" as a reason to skip once invoked.)
 
 ## Checklist
 

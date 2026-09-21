@@ -1,6 +1,6 @@
 # Subagent Return Conventions
 
-**Scope:** Every subagent dispatched via the `Task` tool by a delegating agent (orchestrator, tech-lead full-mode, BA-standalone) MUST include three things in its final message:
+**Scope:** Every subagent dispatched via the `Task` tool by a delegating agent (orchestrator, tech-lead full-mode, BA-standalone, or the main session when dispatching per `rules/workflow-routing.md` — coordinated fast path and full workflow) MUST include three things in its final message:
 
 1. A **status** — one of four values (see below)
 2. A list of **evidence paths** — real files/logs the dispatcher can `Read`
@@ -25,6 +25,8 @@ Four values, reused from `skills/subagent-driven-development/SKILL.md`:
 | `NEEDS_CONTEXT` | Cannot proceed because required inputs are missing or ambiguous | summary, what's needed, next-step recommendation |
 | `BLOCKED` | Cannot complete; scope/spec/approach/environment needs to change (includes hitting review-loop limits per `rules/review-loop-limits.md`) | summary, what was tried, blocker explanation, next-step recommendation |
 
+BLOCKED returns must also name the **failure category** — transient/environment (retry may work) or scope/spec/approach (the task itself needs to change) — and include any **partial results** with a note of what was and wasn't covered. (A missing input the dispatcher can supply is `NEEDS_CONTEXT`, not `BLOCKED`.) Generic "it failed" statuses force the dispatcher to guess between retry, re-scope, and escalate. Do not conflate a tooling failure with a valid empty result: a check that ran successfully and found nothing is `DONE`, not `BLOCKED`.
+
 The status keyword MUST appear verbatim somewhere in the return — as a heading (`## Status: DONE`), a bold label (`**Status:** DONE`), an XML tag (`<status>DONE</status>`), or a sentence (`Status: DONE`). All are acceptable. The dispatcher scans for the keyword.
 
 ---
@@ -40,7 +42,7 @@ The status keyword MUST appear verbatim somewhere in the return — as a heading
 
 ## Evidence rules
 
-- Every cited path must be real. Dispatchers `Read` them.
+- Every cited path must be real. Dispatchers `Read` them. Fabricated paths are a hallucination (`rules/reduce-hallucinations.md`) — treat as BLOCKED regardless of claimed status.
 - Test/build output: write to a file (`> /tmp/<slug>.log` or project-local equivalent) and cite the path. Don't paste multi-page output inline.
 - For code changes, cite file paths (not diffs). Reviewers read files.
 - For commands run, include the exact command so reviewers can reproduce.
@@ -50,12 +52,7 @@ The status keyword MUST appear verbatim somewhere in the return — as a heading
 
 ## Strategic agents: persistence obligation
 
-Strategic agents (`business-analyst-subagent`, `tech-lead-subagent`, `security-engineer-subagent`) MUST persist their canonical artifacts to `docs/` per `rules/strategic-output-persistence.md` AND cite those paths in evidence. Do not paste full contracts / threat models / user stories into the return — cite the persisted files.
-
-- BA → `docs/requirements/`
-- TechLead (full mode) → `docs/contracts/` + module READMEs
-- TechLead (`(contract)`-mode / "Stop after Phase 2") → module READMEs only
-- Security → `docs/security/`
+Strategic agents (`business-analyst-subagent`, `tech-lead-subagent`, `security-engineer-subagent`) MUST persist their canonical artifacts to `docs/` per `rules/strategic-output-persistence.md` (which owns the per-agent destinations) AND cite those paths in evidence. Do not paste full contracts / threat models / user stories into the return — cite the persisted files.
 
 ---
 

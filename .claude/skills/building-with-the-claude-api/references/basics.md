@@ -30,7 +30,7 @@ from anthropic import Anthropic
 
 load_dotenv()
 client = Anthropic()  # reads ANTHROPIC_API_KEY
-model = "claude-opus-4-7"  # or claude-sonnet-4-6, claude-haiku-4-5
+model = "claude-opus-4-8"  # or claude-sonnet-5, claude-haiku-4-5
 ```
 
 ## A minimal request
@@ -159,13 +159,13 @@ while True:
 
 Two strategies. Pick by model.
 
-### Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Mythos: structured outputs
+### Opus 4.8 / Sonnet 5: structured outputs
 
 **Prefill returns 400 on these models.** Use `output_config.format` with a JSON Schema — the decoder is grammar-constrained to your schema. GA (no beta header).
 
 ```python
 response = client.messages.create(
-    model="claude-opus-4-7",
+    model="claude-opus-4-8",
     max_tokens=1024,
     messages=[{"role": "user", "content": "Extract: Alice (alice@x.com) wants a demo Tue 2pm"}],
     output_config={
@@ -190,7 +190,7 @@ data = json.loads(response.content[0].text)
 
 Set `additionalProperties: false` and list every property in `required` — otherwise the model may emit extras. **Incompatible with Citations** — both together returns 400.
 
-### Sonnet 4.5 / Haiku 4.5 / older: prefill + stop_sequences
+### Haiku 4.5: prefill + stop_sequences
 
 ```python
 messages = [{"role": "user", "content": "Give 3 movie ideas with title, genre, logline."},
@@ -214,7 +214,7 @@ The assistant prefix forces JSON syntax; `stop_sequences` halts before the closi
 - **`content[0].text` only for pure text.** With tool_use / thinking / citations, iterate blocks.
 - **Temperature doesn't guarantee variation.** Short prompts often give similar outputs at 1.0.
 - **Streaming errors surface on `__exit__`.** Wrap the whole `with`, don't try/except inside the loop.
-- **Prefill is deprecated on 4.7/4.6 tier.** A prefilled assistant message → 400. Migrate to structured outputs.
+- **Prefill is deprecated on Opus 4.8 / Sonnet 5.** A prefilled assistant message → 400. Migrate to structured outputs.
 - **Never add text after `tool_result` in the same user message.** Breaks future parallelism and can cause empty responses.
 - **Check `stop_reason` before indexing `content[0]`.** A refused or empty response has no `[0].text`.
 
