@@ -70,12 +70,12 @@ When you can't trace manually, add instrumentation:
 ```typescript
 // Before the problematic operation
 async function gitInit(directory: string) {
-  const stack = new Error().stack;
+  // Inspect a sanitized stack locally if the caller cannot be located from the code.
   console.error('DEBUG git init:', {
-    directory,
-    cwd: process.cwd(),
-    nodeEnv: process.env.NODE_ENV,
-    stack,
+    directoryProvided: directory.length > 0,
+    runningInTest: process.env.NODE_ENV === 'test',
+    // Keep only sanitized project-relative filenames/line numbers from stack.
+    // Do not emit absolute user paths, arguments, environment values or payloads.
   });
 
   await execFileAsync('git', ['init'], { cwd: directory });
@@ -157,8 +157,8 @@ digraph principle {
 
 **In tests:** Use `console.error()` not logger - logger may be suppressed
 **Before operation:** Log before the dangerous operation, not after it fails
-**Include context:** Directory, cwd, environment variables, timestamps
-**Capture stack:** `new Error().stack` shows complete call chain
+**Include context:** Presence flags, safe relative filenames and timestamps; never raw environment values or private paths
+**Capture stack:** Inspect `new Error().stack` locally; disclose only sanitized project-relative filenames and line numbers
 
 ## Real-World Impact
 

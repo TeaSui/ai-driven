@@ -1,3 +1,5 @@
+> Historical curriculum. For current models use [the current guide](../references/current-models.md). This preserved snapshot is background material, not current API authority.
+
 ---
 tags: [moc, claude-api]
 aliases: [Home, Claude API Docs]

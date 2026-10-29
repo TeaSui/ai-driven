@@ -1,11 +1,9 @@
 # AI Integration Rules
 
 ## Model Selection
-- Use haiku for classification, extraction, routing, simple Q&A (cost efficiency)
-- Use sonnet for standard coding, analysis, summarization (quality/cost balance)
-- Use opus for complex architecture decisions, multi-step reasoning, critical evals
-- Never use opus as default — explicit justification required
-- Document model selection rationale in code comments
+- Current selection policy: `~/.claude/references/model-guide.md`; current API details: `~/.claude/skills/building-with-the-claude-api/references/current-models.md`.
+- Start an unspecified substantial workload with Opus 5.5 at medium effort. Use Sonnet 5.5 for clear bounded implementation, Haiku 5.5 for measured mechanical/volume tasks, Fable 5.1 for difficult reasoning and long autonomous work.
+- Validate quality, latency and cost on representative cases; keep a concise rationale where a choice is non-obvious. Do not impose historical model/effort defaults on current tasks.
 
 ## Prompt Engineering Standards
 - Store prompts as versioned constants, not inline strings
@@ -42,14 +40,13 @@ Return JSON with fields: category, risk_level, confidence.
 - Context window is finite — design for it
 - For RAG: retrieve only what's needed, rank by relevance, limit to top-k chunks
 - For long documents: chunk and summarize rather than stuffing full content
-- For agents: prune conversation history aggressively
+- For agents: keep prior turns/system/tools stable under preserved thinking; use documented compaction/edit controls for long sessions
 - For PII handling with LLMs: see `data-privacy-patterns.md` (LLM/AI Usage with PII section)
 
-## Extended Thinking
-- Use extended thinking for: multi-step math, complex reasoning chains, ambiguous problem decomposition
-- Do NOT use for: simple extraction, classification, format conversion (wasteful)
-- Budget tokens conservatively: start at 1024 thinking tokens, scale up only if quality insufficient
-- Test quality improvement vs cost tradeoff before enabling in production
+## Adaptive Reasoning
+- Current models use adaptive reasoning. Control depth with documented effort; fixed thinking budgets are rejected on the current family.
+- Fable 5.1/Opus 5.5 cannot turn thinking off. Use lower effort for mechanical work where quality holds, instead of adding prose that asks the model not to think.
+- Keep request output budgets adequate for thinking plus response. Re-baseline quality/cost when changing models rather than copying prior-generation tuning.
 
 ## Prompt Caching
 - Cache system prompts that are ≥1024 tokens and used repeatedly
@@ -98,11 +95,11 @@ try {
 - Implement max iteration limits (default: 10 turns)
 - Implement token budget limits per agent run
 - Use structured tool outputs (JSON) — never free-form text for actions
-- Log every tool call and result for debugging and audit
+- Log tool names, status, latency and usage; redact sensitive arguments/results before diagnostic capture
 - Design for partial failure — agents must handle tool errors gracefully
 
 ## Observability
 - Trace every LLM call with correlation ID linking to user request
 - Emit metrics: latency P50/P95/P99, token counts, cost, cache hit rate, error rate
-- Use Langfuse, Helicone, or custom instrumentation — never fly blind on AI costs
+- Use the project observability stack in `observability-patterns.md`; introduce another vendor only within the approved architecture/security scope
 - Alert on: error rate >5%, latency P99 >10s, daily cost >threshold

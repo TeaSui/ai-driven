@@ -17,7 +17,7 @@ cd /Users/tungnguyen/TYME/Tools/Claude/eval-upgrade
 # Evaluate (default mode when the user gives no subcommand)
 node bin/run.mjs [--target <dir>] [--types agents,commands,rules,skills] [--llm] [--json]
 
-# Dashboard — start, then give the user the printed URL (it contains the session token)
+# Dashboard — when requested, open the local URL without copying its session token into chat/logs
 node server.mjs
 
 # Arena — champion/challenger duels
@@ -27,8 +27,8 @@ node bin/arena.mjs status                     # list arenas
 node bin/arena.mjs promote <artifact-id>      # manual promotion (backup kept)
 node bin/arena.mjs discard <artifact-id>      # retire challenger
 
-# Config — show current toggles; edit config.json or use the dashboard to change
-node -e "console.log(JSON.stringify(require('./config.json'), null, 2))"
+# Config — inspect documented non-sensitive toggles through an authorized sanitized view
+# Never dump the entire configuration or credential values into the transcript.
 ```
 
 Artifact ids look like `skills/goal`, `agents/code-reviewer`, `rules/patterns`, `commands/prove-it`.
@@ -44,8 +44,10 @@ Artifact ids look like `skills/goal`, `agents/code-reviewer`, `rules/patterns`, 
 
 ## Real-session auto-trigger (opt-in, background only)
 
-A `PostToolUse` hook is registered in `~/.claude/settings.json` (matcher `Skill|Task|Agent`,
-async) at `hooks/auto-trigger.mjs`. When a real Skill/Agent call fires in ANY session, it
+The tool supports an optional async `PostToolUse` hook at `hooks/auto-trigger.mjs`
+(matcher `Skill|Task|Agent`). Do not assume it is registered: verify active hooks through
+`/hooks` or an authorized sanitized settings view before claiming auto-trigger is available.
+Do not modify hook registration as part of an evaluation. If registered, a real Skill/Agent call
 checks `config.json`'s `autoTrigger.enabled` (default `false`) and the artifact's type
 toggle — if both are on AND an arena already exists for that artifact, it fires one
 background duel round (throttled, default once/day/artifact). It never auto-registers a

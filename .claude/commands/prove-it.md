@@ -3,7 +3,11 @@ description: Challenge a completion claim — list every assertion made and run 
 argument-hint: "[optional: specific claim or task to verify]"
 ---
 
-For every completion or status claim in the current task:
+For every completion or status claim in the current task, identify the actual reviewed state/target and applicable scope. Discover project-supported commands before running them. This explicit challenge requires fresh evidence, unlike routine reuse of still-valid results.
+
+Keep checks within the authorized safe target. Do not install dependencies, start services or perform mutating requests merely to prove a claim; mark unavailable gates UNVERIFIED. Redact credentials, PII, environment values, auth headers and raw payloads from output.
+
+For each claim:
 
 1. **List every claim:** "tests pass", "build succeeds", "feature works", "bug fixed", etc.
 
@@ -18,7 +22,7 @@ For every completion or status claim in the current task:
 
 3. **Run each command NOW** — do not reuse a previous run
 
-4. **Report with exact output:**
+4. **Report with decisive output (sensitive contents redacted), exit code and scope:**
    ```
    claim: "tests pass"
    command: npm test

@@ -1,70 +1,14 @@
 ---
 name: executing-plans
-description: Use when you have a written implementation plan to execute in a separate session with review checkpoints
+description: Resume or execute an existing implementation plan across sessions with its accepted review checkpoints.
 ---
 
-# Executing Plans
+# Execute a saved plan
 
-## Overview
+Read the plan and existing progress/evidence first. Retain the original goal, constraints and accepted decisions; do not restart completed work after compaction. Resolve material gaps before dependent work, using available sources and safe assumptions for routine details.
 
-Load plan, review critically, execute all tasks, report when complete.
+Follow the routing tier, Security rules and contracts. Execute tasks in dependency order, mark progress, run relevant checks and read their results. When useful and available, use subagent-driven-development for owned independent tasks. If tools or services are unavailable, record the missing gate instead of inventing a result.
 
-**Announce at start:** "I'm using the executing-plans skill to implement this plan."
+Use project isolation when concurrent changes/risk require it and the runtime supports it; do not require a missing worktree skill or initialize a Git repository merely to follow the plan. Preserve other changes. Reuse existing scope authorization and honor explicit human checkpoints; do not add new confirmation loops for internal execution choices.
 
-**Note:** This skill works best with subagent support. If subagents are available (Claude Code, Codex), use `subagent-driven-development` instead of this skill.
-
-## The Process
-
-### Step 1: Load and Review Plan
-1. Read plan file
-2. Review critically - identify any questions or concerns about the plan
-3. If concerns: Raise them with your human partner before starting
-4. If no concerns: Create TodoWrite and proceed
-
-### Step 2: Execute Tasks
-
-For each task:
-1. Mark as in_progress
-2. Follow each step exactly (plan has bite-sized steps)
-3. Run verifications as specified
-4. Mark as completed
-
-### Step 3: Complete Development
-
-After all tasks complete and verified:
-- Announce: "I'm using the finishing-a-development-branch skill to complete this work."
-- **REQUIRED SUB-SKILL:** Use finishing-a-development-branch
-- Follow that skill to verify tests, present options, execute choice
-
-## When to Stop and Ask for Help
-
-**STOP executing immediately when:**
-- Hit a blocker (missing dependency, test fails, instruction unclear)
-- Plan has critical gaps preventing starting
-- You don't understand an instruction
-- Verification fails repeatedly
-
-**Ask for clarification rather than guessing.**
-
-## When to Revisit Earlier Steps
-
-**Return to Review (Step 1) when:**
-- Partner updates the plan based on your feedback
-- Fundamental approach needs rethinking
-
-**Don't force through blockers** - stop and ask.
-
-## Remember
-- Review plan critically first
-- Follow plan steps exactly
-- Don't skip verifications
-- Reference skills when plan says to
-- Stop when blocked, don't guess
-- Never start implementation on main/master branch without explicit user consent
-
-## Integration
-
-**Required workflow skills:**
-- **using-git-worktrees** - REQUIRED: Set up isolated workspace before starting
-- **writing-plans** - Creates the plan this skill executes
-- **finishing-a-development-branch** - Complete development after all tasks
+Debug failures from reproduced evidence. Bound fix/review attempts per `rules/review-loop-limits.md`; stop dependent work and explain the blocker when no safe authorized path remains. Finish with actual verification and the already-authorized delivery action. Use finishing-a-development-branch for a Git branch when applicable.

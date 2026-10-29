@@ -17,60 +17,70 @@ Primary platform: Flutter/Dart. iOS (Swift) and Android (Kotlin) patterns provid
 
 ## Biometric Authentication Flow
 
-### Flutter Implementation
+### Flutter Implementation — local_auth 3.x
+
+Read `pubspec.lock` and platform setup first; the current route below uses the 3.x API. `AuthResult`, `AuthRepository`, token types and `SecureTokenStorage` are application interfaces to implement/test, not plugin APIs. This integration sketch has not been executed on a device.
+
 ```dart
-// features/auth/domain/usecases/biometric_auth.dart
+import 'package:local_auth/local_auth.dart';
 
 class BiometricAuthUseCase {
   final LocalAuthentication _localAuth;
   final SecureTokenStorage _tokenStorage;
   final AuthRepository _authRepo;
 
-  /// Full biometric flow with fallback chain:
-  /// Biometric → Device PIN/Pattern → App PIN → Password
+  BiometricAuthUseCase(this._localAuth, this._tokenStorage, this._authRepo);
+
   Future<AuthResult> authenticate() async {
-    final canCheckBiometrics = await _localAuth.canCheckBiometrics;
-    final isDeviceSupported = await _localAuth.isDeviceSupported();
-
-    if (!canCheckBiometrics || !isDeviceSupported) {
-      return AuthResult.fallbackRequired(FallbackType.appPin);
-    }
-
     try {
+      // OR permits device credentials on supported devices without biometrics.
+      final supported = await _localAuth.canCheckBiometrics ||
+          await _localAuth.isDeviceSupported();
+      if (!supported) return AuthResult.fallbackRequired(FallbackType.password);
+
       final authenticated = await _localAuth.authenticate(
         localizedReason: 'Verify your identity to access your account',
-        options: const AuthenticationOptions(
-          stickyAuth: true,       // keep auth dialog on app resume
-          biometricOnly: false,   // allow device PIN as fallback
-          useErrorDialogs: true,
-        ),
+        biometricOnly: false, // OS may allow device passcode/PIN/pattern
+        persistAcrossBackgrounding: true,
       );
-
       if (!authenticated) return AuthResult.cancelled();
 
-      // Retrieve stored refresh token after biometric success
+      // Local authentication is not server authorization or crypto key binding.
       final refreshToken = await _tokenStorage.getRefreshToken();
-      if (refreshToken == null) return AuthResult.fallbackRequired(FallbackType.password);
-
-      // Exchange refresh token for new access token
+      if (refreshToken == null) {
+        return AuthResult.fallbackRequired(FallbackType.password);
+      }
       final tokens = await _authRepo.refreshSession(refreshToken);
       await _tokenStorage.storeTokens(tokens);
       return AuthResult.success(tokens.accessToken);
-
-    } on PlatformException catch (e) {
-      if (e.code == 'LockedOut') {
-        return AuthResult.lockedOut(duration: const Duration(seconds: 30));
+    } on LocalAuthException catch (e) {
+      switch (e.code) {
+        case LocalAuthExceptionCode.userCanceled:
+        case LocalAuthExceptionCode.systemCanceled:
+          return AuthResult.cancelled();
+        case LocalAuthExceptionCode.temporaryLockout:
+        case LocalAuthExceptionCode.biometricLockout:
+        case LocalAuthExceptionCode.noCredentialsSet:
+        case LocalAuthExceptionCode.noBiometricHardware:
+        case LocalAuthExceptionCode.noBiometricsEnrolled:
+        case LocalAuthExceptionCode.userRequestedFallback:
+          return AuthResult.fallbackRequired(FallbackType.password);
+        default: // codes may be extended; don't assume an exhaustive enum
+          return AuthResult.error('Local authentication unavailable');
       }
-      if (e.code == 'PermanentlyLockedOut') {
-        return AuthResult.fallbackRequired(FallbackType.password);
-      }
-      return AuthResult.error(e.message ?? 'Biometric authentication failed');
     }
   }
 }
 ```
 
+Serialize concurrent prompts in the application; handle repository/session failures separately through the app's error boundary. For biometric-only policy, check enrollment with `getAvailableBiometrics()` and set `biometricOnly: true` on supported platforms; do not silently weaken a payment authorization policy. A successful OS prompt alone does not bind a storage read or transaction signature to hardware authentication.
+
+**Pinned 2.x projects only:** preserve their existing `options: AuthenticationOptions(...)`, `stickyAuth` and `PlatformException` handling until a planned migration. In 3.x the options wrapper is removed, `stickyAuth` becomes `persistAcrossBackgrounding`, and the app owns error UI; do not upgrade a dependency merely to copy this example. See [local_auth usage](https://pub.dev/packages/local_auth), [3.0 migration notes](https://pub.dev/packages/local_auth/changelog), and [structured exception codes](https://pub.dev/documentation/local_auth/latest/local_auth/LocalAuthExceptionCode.html).
+
 ### Secure Token Storage
+
+The options fragment below is for a pinned `flutter_secure_storage` release supporting `encryptedSharedPreferences`. It is independent of local_auth's major; verify the installed storage package API before reuse. Configure current OS-backed storage according to that package and platform. For biometric-gated keys, use a platform/plugin facility that actually enforces authenticated key access; an earlier UI prompt does not impose that restriction.
+
 ```dart
 // features/auth/data/secure_token_storage.dart
 
@@ -78,7 +88,8 @@ class SecureTokenStorage {
   final FlutterSecureStorage _storage;
 
   // iOS: Keychain with kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly
-  // Android: EncryptedSharedPreferences with StrongBox if available
+  // Android options below are legacy plugin options; verify flutter_secure_storage
+  // in pubspec.lock. They do not request StrongBox or biometric-bound key access.
   static const _options = IOSOptions(
     accessibility: KeychainAccessibility.passcode,
     accountName: 'com.app.auth',
@@ -86,6 +97,11 @@ class SecureTokenStorage {
   static const _androidOptions = AndroidOptions(
     encryptedSharedPreferences: true,
   );
+
+  SecureTokenStorage(this._storage);
+
+  Future<String?> getRefreshToken() => _storage.read(
+    key: 'refresh_token', iOptions: _options, aOptions: _androidOptions);
 
   Future<void> storeTokens(AuthTokens tokens) async {
     await _storage.write(
@@ -112,8 +128,8 @@ class SecureTokenStorage {
 ```
 BIO-01: Never store biometric data — delegate to OS (LocalAuthentication/BiometricPrompt)
 BIO-02: Biometric unlocks a stored credential (refresh token), not the account directly
-BIO-03: Fallback chain: biometric → device PIN → app PIN → password (never skip to password)
-BIO-04: Lock after 5 failed biometric attempts, require password re-authentication
+BIO-03: Use the approved fallback policy; device credentials/password require appropriate re-authentication. Never bypass a biometric-only transaction requirement with an unverified app PIN.
+BIO-04: Respect OS lockout and server re-authentication policy; do not assume a portable attempt count or fixed lockout duration from local_auth.
 BIO-05: Re-enroll biometric binding when user changes device biometrics
 BIO-06: Transaction signing: require fresh biometric for payments > threshold amount
 ```

@@ -4,8 +4,9 @@ Use this template when dispatching a spec compliance reviewer subagent.
 
 **Purpose:** Verify implementer built what was requested (nothing more, nothing less)
 
-Reviewers default to literal-class models (sonnet/opus-4.8) — the coverage instruction below is
-load-bearing; do not add "be conservative" or severity filters (see model-routing.md steering).
+Choose model/effort using `~/.claude/references/model-guide.md`. Every reviewer receives the
+actual requirements, owned review scope and applicable evidence. Use the available Agent tool
+(`Task` alias supported); no model label substitutes for independent inspection.
 
 ```
 Task tool (general-purpose or code-reviewer):
@@ -17,14 +18,22 @@ Task tool (general-purpose or code-reviewer):
 
     [FULL TEXT of task requirements]
 
+    ## Review Scope
+
+    [REVIEW_SCOPE: committed range, pending Git work or non-Git original/changed manifest;
+    owned paths, baseline/checked state, untracked additions, deletions/renames, evidence logs]
+    For pending work inspect staged and unstaged diffs plus listed untracked files; do not
+    substitute HEAD~1..HEAD. Compare non-Git copies using the supplied manifest. If files drift
+    during review, report the affected scope; do not certify a later unreviewed state.
+
     ## What Implementer Claims They Built
 
     [From implementer's report]
 
     ## CRITICAL: Do Not Trust the Report
 
-    The implementer finished suspiciously quickly. Their report may be incomplete,
-    inaccurate, or optimistic. You MUST verify everything independently.
+    Reports can be incomplete or optimistic. Inspect the actual scoped changes and cited
+    evidence independently; an implementer report alone cannot establish compliance.
 
     **DO NOT:**
     - Take their word for what they implemented
@@ -65,5 +74,7 @@ Task tool (general-purpose or code-reviewer):
     Report per `~/.claude/rules/subagent-return-format.md` (any shape — prose, markdown, or XML):
     - Status DONE when everything matches after code inspection (spec compliant)
     - Status BLOCKED with the list of missing/extra items (file:line references) when issues are found
-    - Always include a 1–3 sentence summary and evidence paths for the files you read
+    - Always include a 1–3 sentence summary, actual reviewed scope/state, evidence paths and
+      one met/not-met exit-criteria result per supplied requirement. State skipped/unsupported
+      checks; code inspection does not establish runtime test success.
 ```

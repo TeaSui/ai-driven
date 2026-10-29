@@ -1,5 +1,5 @@
 ---
-description: Initialize a new project with deep questioning → optional research → requirements → roadmap. Writes .planning/ scaffold (PROJECT.md, config.json, REQUIREMENTS.md, ROADMAP.md, STATE.md) and commits atomically.
+description: Initialize a new project through questioning, optional research, requirements and roadmap; write .planning artifacts and commit each approved stage only when commit_docs is enabled
 argument-hint: "[--auto] [@idea.md]"
 ---
 
@@ -50,7 +50,7 @@ Read these before running:
 
 ```bash
 # Detect state
-HAS_GIT=$( [ -d .git ] && echo true || echo false )
+HAS_GIT=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo false)
 PROJECT_EXISTS=$( [ -f .planning/PROJECT.md ] && echo true || echo false )
 HAS_CODEBASE_MAP=$( [ -d .planning/codebase ] && echo true || echo false )
 HAS_CODE=$(find . -maxdepth 3 \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.py' -o -name '*.go' -o -name '*.rs' -o -name '*.java' -o -name '*.swift' \) 2>/dev/null | grep -v node_modules | grep -v .git | head -1)
@@ -61,7 +61,11 @@ echo "project_exists=$PROJECT_EXISTS has_git=$HAS_GIT has_codebase_map=$HAS_CODE
 ```
 
 - If `PROJECT_EXISTS=true`: stop. Tell the user the project is already initialized and suggest editing `.planning/PROJECT.md` directly.
-- If `HAS_GIT=false`: `git init`.
+- `git rev-parse` supports linked worktrees/subdirectories; do not infer repository state from whether `.git` is a directory.
+- Resolve `commit_docs` **before the first commit**: reuse the task's explicit choice or existing `.planning/config.json`; otherwise ask once whether to commit planning docs. In `--auto`, use a supplied preference; if none exists, default to leaving artifacts uncommitted rather than inventing consent to repository/history changes.
+- If `HAS_GIT=false`, initialize Git only when repository creation is within the user's authorization. Recheck `HAS_GIT` afterward. Planning artifacts can be written without a repository.
+- Before **every** planning commit, require `HAS_GIT=true` and `commit_docs=true`, inspect the staged diff, stage only owned planning paths, and avoid including unrelated staged work. No opt-out can be overridden by `--auto` or a later checkpoint.
+- Follow `~/.claude/rules/workflow-routing.md` for planning/dispatch scope and prerequisite order; research does not authorize implementation or external writes.
 
 ### 2. Brownfield offer (skip in auto mode)
 
@@ -87,7 +91,7 @@ Display stage banner:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Open freeform: **"What do you want to build?"**
+Use the existing idea/session context first. Ask **"What do you want to build?"** only if the goal is missing.
 
 Then follow threads based on the response. Use techniques from `~/.claude/planning-references/questioning.md`:
 - Challenge vagueness — "what do you mean by X?"
@@ -98,11 +102,7 @@ Then follow threads based on the response. Use techniques from `~/.claude/planni
 
 Mentally track the context checklist (problem, user, success, constraints, key decisions). Weave in questions naturally rather than interrogating.
 
-**Gate:** when you can write a clean PROJECT.md, ask inline:
-```
-Ready to create PROJECT.md, or keep exploring?
-```
-Loop until the user says "go".
+**Checkpoint:** preserve any explicit user request to review before writing. If no such checkpoint exists and the user has already delegated project initialization, write PROJECT.md when the context is sufficient. Otherwise ask once whether to create it or keep exploring. Reuse a prior "go" for the same scope; do not restart approval loops.
 
 ### 4. Write PROJECT.md
 
@@ -117,23 +117,24 @@ Footer line:
 *Last updated: <TODAY> after initialization*
 ```
 
-Commit:
+Create `.planning/` before writing. Commit only if `HAS_GIT=true` and `commit_docs=true`:
 ```bash
-mkdir -p .planning
-git add .planning/PROJECT.md
-git commit -m "docs: initialize project"  # only if HAS_GIT=true
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ "${commit_docs:-false}" = true ]; then
+  git add -- .planning/PROJECT.md
+  git commit -m "docs: initialize project"
+fi
 ```
 
 ### 5. Workflow config
 
-Ask 4 config questions (skip in auto mode — use defaults + YOLO).
+Resolve the remaining config choices, reusing explicit preferences. Ask only missing choices in interactive mode; `--auto` uses documented defaults while preserving the earlier commit_docs decision.
 
 | Question | Options |
 |---|---|
 | **Mode** — how do you want to work? | `yolo` (auto-approve, ship fast) / `interactive` (confirm each step) |
 | **Depth** — how thorough should planning be? | `quick` (3-5 phases) / `standard` (5-8) / `comprehensive` (8-12) |
 | **Parallelization** — run independent plans concurrently? | true / false |
-| **Git tracking** — commit planning docs? | true / false |
+| **Git tracking** — commit planning docs? | Reuse commit_docs resolved in preflight; do not ask again |
 
 Then 3 workflow-agent questions:
 
@@ -143,14 +144,14 @@ Then 3 workflow-agent questions:
 | **Plan checker** — verify plans will achieve their goals? | yes | catches gaps before execution |
 | **Verifier** — verify work satisfies requirements after each phase? | yes | confirms deliverables |
 
-Write `.planning/config.json`:
+Write `.planning/config.json` using the resolved preferences. Set `commit_docs` to the boolean resolved in preflight; the illustrative value below must never override an explicit opt-out:
 
 ```json
 {
   "mode": "yolo|interactive",
   "depth": "quick|standard|comprehensive",
   "parallelization": true,
-  "commit_docs": true,
+  "commit_docs": false,
   "workflow": {
     "research": true,
     "plan_check": true,
@@ -160,12 +161,14 @@ Write `.planning/config.json`:
 }
 ```
 
-If `commit_docs=false`: append `.planning/` to `.gitignore`.
+If `commit_docs=false`, make no planning commit. Add `.planning/` to `.gitignore` only when ignoring these local artifacts is also desired and compatible with existing tracking; preserve existing ignore rules and do not untrack files automatically.
 
 Commit config (only if `commit_docs=true` and `HAS_GIT=true`):
 ```bash
-git add .planning/config.json
-git commit -m "chore: add project config"
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ "${commit_docs:-false}" = true ]; then
+  git add .planning/config.json
+  git commit -m "chore: add project config"
+fi
 ```
 
 ### 6. Research (optional)
@@ -223,10 +226,12 @@ Extract: recommended stack, table-stakes features, key architectural decisions, 
 Return ~10 lines of confirmation after writing.
 ```
 
-Commit (if git + commit_docs):
+Commit only if `HAS_GIT=true` and `commit_docs=true`:
 ```bash
-git add .planning/research/
-git commit -m "docs: research [domain]"
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ "${commit_docs:-false}" = true ]; then
+  git add .planning/research/
+  git commit -m "docs: research [domain]"
+fi
 ```
 
 Display summary banner:
@@ -282,12 +287,14 @@ Cross-check v1 against the Core Value from PROJECT.md. Surface gaps.
 
 Reject vague ones and push back.
 
-In interactive mode, show the full list and ask: *"Does this capture what you're building?"*
+In interactive mode, show the full list. Preserve an explicit requirements-review checkpoint; otherwise reuse existing delegation and ask only when a substantive scope choice remains.
 
-Commit:
+Commit only if `HAS_GIT=true` and `commit_docs=true`:
 ```bash
-git add .planning/REQUIREMENTS.md
-git commit -m "docs: define v1 requirements"
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ "${commit_docs:-false}" = true ]; then
+  git add -- .planning/REQUIREMENTS.md
+  git commit -m "docs: define v1 requirements"
+fi
 ```
 
 ### 8. Roadmap
@@ -338,21 +345,23 @@ If you cannot create a valid roadmap (e.g., requirements are contradictory), ret
 
 **If created:** read the generated ROADMAP.md and render it inline as a phase table (#, Name, Goal, Requirements, # of success criteria), followed by per-phase detail.
 
-**Auto mode:** auto-approve and commit.
+**Auto mode:** accept the in-scope roadmap and commit only if Git/commit_docs conditions hold.
 
-**Interactive mode:** ask:
+**Interactive mode:** preserve an explicit roadmap checkpoint. If the user already delegated this decision for the same scope, present the roadmap and continue; otherwise ask:
 ```
 Does this roadmap structure work for you?
-- Approve — commit and continue
+- Approve — continue and commit only if Git tracking is enabled
 - Adjust — tell me what to change (I'll re-spawn the roadmapper)
 - Review full file — show raw ROADMAP.md
 ```
-On Adjust: capture notes, re-spawn with a `<revision>` block referencing `.planning/ROADMAP.md`. Loop until approved.
+On Adjust: capture notes and re-dispatch with a `<revision>` block referencing `.planning/ROADMAP.md`. Respect `~/.claude/rules/review-loop-limits.md` for agent review/dispatch rounds; unresolved scope decisions go back to the user rather than an unbounded loop.
 
-Commit:
+Commit only if `HAS_GIT=true` and `commit_docs=true`:
 ```bash
-git add .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md
-git commit -m "docs: create roadmap (<N> phases)"
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ "${commit_docs:-false}" = true ]; then
+  git add -- .planning/ROADMAP.md .planning/STATE.md .planning/REQUIREMENTS.md
+  git commit -m "docs: create roadmap (<N> phases)"
+fi
 ```
 
 ### 9. Done
@@ -386,15 +395,15 @@ Completion summary:
 ## Success criteria
 
 - [ ] `.planning/` directory created
-- [ ] Git repo initialized if missing
+- [ ] Repository state detected correctly; Git initialized only if authorized, otherwise artifacts remain local
 - [ ] Brownfield detection ran; user offered `/map-codebase` when appropriate
 - [ ] Deep questioning completed (unless `--auto`)
-- [ ] `PROJECT.md` captures full context → committed
-- [ ] `config.json` has mode, depth, parallelization, workflow flags → committed
-- [ ] Research completed if selected (4 parallel agents + 1 synthesizer) → committed
-- [ ] Requirements gathered with REQ-IDs; user scoped each category (interactive) → committed
-- [ ] Roadmap agent spawned; ROADMAP.md + STATE.md + updated REQUIREMENTS.md written → committed
-- [ ] User approved roadmap (or auto-approved)
+- [ ] `PROJECT.md` captures full context → committed only when Git/commit_docs enable it
+- [ ] `config.json` has mode, depth, parallelization, workflow flags → committed only when Git/commit_docs enable it
+- [ ] Research completed if selected (4 parallel agents + 1 synthesizer) → committed only when Git/commit_docs enable it
+- [ ] Requirements gathered with REQ-IDs; user scoped each category (interactive) → committed only when Git/commit_docs enable it
+- [ ] Roadmap agent spawned; ROADMAP.md + STATE.md + updated REQUIREMENTS.md written → committed only when Git/commit_docs enable it
+- [ ] Explicit user roadmap checkpoint honored, or existing delegation/auto mode reused
 - [ ] User knows the next step
 
-**Atomic commits:** each phase commits immediately. If context is lost, artifacts persist.
+**Persistence:** save artifacts after each stage. Commit only with Git available and commit_docs=true, checking that condition before every commit. Keep artifacts available when tracking is disabled.

@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Context Management
 
 Context window limits, server-side compaction, context editing (clear tool_uses / clear thinking), prompt caching (5m / 1h, breakpoints, invalidation), and token counting.

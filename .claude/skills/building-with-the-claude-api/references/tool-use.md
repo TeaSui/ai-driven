@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Tool Use
 
 Custom tools, schemas, tool_use / tool_result lifecycle, multi-turn loops, parallel calls, `strict: true`, the Tool Runner SDK, prompt caching with tools, and troubleshooting. For **built-in tools** (web_search, code_execution, bash, memory, text_editor, computer_use, advisor), see [built-in-tools.md](built-in-tools.md). For **scaling tools** (tool search, programmatic tool calling, fine-grained streaming), see [tool-infrastructure.md](tool-infrastructure.md).

@@ -11,10 +11,9 @@ Dispatch code-reviewer subagent to catch issues before they cascade. The reviewe
 
 ## When to Request Review
 
-**Mandatory:**
-- After each task in subagent-driven development
-- After completing major feature
-- Before merge to main
+**Required when the routing tier/accepted plan calls for independent review:**
+- Substantial implementation, trust-boundary changes and formal pre-merge gates
+- Respect `~/.claude/rules/workflow-routing.md`; a fast-path fix uses appropriate local verification without mandatory subagent ceremony.
 
 **Optional but valuable:**
 - When stuck (fresh perspective)
@@ -23,21 +22,31 @@ Dispatch code-reviewer subagent to catch issues before they cascade. The reviewe
 
 ## How to Request
 
-**1. Get git SHAs:**
+**1. Identify the actual review scope:**
+Select one `REVIEW_SCOPE` and record its checked state:
+
+- **Committed range:** verify the task's actual base/head refs, then inspect their diff. Never assume the previous commit represents the task.
+- **Pending Git work:** inspect staged and unstaged diffs plus untracked owned files. Include deletions/renames and record baseline/content hashes or an equivalent snapshot so the reviewer can detect drift.
+- **Non-Git work:** supply the owned changed-file manifest with original/changed copies and hashes.
+
+For pending scope collect filenames without losing spaces/newlines:
 ```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
-HEAD_SHA=$(git rev-parse HEAD)
+git diff --name-only --no-renames -z
+git diff --cached --name-only --no-renames -z
+git ls-files --others --exclude-standard -z
 ```
+Deduplicate with a NUL-aware collector and pass paths as arguments, never interpolated shell code. Review the actual scoped content; exclude unrelated/user/other-agent changes from the claimed work without hiding relevant context. Do not commit merely to enable review.
 
 **2. Dispatch code-reviewer subagent:**
 
-Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
+Use the available Agent tool (`Task` alias supported) with code-reviewer type and the template at `~/.claude/skills/requesting-code-review/code-reviewer.md`. Choose model/effort from `~/.claude/references/model-guide.md`.
 
 **Placeholders:**
 - `{WHAT_WAS_IMPLEMENTED}` - What you just built
 - `{PLAN_OR_REQUIREMENTS}` - What it should do
-- `{BASE_SHA}` - Starting commit
-- `{HEAD_SHA}` - Ending commit
+- `{REVIEW_SCOPE}` - Mode (committed/pending/non-Git), owned paths, baseline and actual checked state/manifest
+- `{BASE_SHA}` - Verified starting commit; required only for committed-range review
+- `{HEAD_SHA}` - Verified ending commit; required only for committed-range review
 - `{DESCRIPTION}` - Brief summary
 
 **3. Act on feedback:**
@@ -53,14 +62,14 @@ Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
 
 You: Let me request code review before proceeding.
 
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
+[Inspect staged/unstaged diffs, listed untracked files and original baseline]
+[Capture the owned changed-file manifest/content hashes]
 
 [Dispatch code-reviewer subagent]
   WHAT_WAS_IMPLEMENTED: Verification and repair functions for conversation index
   PLAN_OR_REQUIREMENTS: Task 2 from docs/plans/deployment-plan.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
+  REVIEW_SCOPE: pending Git work; owned verification/repair files and tests;
+                baseline and content hashes in the supplied review manifest
   DESCRIPTION: Added verifyIndex() and repairIndex() with 4 issue types
 
 [Subagent returns]:
@@ -77,12 +86,12 @@ You: [Fix progress indicators]
 ## Integration with Workflows
 
 **Subagent-Driven Development:**
-- Review after EACH task
+- Review substantial owned tasks at the checkpoints required by the tier/plan
 - Catch issues before they compound
 - Fix before moving to next task
 
 **Executing Plans:**
-- Review after each batch (3 tasks)
+- Review at the accepted checkpoints, sized to integration risk
 - Get feedback, apply, continue
 
 **Ad-Hoc Development:**
@@ -92,7 +101,7 @@ You: [Fix progress indicators]
 ## Red Flags
 
 **Never:**
-- Skip review because "it's simple"
+- Skip a review gate required by the routing tier or accepted plan
 - Ignore Critical issues
 - Proceed with unfixed Important issues
 - Argue with valid technical feedback
@@ -102,4 +111,4 @@ You: [Fix progress indicators]
 - Show code/tests that prove it works
 - Request clarification
 
-See template at: requesting-code-review/code-reviewer.md
+See template at: `~/.claude/skills/requesting-code-review/code-reviewer.md`. Review results must name the checked state/scope and contain status, existing evidence paths and exit-criteria checks per `rules/subagent-return-format.md`. A changed file after review invalidates only the affected scope; recheck it before carrying the verdict forward.

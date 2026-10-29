@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # RAG
 
 Retrieval-Augmented Generation: chunking, embeddings, BM25 lexical search, and multi-index hybrid retrieval.

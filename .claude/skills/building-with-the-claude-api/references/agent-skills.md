@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Agent Skills
 
 Modular, filesystem-based capabilities (SKILL.md + scripts + resources) loaded on-demand via progressive disclosure. Pre-built Anthropic Skills: `pptx`, `xlsx`, `docx`, `pdf`. Also custom Skills you upload.

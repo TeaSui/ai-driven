@@ -1,44 +1,48 @@
-#!/usr/bin/env bash
-# SessionStart hook: inject the session-bootstrap skill into context.
-
+#!/bin/bash
+# Load one local bootstrap as JSON data. The 48 KiB cap is local policy.
 set -euo pipefail
 
-skill_path="$(cd "$(dirname "$0")/.." && pwd)/skills/session-bootstrap/SKILL.md"
-
-if [ ! -r "$skill_path" ]; then
-    # Fail open: emit an empty-context hook payload rather than failing the session.
-    printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""}}\n'
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":""},"systemMessage":"Bootstrap omitted: python3 is unavailable."}'
     exit 0
 fi
 
-skill_content=$(cat "$skill_path")
+hook_dir="${BASH_SOURCE[0]%/*}"
+config_root="$(cd -- "$hook_dir/.." && pwd -P)"
+exec python3 - "$config_root" <<'PY'
+import json
+from pathlib import Path
+import sys
 
-# Size guard: Claude Code hook payloads are bounded; keep the injected skill under 48 KiB.
-# If the skill ever grows past that, truncate with a marker so the hook still emits valid JSON
-# rather than silently blowing past the hook limit with no error.
-MAX_BYTES=49152
-skill_bytes=${#skill_content}
-if [ "$skill_bytes" -gt "$MAX_BYTES" ]; then
-    skill_content="${skill_content:0:$MAX_BYTES}
+LIMIT = 49152
+root = Path(sys.argv[1])
+skill = root / 'skills/session-bootstrap/SKILL.md'
+payload = {'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': ''}}
 
-[TRUNCATED: session-bootstrap exceeded ${MAX_BYTES}-byte hook budget at ${skill_bytes} bytes. Load the full file via the Skill tool.]"
-fi
+def omit(reason):
+    payload['systemMessage'] = 'Bootstrap omitted: ' + reason + '.'
 
-# Escape for JSON embedding. Each ${s//old/new} is one C-level pass.
-escape_for_json() {
-    local s="$1"
-    s="${s//\\/\\\\}"
-    s="${s//\"/\\\"}"
-    s="${s//$'\n'/\\n}"
-    s="${s//$'\r'/\\r}"
-    s="${s//$'\t'/\\t}"
-    printf '%s' "$s"
-}
+try:
+    if any(p.is_symlink() for p in (root, root / 'skills', skill.parent, skill)):
+        omit('unexpected symbolic link')
+    elif not skill.is_file():
+        omit('session-bootstrap is unavailable')
+    else:
+        with skill.open('rb') as handle:
+            content = handle.read(LIMIT + 1)
+        if len(content) > LIMIT:
+            omit('the local 48 KiB input budget was exceeded')
+            payload['hookSpecificOutput']['additionalContext'] = '[TRUNCATED: bootstrap omitted in full. Load session-bootstrap via Skill if needed.]'
+        else:
+            text = content.decode('utf-8')
+            payload['hookSpecificOutput']['additionalContext'] = '<session-bootstrap>\n' + text + '\n</session-bootstrap>'
+except (OSError, UnicodeError):
+    omit('session-bootstrap could not be read as UTF-8')
 
-skill_escaped=$(escape_for_json "$skill_content")
-session_context="<EXTREMELY_IMPORTANT>\n**Below is the full content of your 'session-bootstrap' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${skill_escaped}\n</EXTREMELY_IMPORTANT>"
-
-# Claude Code SessionStart output shape.
-# printf is used instead of a heredoc: bash 5.3+ can hang on heredoc-fed JSON
-# when the payload contains escaped newlines, so we build the JSON literal here.
-printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context"
+encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+if len((encoded + '\n').encode('utf-8')) > LIMIT:
+    payload['hookSpecificOutput']['additionalContext'] = '[TRUNCATED: bootstrap omitted in full because serialized JSON exceeds the local 48 KiB budget. Load session-bootstrap via Skill if needed.]'
+    omit('the local serialized-output budget was exceeded')
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+print(encoded)
+PY

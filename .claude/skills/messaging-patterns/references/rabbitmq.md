@@ -72,12 +72,13 @@ public RabbitTemplate rabbitTemplate(ConnectionFactory cf) {
     var template = new RabbitTemplate(cf);
     template.setConfirmCallback((correlationData, ack, cause) -> {
         if (!ack) {
-            log.error("Publish NACK: {} — {}", correlationData, cause);
+            log.error("Publish NACK; category=broker_nack");
             // trigger outbox retry
         }
     });
+    template.setMandatory(true); // surface unroutable publishes through returns
     template.setReturnsCallback(returned -> {
-        log.error("Message returned unroutable: {}", returned.getMessage());
+        log.error("Message returned; replyCode={}", returned.getReplyCode());
         // no matching binding — alert or route to fallback
     });
     return template;
@@ -88,7 +89,7 @@ public RabbitTemplate rabbitTemplate(ConnectionFactory cf) {
 // spring.rabbitmq.publisher-returns: true
 ```
 
-**Publisher confirms are mandatory for quorum queues.** Confirm is sent only after the message is written and fsynced by a quorum of nodes.
+For reliable publication, require confirms and handle unroutable returns. A confirm covers broker acceptance, not consumer completion. A critical relay publishes only committed outbox rows and marks them published only after confirmed routing/acceptance; callback logs alone are not that state transition. See [RabbitMQ acknowledgements and confirms](https://www.rabbitmq.com/docs/confirms).
 
 ## Consumer patterns
 
@@ -104,26 +105,19 @@ public class InventoryConsumer {
             Channel channel,
             @Header(AmqpHeaders.DELIVERY_TAG) long tag) throws IOException {
 
-        if (idempotencyStore.isDuplicate(event.getEventId())) {
-            channel.basicAck(tag, false);
-            return;
-        }
-        try {
-            inventoryService.reserveStock(event);
-            idempotencyStore.markProcessed(event.getEventId());
-            channel.basicAck(tag, false);                    // success — delete from queue
-        } catch (RetryableException e) {
-            channel.basicNack(tag, false, true);             // requeue for retry
-        } catch (Exception e) {
-            log.error("Non-retryable {}", event.getEventId(), e);
-            channel.basicNack(tag, false, false);            // reject → goes to DLX
-        }
+        // Application-owned separate transaction: inbox uniqueness + DB effects.
+        // It returns only after commit (including a committed duplicate).
+        // Let processing exceptions reach the container's bounded retry policy.
+        inboxHandler.applyOnce(event);
+        channel.basicAck(tag, false); // outside transaction, after commit
     }
 }
 ```
 
+`inboxHandler.applyOnce` implements the parent skill's storage contract using the same database transaction/connection for inbox and stock changes. It is not a broker library call. Configure and test bounded retry/backoff in the installed Spring AMQP container; after exhausted retries, reject to a provisioned DLX/DLQ without hot requeueing. A thrown error must not be treated as success or acked. Confirm the selected queue/version's dead-letter reliability strategy. These are integration sketches, not a complete retry-container implementation.
+
 **Ack semantics:**
-- `basicAck` — message processed successfully; broker deletes it
+- `basicAck` — inbox + database effects have committed (or committed duplicate); broker can delete it
 - `basicNack(requeue=true)` — requeue (use for transient failures only; avoid hot requeue loop)
 - `basicNack(requeue=false)` — reject; routes to DLX if configured, otherwise discarded
 
@@ -146,7 +140,7 @@ Set prefetch to limit in-flight messages per consumer. Low prefetch = fairer dis
 | Mode | Config | Notes |
 |------|--------|-------|
 | At-most-once | Auto-ack on receive | Fast; messages lost on consumer crash |
-| At-least-once | Manual ack after processing | Duplicates on crash; idempotent consumer required |
+| At-least-once | Manual ack after database commit | Duplicates on crash; idempotent consumer required |
 | Publisher-side durability | Quorum queue + publisher confirms | Message safe after quorum writes to disk |
 
 There is no exactly-once in AMQP 0-9-1. Design consumers to be idempotent. Cross-broker idempotency pattern: see parent `SKILL.md`.

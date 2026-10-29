@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use before implementing behavior changes or bug fixes; preserve existing work and choose proportionate checks for prose/config changes
 ---
 
 # Test-Driven Development (TDD)
@@ -9,40 +9,33 @@ description: Use when implementing any feature or bugfix, before writing impleme
 
 Write the test first. Watch it fail. Write minimal code to pass.
 
-**Core principle:** If you didn't watch the test fail, you don't know if it tests the right thing.
+**Core principle:** A behavior regression test needs evidence that it detects the missing behavior, followed by a passing result after the fix.
 
 **Violating the letter of the rules is violating the spirit of the rules.**
 
 ## When to Use
 
-**Always:**
-- New features
-- Bug fixes
-- Refactoring
-- Behavior changes
+Use red-green-refactor for new runtime behavior and bug fixes. For refactoring, first establish relevant regression coverage and keep it passing; add a failing test when exposing a missing behavior.
 
-**Exceptions (ask your human partner):**
-- Throwaway prototypes
-- Generated code
-- Configuration files
+For prose, formatting, generated output or configuration-only changes, use the checks that can detect the actual defect: parsing, schema/reference checks, lint, a build or an isolated command fixture. Configuration that changes runtime behavior still needs a behavior check when practical. Do not invent tests that merely repeat the implementation.
 
-Thinking "skip TDD just this once"? Stop. That's rationalization.
+Reuse authorization and the accepted plan. These applicability choices do not require a new permission gate. If the required check is unavailable, state the gap and use the best applicable evidence without claiming a skipped check passed.
 
 ## The Iron Law
 
 ```
-NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
+NEW BEHAVIOR: DEMONSTRATE A RELEVANT FAILURE, THEN IMPLEMENT AND VERIFY GREEN
 ```
 
-Write code before the test? Delete it. Start over.
+### Recover safely when implementation came first
 
-**No exceptions:**
-- Don't keep it as "reference"
-- Don't "adapt" it while writing tests
-- Don't look at it
-- Delete means delete
+1. Inspect the current diff and ownership before changing anything. Preserve pre-existing, user and other-agent edits, including edits in the same file.
+2. Write the test from the requirement, independently of the implementation details.
+3. Demonstrate the expected failure against the pre-change behavior in an isolated copy/worktree or by temporarily reversing only your known owned patch. Preserve a recoverable copy, including new/untracked files, and restore it afterward. Never use blanket deletion, reset or checkout as TDD recovery.
+4. If edits are interleaved or provenance is uncertain, keep the work intact and use an isolated reproduction. If you cannot safely establish red, report that limitation; do not label a passing-only test as a completed red-green cycle.
+5. Implement or restore the smallest owned change and verify green, then run the relevant regression checks.
 
-Implement fresh from tests. Period.
+The goal is evidence that the test catches the defect, not erasing work to recreate the order of a past session.
 
 ## Red-Green-Refactor
 
@@ -115,7 +108,7 @@ Vague name, tests mock not code
 **MANDATORY. Never skip.**
 
 ```bash
-npm test path/to/test.test.ts
+<project-supported command selecting this test file>
 ```
 
 Confirm:
@@ -123,7 +116,7 @@ Confirm:
 - Failure message is expected
 - Fails because feature missing (not typos)
 
-**Test passes?** You're testing existing behavior. Fix test.
+**Test passes?** Check whether the requirement is already satisfied or the test misses the change. For a new regression test, establish red safely using the recovery steps above; do not force an unrelated failure.
 
 **Test errors?** Fix error, re-run until it fails correctly.
 
@@ -170,7 +163,7 @@ Don't add features, refactor other code, or "improve" beyond the test.
 **MANDATORY.**
 
 ```bash
-npm test path/to/test.test.ts
+<project-supported command selecting this test file>
 ```
 
 Confirm:
@@ -225,13 +218,9 @@ Manual testing is ad-hoc. You think you tested everything but:
 
 Automated tests are systematic. They run the same way every time.
 
-**"Deleting X hours of work is wasteful"**
+**"Implementation already exists — how do I prove the regression test?"**
 
-Sunk cost fallacy. The time is already gone. Your choice now:
-- Delete and rewrite with TDD (X more hours, high confidence)
-- Keep it and add tests after (30 min, low confidence, likely bugs)
-
-The "waste" is keeping code you can't trust. Working code without real tests is technical debt.
+Preserve it. Test the requirement against a safe pre-change fixture or reverse only the owned fix in isolation. Observe the expected failure, restore the change and verify green. Existing coverage remains useful; do not misrepresent tests written afterward as tests that failed first.
 
 **"TDD is dogmatic, being pragmatic means adapting"**
 
@@ -257,19 +246,19 @@ Tests-first force edge case discovery before implementing. Tests-after verify yo
 
 | Excuse | Reality |
 |--------|---------|
-| "Too simple to test" | Simple code breaks. Test takes 30 seconds. |
-| "I'll test after" | Tests passing immediately prove nothing. |
+| "Too simple to test" | Choose the smallest check that detects the relevant behavior defect. |
+| "I'll test after" | Passing alone does not establish that a regression test catches the defect. |
 | "Tests after achieve same goals" | Tests-after = "what does this do?" Tests-first = "what should this do?" |
 | "Already manually tested" | Ad-hoc ≠ systematic. No record, can't re-run. |
-| "Deleting X hours is wasteful" | Sunk cost fallacy. Keeping unverified code is technical debt. |
-| "Keep as reference, write tests first" | You'll adapt it. That's testing after. Delete means delete. |
-| "Need to explore first" | Fine. Throw away exploration, start with TDD. |
+| "Implementation is already written" | Preserve it; demonstrate the failure against pre-change behavior safely. |
+| "Copy implementation into the assertion" | Derive assertions from requirements so they can expose an incorrect implementation. |
+| "Need to explore first" | Isolate exploration from user work; use requirement-based checks for the final behavior. |
 | "Test hard = design unclear" | Listen to test. Hard to test = hard to use. |
 | "TDD will slow me down" | TDD faster than debugging. Pragmatic = test-first. |
 | "Manual test faster" | Manual doesn't prove edge cases. You'll re-test every change. |
 | "Existing code has no tests" | You're improving it. Add tests for existing code. |
 
-## Red Flags - STOP and Start Over
+## Red Flags - Inspect and Recover Safely
 
 - Code before test
 - Test after implementation
@@ -281,11 +270,11 @@ Tests-first force edge case discovery before implementing. Tests-after verify yo
 - "Tests after achieve the same purpose"
 - "It's about spirit not ritual"
 - "Keep as reference" or "adapt existing code"
-- "Already spent X hours, deleting is wasteful"
+- "Already spent X hours, so a passing-only test proves the regression"
 - "TDD is dogmatic, I'm being pragmatic"
 - "This is different because..."
 
-**All of these mean: Delete code. Start over with TDD.**
+**These mean: stop extending the unverified behavior, preserve the current work, and follow the safe recovery steps.**
 
 ## Example: Bug Fix
 
@@ -328,16 +317,16 @@ Extract validation for multiple fields if needed.
 
 Before marking work complete:
 
-- [ ] Every new function/method has a test
-- [ ] Watched each test fail before implementing
+- [ ] New or changed behavior has meaningful coverage
+- [ ] Observed the expected regression failure before the fix (or safely against pre-change behavior)
 - [ ] Each test failed for expected reason (feature missing, not typo)
 - [ ] Wrote minimal code to pass each test
-- [ ] All tests pass
-- [ ] Output pristine (no errors, warnings)
+- [ ] Applicable checks pass for the reviewed scope; skipped/unavailable checks are explicit
+- [ ] New failures and warnings are investigated; pre-existing issues are distinguished
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
 
-Can't check all boxes? You skipped TDD. Start over.
+If a box is unmet, report the precise gap and address it within the owned scope. Do not delete unrelated work or claim unexecuted checks passed.
 
 ## When Stuck
 
@@ -352,7 +341,7 @@ Can't check all boxes? You skipped TDD. Start over.
 
 Bug found? Write failing test reproducing it. Follow TDD cycle. Test proves fix and prevents regression.
 
-Never fix bugs without a test.
+For a behavior bug, establish a failing reproduction and verify the fix. For prose/config defects, use the applicable structural or isolated check described above.
 
 ## Testing Anti-Patterns
 
@@ -364,8 +353,9 @@ When adding mocks or test utilities, read @testing-anti-patterns.md to avoid com
 ## Final Rule
 
 ```
-Production code → test exists and failed first
-Otherwise → not TDD
+Behavior change → expected failure demonstrated, then green
+Prose/config-only change → applicable structural or isolated checks
+Every path → preserve existing work and state the actual evidence
 ```
 
-No exceptions without your human partner's permission.
+Follow explicit user constraints and the accepted plan; reuse existing authorization instead of adding a routine exception-approval loop.

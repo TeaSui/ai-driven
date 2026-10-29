@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Working with Files
 
 Files API (upload by ID), PDF input, images / vision. For code_execution + `container_upload`, see [built-in-tools.md#code-execution](built-in-tools.md#code-execution).

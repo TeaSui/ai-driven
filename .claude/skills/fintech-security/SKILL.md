@@ -58,7 +58,7 @@ SPOOFING:
 
 TAMPERING:
 - Missing @Valid on request DTOs — allows malformed input to reach service layer
-- CSRF disabled but using cookie-based auth (only safe with stateless JWT)
+- CSRF disabled with browser-automatic credentials (JWT cookies, session cookies or HTTP Basic); statelessness alone is not a CSRF defense
 - Missing request size limits — spring.servlet.multipart.max-file-size unbounded
 - Deserialization of untrusted JSON — Jackson polymorphic type handling
 
@@ -78,7 +78,7 @@ DENIAL OF SERVICE:
 ### Spring Security Rules Template
 ```
 # Rules for Backend Engineer (Spring Boot)
-SEC-SPRING-01: SecurityFilterChain must disable CSRF for stateless APIs, enable for web forms
+SEC-SPRING-01: Keep CSRF protection for browser-automatic credentials, including JWT cookies and HTTP Basic. Disable only on an explicitly scoped Authorization-header-only resource-server chain accepting no automatic credential alternative; evaluate cookie-based login/refresh/logout separately.
 SEC-SPRING-02: All endpoints authenticated by default (.anyRequest().authenticated())
 SEC-SPRING-03: Actuator endpoints: only /health and /info public, all others require ADMIN
 SEC-SPRING-04: JWT validation must check: signature, expiry, issuer, audience claims
@@ -89,6 +89,8 @@ SEC-SPRING-08: No server.error.include-stacktrace in production profiles
 SEC-SPRING-09: Rate limiting on /auth/** endpoints (spring-boot-starter-cache + Bucket4j or API Gateway)
 SEC-SPRING-10: Input validation via @Valid + Bean Validation on all @RequestBody parameters
 ```
+
+Credential transport controls CSRF exposure; JWT format and `STATELESS` session policy do not. See [Spring CSRF considerations](https://docs.spring.io/spring-security/reference/features/exploits/csrf.html).
 
 ## Go Security Pitfalls
 

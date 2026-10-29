@@ -7,7 +7,7 @@ description: Use when facing 2+ independent tasks that can be worked on without 
 
 ## Overview
 
-You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. They should never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
+You delegate tasks to specialized agents with isolated context. By precisely crafting their instructions and context, you ensure they stay focused and succeed at their task. Non-fork subagents do not inherit the parent conversation; forks and host settings can differ. Construct the task-specific context they need. This also preserves your own context for coordination work.
 
 When you have multiple unrelated failures (different test files, different subsystems, different bugs), investigating them sequentially wastes time. Each investigation is independent and can happen in parallel.
 
@@ -73,7 +73,7 @@ Task("Fix tool-approval-race-conditions.test.ts failures")
 // All three run concurrently
 ```
 
-**Per-dispatch model selection:** each `Task` accepts an optional `model` param (`opus`/`sonnet`/`haiku`, plus `fable` where available) to override the target subagent's default. Use it when the specific dispatch is materially lighter or heavier than the agent's typical workload — e.g., a Haiku-tier enumeration task or an Opus-tier greenfield design pass. See `references/model-routing.md` for the three-tier table, the override-justification convention, and the **Model-Specific Steering** section — the prompt's content style must match the resolved model.
+**Per-dispatch model selection:** each `Task` accepts an optional `model` param (`opus`/`sonnet`/`haiku`, plus `fable` where available) to override the target subagent's default. Use it when the specific dispatch is materially lighter or heavier than the agent's typical workload — e.g., a Haiku-tier enumeration task or an Opus-tier greenfield design pass. See `references/model-routing.md` for current four-model/effort guidance and the **Model-Specific Steering** section. State a concise rationale when the dispatch choice is non-obvious.
 
 ### 4. Review and Integrate
 
@@ -89,7 +89,7 @@ Prompt shape is owned by `~/.claude/rules/dispatch-prompt-contract.md`: implemen
 
 Good agent prompts are:
 1. **Focused** - One clear problem domain
-2. **Self-contained** - All context needed to understand the problem (agents see neither your session history nor `rules/`/CLAUDE.md)
+2. **Self-contained** - All context needed to understand the problem (non-forks lack parent conversation history; custom agents normally receive CLAUDE.md and configured preloads, with runtime exceptions)
 3. **Specific about output** - What should the agent return?
 
 ```markdown

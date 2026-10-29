@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Built-in Tools
 
 Server-executed tools (run by Anthropic): `web_search`, `web_fetch`, `code_execution`, `advisor`. Anthropic-schema client tools (you execute, schema is built in): `memory`, `bash`, `text_editor`, `computer`. For custom tools / lifecycle / Tool Runner, see [tool-use.md](tool-use.md).

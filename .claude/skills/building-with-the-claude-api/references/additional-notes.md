@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Additional notes (from prior curriculum)
 
 Supplementary material ported from the earlier 62-lesson curriculum. Each section names the skill reference it augments. Load this file only when the cross-ref points here.

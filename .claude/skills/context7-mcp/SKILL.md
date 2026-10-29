@@ -1,9 +1,9 @@
 ---
 name: context7-mcp
-description: This skill should be used when the user asks about libraries, frameworks, API references, or needs code examples. Activates for setup questions, code generation involving libraries, or mentions of specific frameworks like React, Vue, Next.js, Prisma, Supabase, etc.
+description: Use for uncertain or version-sensitive library, framework and API details; prefer configured Context7 when available and accept relevant primary/local sources
 ---
 
-When the user asks about libraries, frameworks, or needs code examples, use Context7 to fetch current documentation instead of relying on training data.
+Follow `~/.claude/rules/context7.md`: prefer the configured Context7 tools when available for version-sensitive details. Current official docs, installed help and local source are valid alternatives when they answer the question or Context7 is unavailable. Do not require a redundant network call for ordinary code reading or reuse of valid inspected evidence.
 
 ## When to Use This Skill
 
@@ -12,13 +12,13 @@ Activate this skill when the user:
 - Asks setup or configuration questions ("How do I configure Next.js middleware?")
 - Requests code involving libraries ("Write a Prisma query for...")
 - Needs API references ("What are the Supabase auth methods?")
-- Mentions specific frameworks (React, Vue, Svelte, Express, Tailwind, etc.)
+- Needs an uncertain, load-bearing API/version detail while working with a framework
 
 ## How to Fetch Documentation
 
 ### Step 1: Resolve the Library ID
 
-Call `resolve-library-id` with:
+When the configured tool exposes `resolve-library-id`, call it with:
 
 - `libraryName`: The library name extracted from the user's question
 - `query`: What to look up in the library's documentation (improves relevance ranking)
@@ -33,7 +33,7 @@ From the resolution results, choose based on:
 
 ### Step 3: Fetch the Documentation
 
-Call `query-docs` with:
+When the configured tool exposes `query-docs`, call it with:
 
 - `libraryId`: The selected Context7 library ID (e.g., `/vercel/next.js`)
 - `query`: What to look up in the library's documentation, scoped to a single concept
@@ -46,7 +46,12 @@ Incorporate the fetched documentation into your response:
 
 - Answer the user's question using current, accurate information
 - Include relevant code examples from the docs
-- Cite the library version when relevant
+- Cite the primary source/library version when relevant
+- Verify installed/project version from manifests, lockfiles or local help; an indexed latest version may differ
+- Reuse resolved IDs/results for the same applicable version/concept; rerun when stale or uncertain
+- If Context7 is unavailable, unindexed or quota-limited, use official docs or installed help/source. State unknowns rather than inventing a result
+- Do not install/download a CLI or authenticate merely to perform a routine lookup; use an already configured option within scope
+- Send only a minimal generic documentation query; never credentials, PII or proprietary payloads/code
 
 ## Guidelines
 

@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Agents & Workflows
 
 When to use a fixed multi-step **workflow** vs. an open-ended **agent**, and the four workflow patterns that cover most real systems: parallelization, chaining, routing, and evaluator-optimizer. Plus the two things agents need to be useful: composable tools and the ability to inspect their environment.

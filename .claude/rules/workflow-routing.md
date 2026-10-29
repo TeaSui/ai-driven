@@ -38,11 +38,11 @@ Multi-domain, no trust boundary (e.g., cross-service refactor, shared-schema ren
 - Integration-check before merge: run the smoke test at the integration point; do not skip because each side passed in isolation.
 
 ### Full workflow (single-domain trust boundary)
-brainstorming → plan → Security subagent → **TechLead (contract-mode) if architecture or API contract work is needed** → `subagent-driven-development` → API Test + QA (parallel, when service is running).
+scope/design clarification → coordination outline → Security subagent → **TechLead (contract-mode) if architecture or API contract work is needed** → implementation plan → `subagent-driven-development` → QA, plus API Test in parallel when a service is running.
 TechLead is optional for this tier — skip when the change has no new contract surface (e.g., tightening validation on an existing endpoint). When invoked here, TechLead runs in contract-mode ("Stop after Phase 2"); it does NOT delegate — the main session dispatches implementers using custom agent definitions as context.
 
 ### Orchestrator (multi-domain trust boundary)
-Orchestrator sequences: **brainstorming (or BA dispatch) → Security → TechLead (contract-mode) → implementation → API Test + QA (parallel, when service is running).**
+Orchestrator sequences: **scope/design clarification (or BA) → coordination outline → Security → TechLead (contract-mode) → implementation plan → implementation → QA, plus API Test in parallel when a service is running.**
 Runtime dependency resolution. Parallel when safe. TechLead runs in contract-mode only; the orchestrator (not TechLead) dispatches implementers.
 
 ## Mid-execution domain expansion
@@ -74,7 +74,10 @@ Walk the 6-item checklist above. If any item is YES, full workflow or orchestrat
 For non-trivial design decisions (architecture, API contracts, skill/agent design, data models), use the Agent tool to challenge your draft before presenting to the user:
 1. Draft the design with full context
 2. Spawn an agent to find flaws, gaps, and counter-arguments
-3. Resolve all counter-arguments — iterate until none remain
+3. Resolve material counter-arguments within `rules/review-loop-limits.md`; report unresolved concerns rather than forcing consensus
 4. Present only the final version
 
 Skip for: implementation tasks, bug fixes, simple questions, single-file changes.
+
+## Authorization and runtime
+Reuse explicit authorization already given for the same scope. Present substantive decisions without adding repeated approval gates for choices the user delegated. Native permission prompts and separately controlled actions still apply. If agents/services are unavailable, state the missing gate; use a safe authorized fallback without fabricating an independent review or API result.

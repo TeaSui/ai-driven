@@ -76,10 +76,10 @@ You MUST complete each phase before proceeding to the next.
    **BEFORE proposing fixes, add diagnostic instrumentation:**
    ```
    For EACH component boundary:
-     - Log what data enters component
-     - Log what data exits component
-     - Verify environment/config propagation
-     - Check state at each layer
+     - Log presence, counts, safe identifiers or explicitly redacted metadata
+     - Never log raw environment values, credentials, PII, auth headers or payloads
+     - Verify environment/config propagation using presence-only checks
+     - Check state at each layer without exposing sensitive contents
 
    Run once to gather evidence showing WHERE it breaks
    THEN analyze evidence to identify failing component
@@ -90,19 +90,28 @@ You MUST complete each phase before proceeding to the next.
    ```bash
    # Layer 1: Workflow
    echo "=== Secrets available in workflow: ==="
-   echo "IDENTITY: ${IDENTITY:+SET}${IDENTITY:-UNSET}"
+   if [ "${IDENTITY+x}" != x ]; then
+     echo "IDENTITY: UNSET"
+   elif [ -z "$IDENTITY" ]; then
+     echo "IDENTITY: EMPTY"
+   else
+     echo "IDENTITY: SET"
+   fi
 
    # Layer 2: Build script
-   echo "=== Env vars in build script: ==="
-   env | grep IDENTITY || echo "IDENTITY not in environment"
+   echo "=== Identity propagation in build script: ==="
+   if [ "${IDENTITY+x}" = x ]; then echo "IDENTITY present"; else echo "IDENTITY missing"; fi
 
-   # Layer 3: Signing script
-   echo "=== Keychain state: ==="
-   security list-keychains
-   security find-identity -v
+   # Layer 3: Signing tooling availability (no identities or keychain contents)
+   if command -v codesign >/dev/null 2>&1; then echo "codesign: AVAILABLE"; else echo "codesign: MISSING"; fi
 
-   # Layer 4: Actual signing
-   codesign --sign "$IDENTITY" --verbose=4 "$APP"
+   # Layer 4: Read-only verification of an explicitly scoped existing artifact
+   # Run only when APP is the intended local artifact; do not sign or start services for diagnostics.
+   if codesign --verify --strict "$APP" >/dev/null 2>&1; then
+     echo "artifact signature: VERIFIED"
+   else
+     echo "artifact signature: NOT VERIFIED (missing tool/artifact or verification failure)"
+   fi
    ```
 
    **This reveals:** Which layer fails (secrets → workflow ✓, workflow → build ✗)
@@ -175,8 +184,9 @@ You MUST complete each phase before proceeding to the next.
    - Simplest possible reproduction
    - Automated test if possible
    - One-off test script if no framework
-   - MUST have before fixing
-   - Use the `test-driven-development` skill for writing proper failing tests
+   - For behavior changes, demonstrate the expected failure before the fix
+   - For prose/config-only defects, use the applicable structural or isolated command check
+   - Use `test-driven-development` for red-green checks and safe recovery; preserve pre-existing/user/other-agent changes
 
 2. **Implement Single Fix**
    - Address the root cause identified
@@ -192,8 +202,9 @@ You MUST complete each phase before proceeding to the next.
 4. **If Fix Doesn't Work**
    - STOP
    - Count: How many fixes have you tried?
-   - If < 3: Return to Phase 1, re-analyze with new information
-   - **If ≥ 3: STOP and question the architecture (step 5 below)**
+   - Follow any applicable formal bound in `~/.claude/rules/review-loop-limits.md` first; this heuristic does not extend it
+   - Below that bound, return to Phase 1 and re-analyze with new information
+   - **At 3 failed exploratory hypotheses (or earlier if the formal bound is reached): stop and reassess the approach (step 5 below)**
    - DON'T attempt Fix #4 without architectural discussion
 
 5. **If 3+ Fixes Failed: Question Architecture**
@@ -210,7 +221,7 @@ You MUST complete each phase before proceeding to the next.
 
    **Discuss with your human partner before attempting more fixes**
 
-   This is NOT a failed hypothesis - this is a wrong architecture.
+   Repeated failures are evidence to reassess the approach, not proof that the architecture is wrong. Report the tested hypotheses and unresolved evidence.
 
 ## Red Flags - STOP and Follow Process
 

@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Tool Infrastructure
 
 Scaling tools beyond ~20 definitions: tool search, programmatic tool calling, fine-grained streaming, and the decision framework for combining these techniques. For custom-tool fundamentals see [tool-use.md](tool-use.md).

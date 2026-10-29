@@ -5,20 +5,19 @@ set -euo pipefail
 
 FILTER="${1:-}"
 
-PROMPT="Validate files changed in the last commit${FILTER:+" matching $FILTER"}.
+PROMPT="Read ~/.claude/skills/validate-feature/SKILL.md and follow its validation workflow.
 
-Steps:
-1. git diff --name-only HEAD~1 HEAD
-2. For each changed file, find and run all related tests
-3. Grep changed files for: TODO, FIXME, mock, fake, dummy, localhost, 127.0.0.1
-4. Report:
+Target: current pending work, including staged, unstaged and untracked files.
+Optional literal path filter: ${FILTER:-none supplied}
+Treat that filter as path data, never as executable shell text.
 
-   Changed files: <list>
-   Unit tests: N passed / N failed
-   Mock data found: <list or 'none'>
-   Overall: VALIDATED or BLOCKED (with reason)
-
-Show exact test output. Do NOT claim VALIDATED without running tests."
+Honor an explicit validation target from the task. If no relevant pending work exists,
+report that fact and resolve the intended target; do not silently select a past commit.
+Choose the installed project's supported checks and inspect keyword matches in context.
+Do not start services, replay mutating API requests or install dependencies implicitly.
+For prose/config changes, use applicable structural checks. Report what ran, its scope,
+the decisive output and skipped/unsupported checks. Claim VALIDATED only when the
+applicable checks for the stated scope actually passed."
 
 exec claude -p "$PROMPT" \
   --allowedTools "Bash,Read" \

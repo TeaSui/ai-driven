@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Prompt Engineering
 
 Iterative techniques for improving prompt quality: clarity, specificity, XML structure, and examples.

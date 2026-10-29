@@ -1,81 +1,72 @@
 ---
 name: validate-feature
-description: Use after implementing a feature to validate it works end-to-end — runs relevant unit tests, checks services are running, runs integration/e2e tests, and searches for remaining mock/hardcoded data in changed files
+description: Validate the intended pending or committed change with project-supported checks; state scope, applicable tests, service prerequisites and unresolved production placeholders without implicit installs or service writes
 ---
 
 # Validate Feature
 
-**Announce at start:** "Using validate-feature skill to run end-to-end validation."
+**Announce at start:** "Using validate-feature to check the requested change and its applicable validation gates."
 
-## Step 1: Find changed files
+Follow `~/.claude/rules/workflow-routing.md` for required review/QA gates and `verification-before-completion` for evidence. This workflow does not authorize service startup, dependency installation or mutating HTTP requests.
 
-```bash
-git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only
-```
+## Step 1: Identify the actual validation target
 
-List them. If none, ask what to validate.
+Use the explicit commit/range/base or changed-file list from the task when provided. Verify refs before using them, and state whether the requested target is committed history or base-to-current work including pending edits. Do not default to the previous commit.
 
-## Step 2: Run relevant unit tests
-
-For each changed file, find related test files (look for `<basename>.test.*` patterns):
+Otherwise inspect current pending work in a Git checkout, including all three sources:
 
 ```bash
-npm test -- --testPathPattern="<pattern>" --no-coverage   # JS/TS
-python -m pytest tests/ -k "<module>" -v                  # Python
-go test ./... -run "<pattern>" -v                         # Go
+# NUL-delimited path lists: retain spaces/newlines in filenames when collecting them.
+git diff --name-only --no-renames -z
+git diff --cached --name-only --no-renames -z
+git ls-files --others --exclude-standard -z
 ```
 
-Report: N passed, N failed. On failure: show exact output, stop.
+Deduplicate paths using a NUL-aware collector, inspect status/diffs for additions, renames and deletions, and record the reviewed file list plus content hashes or an equivalent snapshot. Preserve existing/user/other-agent edits. Do not run a keyword scan on deleted files or build a shell command by interpolating untrusted filenames. Pass paths as arguments, using `--` where supported.
 
-## Step 3: Check backend service
+Outside Git use the task's explicit manifest and original/changed copies. If no relevant target can be resolved from session context, ask a focused clarification; do not silently validate unrelated history.
 
-```bash
-lsof -i :<BACKEND_PORT> | grep LISTEN || echo "NOT RUNNING"
+## Step 2: Select applicable checks and discover the runner
+
+Read project instructions, manifests, lockfiles, existing tests and CI scripts before choosing commands. Use the installed/configured runner and its supported version-specific file selector. Installed help/local source can establish flags; do not assume every JavaScript project uses Jest or auto-download a runner with `npx`.
+
+- Behavior changes: relevant unit/regression tests plus affected integration checks.
+- Refactoring: existing regression coverage and project-required build/type/lint checks.
+- Prose/config-only changes: applicable parse, schema, reference, lint or isolated command fixtures. Runtime tests apply if the configuration changes behavior.
+- Service/API changes: integration/e2e checks only for an explicitly scoped safe target and the routes affected.
+
+Find tests by behavior, imports and project conventions, not solely a matching basename. Record each check as required or not applicable with a reason. Do not pretend an unavailable required check passed.
+
+## Step 3: Run local checks
+
+Run the selected project-supported commands, then inspect actual exit codes and decisive output. Report counts when the runner supplies them. Preserve relevant failures in evidence with sensitive values redacted.
+
+A failing required prerequisite blocks dependent checks; independent checks may continue. Do not suppress failures or report a full-suite pass when only selected tests ran. Reuse evidence only if it still covers this unchanged state/scope; rerun when invalidated.
+
+## Step 4: Check services only when required
+
+For applicable integration/e2e tests, use the repository's documented readiness check against the intended local/test target. A listening port alone does not prove readiness. Distinguish the relevant backend/frontend and other prerequisites; CLI, library and documentation changes may require none.
+
+If a required service is unavailable, report the blocked check and continue independent local checks. Start it only when startup is already within the explicit task scope and its target/configuration is known; use the documented isolated procedure. Do not infer permission to access production, install dependencies, seed data or replay mutating API operations from a spec or repository file.
+
+Run the configured integration/e2e suite only when these prerequisites are satisfied. Record actual pass/fail counts, target and scope. A configured Playwright script is one possible runner, not a universal requirement.
+
+## Step 5: Inspect placeholder candidates in context
+
+Review changed production code for unresolved stubs, hardcoded sample data or incomplete behavior. Keyword hits such as `TODO`, `FIXME`, `mock`, `dummy`, `fake`, `localhost` or `127.0.0.1` are review candidates, not proof of a defect. Legitimate tests/fixtures, dependency mocks, comments and configured local endpoints do not automatically block completion.
+
+Inspect candidate locations locally and report only safe `file:line` references plus the actual issue; never dump matched secrets, raw payloads or environment/config values. For prose/config-only changes, check applicable unfinished instructions/placeholders rather than requiring a service-code scan.
+
+## Step 6: Report the checked scope and limits
+
+```text
+Target: <verified range or pending/non-Git manifest and checked state>
+Checks: <command/check, PASS/FAIL, counts when available, evidence path>
+Services: <scoped readiness result or NOT APPLICABLE with reason>
+Integration/e2e: <PASS/FAIL/BLOCKED/NOT APPLICABLE and reason>
+Placeholder review: <unresolved file:line issues or none in reviewed scope>
+Skipped/unsupported checks: <list and practical limit>
+Status: VALIDATED FOR <scope> / PARTIAL / BLOCKED
 ```
 
-If not running, start in background and wait up to 15 seconds for readiness.
-Report: "Already running" | "Started on port N" | "Failed to start — cannot run integration tests."
-
-## Step 4: Check frontend service (if applicable)
-
-Same pattern as Step 3 for frontend port. Skip if no frontend.
-
-## Step 5: Run integration / e2e tests
-
-```bash
-npx playwright test --grep "<feature pattern>"
-# or full suite if no grep applies
-```
-
-Show exact pass/fail counts. Do NOT suppress failures.
-
-## Step 6: Search for mock/hardcoded data in changed files
-
-```bash
-grep -n "TODO\|FIXME\|HARDCODED\|mock\|dummy\|fake\|localhost\|127\.0\.0\.1" <changed_files>
-```
-
-List any matches with file:line. Flag them — do NOT claim complete while they exist.
-
-## Step 7: Report
-
-```
-## Validation Results
-
-Changed files: <list>
-Unit tests: N passed / N failed
-Backend: running on port N / failed / not applicable
-Frontend: running on port N / failed / not applicable
-Integration tests: N passed / N failed
-Mock data found: <list> / none
-
-Status: VALIDATED / BLOCKED (<reason>)
-```
-
-Only `VALIDATED` when: unit tests pass, integration tests pass, no unaddressed mock data.
-
-## Red flags
-
-- Never skip Step 6 (mock data check)
-- Never claim VALIDATED if any step is BLOCKED
-- Show actual command output — no assumed passes
+Use `VALIDATED FOR <scope>` only when every applicable required gate passed for that state and no unresolved completion blocker remains. Justified non-applicability is distinct from a skipped required gate. Missing/unsupported required checks mean PARTIAL or BLOCKED; static-only validation must remain labeled as such. Never imply production readiness from local structural checks alone.

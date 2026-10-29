@@ -1,3 +1,5 @@
+> Historical curriculum: current-model API code must start with [current-models.md](current-models.md) and live official docs. Examples and capability claims below target older models; do not migrate them by changing IDs alone.
+
 # Model Capabilities
 
 Thinking (adaptive / manual), effort, task budgets, structured outputs, citations, search_result blocks, batch API, fast mode, embeddings (Voyage), multilingual. Pick the section for the capability you need — nothing else loads automatically.

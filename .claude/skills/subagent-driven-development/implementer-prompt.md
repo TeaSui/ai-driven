@@ -6,11 +6,10 @@ Dispatch to the **domain leaf agent** from the registry in `~/.claude/rules/agen
 (backend-engineer-subagent, frontend-engineer-subagent, mobile-engineer-subagent, etc. — pick by the
 task's stack); fall back to `general-purpose` only when no domain agent fits. This template satisfies
 `rules/dispatch-prompt-contract.md` via markdown headings (fields, not tags, are the contract). It is
-written for **literal-class models (sonnet / opus-4.8)** — the default for leaf implementers. Enumerate
-in the Task Description every file and section the instructions apply to; literal models do not
-generalize scope on their own. If you override the dispatch to a frontier model (fable), trim it per
-model-routing.md's steering section — in particular drop the Self-Review section, which frontier
-models perform unprompted.
+adapted to the selected model/effort using `~/.claude/references/model-guide.md`. Enumerate owned
+files/modules, prerequisites and exit criteria clearly for every model. Keep task/security constraints
+and evidence requirements regardless of model choice; do not assume a model performs an omitted
+review automatically. Use the available Agent tool (`Task` alias is supported).
 
 ```
 Task tool (domain leaf agent per rules/agents.md):
@@ -26,6 +25,13 @@ Task tool (domain leaf agent per rules/agents.md):
 
     [Scene-setting: where this fits, dependencies, architectural context]
 
+    ## Ownership and Constraints
+
+    [Owned files/modules, allowed actions, out-of-scope files, required security/contract inputs]
+    You are not alone in the codebase. Preserve existing/user/other-agent edits, including in
+    shared files. Do not delete/reset unrelated work or expand scope to make a test pass.
+    [Actual verification commands or discovery instructions and one exit criterion per requirement]
+
     ## Before You Begin
 
     If you have questions about:
@@ -34,22 +40,23 @@ Task tool (domain leaf agent per rules/agents.md):
     - Dependencies or assumptions
     - Anything unclear in the task description
 
-    **Ask them now.** Raise any concerns before starting work.
+    Raise material ambiguities before dependent changes; continue independent authorized work with clear requirements.
 
     ## Your Job
 
     Once you're clear on requirements:
     1. Implement exactly what the task specifies
-    2. Write tests (following TDD if task says to)
-    3. Verify implementation works
-    4. Commit your work
+    2. Follow TDD for behavior changes, with safe owned-patch recovery; use applicable structural/isolated checks for prose/config
+    3. Verify the actual changed state/scope and report skipped/unavailable checks explicitly
+    4. Commit only when committing is in scope and applicable commit_docs/task preferences permit it; otherwise leave reviewable pending work
     5. Self-review (see below)
     6. Report back
 
     Work from: [directory]
 
-    **While you work:** If you encounter something unexpected or unclear, **ask questions**.
-    It's always OK to pause and clarify. Don't guess or make assumptions.
+    **While you work:** Investigate unexpected behavior within scope. Clarify decisions whose
+    ambiguity affects correctness; pause dependent work and continue understood independent work.
+    Reuse existing authorization. Never invent required facts or skip a prerequisite silently.
 
     ## Code Organization
 

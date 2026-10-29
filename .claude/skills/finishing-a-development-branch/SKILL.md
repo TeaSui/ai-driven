@@ -5,6 +5,8 @@ description: Use when implementation is complete, all tests pass, and you need t
 
 # Finishing a Development Branch
 
+Reuse the delivery choice already authorized by the user. Do not ask them to choose an internal workflow again. If no Git branch/worktree is involved, report the verified artifact directly. Native permissions and destructive discard still require their applicable authorization.
+
 ## Overview
 
 Guide completion of development work by presenting clear options and handling chosen workflow.
@@ -48,7 +50,7 @@ Or ask: "This branch split from main - is that correct?"
 
 ### Step 3: Present Options
 
-Present exactly these 4 options:
+If delivery is unresolved, offer the applicable choices below:
 
 ```
 Implementation complete. What would you like to do?
@@ -186,15 +188,15 @@ git worktree remove <worktree-path>
 
 **Always:**
 - Verify tests before offering options
-- Present exactly 4 options
+- Offer the relevant delivery options only when the user has not already selected/authorized one
 - Get typed confirmation for Option 4
 - Clean up worktree for Options 1 & 4 only
 
 ## Integration
 
 **Called by:**
-- **subagent-driven-development** (Step 7) - After all tasks complete
-- **executing-plans** (Step 5) - After all batches complete
+- **subagent-driven-development** (after integration and required reviews) - After all tasks complete
+- **executing-plans** (after its accepted checkpoints) - After all batches complete
 
 **Pairs with:**
-- **using-git-worktrees** - Cleans up worktree created by that skill
+- Existing worktree management, when this task actually created an isolated checkout; use the active runtime's supported tools and preserve work still needed.

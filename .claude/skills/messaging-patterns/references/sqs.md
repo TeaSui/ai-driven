@@ -19,7 +19,7 @@ Cross-broker selection guide: see parent `SKILL.md`.
 | Concept | Description |
 |---------|-------------|
 | **Standard queue** | At-least-once, best-effort ordering, nearly unlimited throughput |
-| **FIFO queue** | Exactly-once (within deduplication window), strict ordering per message group, 300 TPS (3000 with batching) |
+| **FIFO queue** | Producer deduplication within five minutes; ordering per message group; throughput depends on mode/Region/quota |
 | **Visibility timeout** | Duration message is hidden after receive; consumer must delete before expiry or it reappears |
 | **Redrive policy** | Move messages to DLQ after `maxReceiveCount` failed deliveries |
 | **Message group ID** | FIFO only; messages in same group are ordered and processed serially |
@@ -32,13 +32,16 @@ Cross-broker selection guide: see parent `SKILL.md`.
 
 ```typescript
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { randomUUID } from "node:crypto";
 
 const sqs = new SQSClient({ region: "ap-southeast-1" });
 
+// For a critical business event, reuse the eventId from its committed outbox row.
+const eventId = randomUUID(); // direct-send example only: create once, reuse on retry
 await sqs.send(new SendMessageCommand({
   QueueUrl: process.env.ORDER_QUEUE_URL,
   MessageBody: JSON.stringify({
-    eventId: crypto.randomUUID(),
+    eventId,
     eventType: "OrderCreated",
     version: 1,
     timestamp: new Date().toISOString(),
@@ -52,21 +55,21 @@ await sqs.send(new SendMessageCommand({
 }));
 ```
 
-### Batch send (up to 10 messages, max 256 KB total)
+### Batch send (up to 10 messages, max 1 MiB total)
 
 ```typescript
-await sqs.send(new SendMessageBatchCommand({
+const response = await sqs.send(new SendMessageBatchCommand({
   QueueUrl: process.env.ORDER_QUEUE_URL,
   Entries: orders.map((order, i) => ({
     Id: String(i),                      // batch-local ID for result correlation
-    MessageBody: JSON.stringify(order),
+    MessageBody: JSON.stringify({ eventId: order.eventId, eventType: "OrderCreated", version: 1, data: order }),
     MessageGroupId: order.id,           // FIFO
     MessageDeduplicationId: order.eventId,
   })),
 }));
 ```
 
-Batch send costs 1 API call per batch (vs 10 for individual sends). Always use batch when sending multiple messages.
+Inspect `response.Failed` even on HTTP 200; retry failed entries with their unchanged event IDs. Critical events must already exist in a committed outbox, and are marked published only after success. Each individual message and the total batch payload must fit 1 MiB (1,048,576 bytes); retain any stricter project payload policy. See [SendMessageBatch](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatch.html).
 
 ### Java producer (AWS SDK v2)
 
@@ -81,7 +84,7 @@ sqsClient.sendMessage(SendMessageRequest.builder()
 
 ## Consumer patterns
 
-### Node.js consumer (BBC sqs-consumer)
+### Standard-queue Node.js consumer (BBC sqs-consumer)
 
 ```typescript
 import { Consumer } from "sqs-consumer";
@@ -95,20 +98,21 @@ const consumer = Consumer.create({
 
   handleMessageBatch: async (messages) => {
     const results = await Promise.allSettled(
-      messages.map(msg => processMessage(JSON.parse(msg.Body)))
+      messages.map(msg => inboxHandler.applyOnce(JSON.parse(msg.Body!)))
     );
-    // Return only successfully processed messages for deletion
+    // applyOnce resolves only AFTER inbox + database effects commit.
+    // Return committed successes/duplicates for deletion; failed messages remain.
     return messages.filter((_, i) => results[i].status === "fulfilled");
   },
 });
 
-consumer.on("error", (err) => log.error("SQS consumer error", err));
+consumer.on("error", () => log.error("SQS consumer error", { category: "consumer_failed" }));
 consumer.start();
 ```
 
-Throwing from `handleMessage` / returning a rejected promise leaves the message on the queue (it reappears after visibility timeout). Return only the messages you want deleted.
+`inboxHandler.applyOnce` is an application-owned implementation of the parent skill's transactional inbox contract, not an SDK API. Return only committed successes or committed duplicates for deletion. A rejection must leave that message retryable. Match return/ack options to the installed `sqs-consumer` release and [its documented acknowledgement behavior](https://bbc.github.io/sqs-consumer/); do not enable unconditional deletion. Parallel processing here is for Standard queues. FIFO consumers must serialize each message group and stop that group on failure; do not use this parallel sample for FIFO ordering.
 
-### Lambda consumer — partial batch failure
+### Standard-queue Lambda consumer — partial batch failure
 
 When SQS triggers Lambda, configure `FunctionResponseTypes: ["ReportBatchItemFailures"]`:
 
@@ -119,9 +123,9 @@ export const handler: SQSHandler = async (event) => {
 
   await Promise.all(event.Records.map(async (record) => {
     try {
-      await processRecord(JSON.parse(record.body));
+      await inboxHandler.applyOnce(JSON.parse(record.body)); // resolves only after DB commit
     } catch (err) {
-      log.error("Failed record", { messageId: record.messageId, err });
+      log.error("Failed record", { messageId: record.messageId, category: "processing_failed" });
       failures.push({ itemIdentifier: record.messageId });
     }
   }));
@@ -131,7 +135,7 @@ export const handler: SQSHandler = async (event) => {
 };
 ```
 
-Without `ReportBatchItemFailures`, a single failure retries the entire batch — successful messages are reprocessed.
+Without `ReportBatchItemFailures`, a single failure retries the entire batch. A crash after database commit/before returning success also redelivers: the inbox must suppress committed duplicates. For FIFO, stop after the first failure and return both failed and unprocessed message IDs to preserve ordering; do not use the parallel Standard-queue handler. See [Lambda partial batch guidance](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html).
 
 ### Java Lambda consumer (Spring Cloud Function / AWS Lambda Java runtime)
 
@@ -140,7 +144,7 @@ public SQSBatchResponse handleRequest(SQSEvent event, Context context) {
     List<SQSBatchResponse.BatchItemFailure> failures = new ArrayList<>();
     for (SQSMessage msg : event.getRecords()) {
         try {
-            process(msg);
+            inboxHandler.applyOnce(msg); // returns only after inbox + DB effects commit
         } catch (Exception e) {
             failures.add(SQSBatchResponse.BatchItemFailure.builder()
                 .withItemIdentifier(msg.getMessageId()).build());
@@ -155,10 +159,10 @@ public SQSBatchResponse handleRequest(SQSEvent event, Context context) {
 | Queue type | Delivery | Ordering |
 |------------|----------|---------|
 | Standard | At-least-once | Best-effort (not guaranteed) |
-| FIFO | Exactly-once within 5-min deduplication window | Strict per message group |
+| FIFO | Send deduplication within 5-min window; processing can redeliver until delete | Strict per message group with ordered consumer handling |
 
 **Standard queues are not ordered.** For ordered processing, use FIFO with `MessageGroupId`.  
-**Idempotent consumers are still required for FIFO** — the deduplication window is 5 minutes; after that, duplicate sends are possible.
+**Idempotent consumers are still required for FIFO** — send deduplication does not atomically commit application effects and message deletion. Visibility expiration or a crash after commit can cause repeated processing even inside five minutes.
 
 Cross-broker idempotency pattern: see parent `SKILL.md`.
 
@@ -173,7 +177,7 @@ const dlq = new sqs.Queue(this, "OrderDlq", {
 });
 
 const queue = new sqs.Queue(this, "OrderQueue", {
-  visibilityTimeout: Duration.seconds(60),
+  visibilityTimeout: Duration.seconds(185), // example: Lambda timeout 30s + batch window 5s
   deadLetterQueue: {
     queue: dlq,
     maxReceiveCount: 5,     // move to DLQ after 5 failed deliveries
@@ -188,21 +192,23 @@ const queue = new sqs.Queue(this, "OrderQueue", {
 
 `visibilityTimeout > (max_processing_time + buffer)`
 
-- If Lambda timeout is 30 s, set visibility to ≥ 60 s
+- For Lambda, use visibility ≥ 6 × function timeout + batching window (30 s + a 5 s batch window → ≥185 s). For other consumers, size from maximum processing time plus retry/scheduling buffer.
 - Use `heartbeatInterval` (sqs-consumer) or `ChangeMessageVisibility` API to extend for long jobs
 - If visibility expires before delete, message reappears — causes duplicate processing
+- See [Lambda event source configuration](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html); do not copy a general-worker visibility value into a Lambda integration.
 
 ### DLQ alarm (CloudWatch)
 
 ```typescript
-dlq.metricNumberOfMessagesSent().createAlarm(this, "DlqAlarm", {
+dlq.metricApproximateNumberOfMessagesVisible().createAlarm(this, "DlqAlarm", {
   threshold: 1,
   evaluationPeriods: 1,
-  alarmDescription: "Messages arriving in DLQ",
+  comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+  alarmDescription: "Messages available in DLQ",
 });
 ```
 
-DLQ processor responsibilities: see parent `SKILL.md`.
+Import `cloudwatch` from `aws-cdk-lib/aws-cloudwatch` in this CDK v2 fragment. Visible depth is an approximate gauge; choose an evaluation period and missing-data treatment for the project's alert policy. `NumberOfMessagesSent` excludes automatic redrive into a DLQ. See [SQS metrics](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-available-cloudwatch-metrics.html). DLQ processor responsibilities: see parent `SKILL.md`.
 
 ## Schema & evolution
 
@@ -214,15 +220,13 @@ DLQ processor responsibilities: see parent `SKILL.md`.
     "event-type": { DataType: "String", StringValue: "OrderCreated" },
   }
   ```
-- For strict schema enforcement, route through EventBridge (supports JSON Schema validation) before SQS
+- Validate event schemas in the producer/consumer using the project's installed schema validator; registry/discovery alone is not runtime enforcement.
 
 ## Operational concerns
 
 ### Cost model
-- **Per request**: $0.40 per million requests (standard), $0.50/million (FIFO)
-- Long polling reduces empty receive requests → direct cost saving; always use `WaitTimeSeconds=20`
-- Batch up to 10 messages per send/receive/delete API call — 10× cost reduction vs individual calls
-- Data transfer within same region: free
+- Verify current regional rates and payload/request billing before estimating costs: [SQS pricing](https://aws.amazon.com/sqs/pricing/).
+- Long polling reduces empty receives; batch up to 10 compatible messages while respecting payload limits. Savings depend on payload size and utilization.
 
 ### Standard vs FIFO selection
 | Need | Queue type |
@@ -230,7 +234,7 @@ DLQ processor responsibilities: see parent `SKILL.md`.
 | Max throughput, ordering not required | Standard |
 | Per-entity ordered processing (e.g., user session events) | FIFO with `MessageGroupId = entityId` |
 | Global ordering across all messages | FIFO with single `MessageGroupId` (serialises all processing) |
-| Exactly-once within 5 minutes | FIFO with explicit `MessageDeduplicationId` |
+| Deduplicate producer retries within 5 minutes | FIFO with stable `MessageDeduplicationId`; consumer inbox still required |
 
 ### SNS → SQS fan-out
 Publish to SNS topic; multiple SQS queues subscribe (each consumer gets its own copy):
@@ -253,11 +257,11 @@ fn.addEventSource(new SqsEventSource(queue, {
 
 ## Common pitfalls
 
-1. **Visibility timeout too short** — message reappears mid-processing, causing duplicate processing. Set visibility > max processing time + safety buffer.
+1. **Visibility timeout too short** — size from worker processing time; for Lambda apply the six-times timeout plus batching-window guidance above.
 2. **Not using `ReportBatchItemFailures` with Lambda** — single failure retries entire batch. All successfully processed messages run again.
 3. **FIFO with single `MessageGroupId`** — serializes all messages to one consumer, destroying throughput. Use entity ID as group ID.
 4. **Standard queue for ordered workflows** — best-effort ordering is not guaranteed ordering. Use FIFO or design for any-order processing.
 5. **Short polling** — `WaitTimeSeconds=0` hammers the API with empty receives and increases cost. Always use long polling (`WaitTimeSeconds=20`).
 6. **`maxReceiveCount=1`** — any transient error sends to DLQ immediately. Set to allow ≥3 retries.
-7. **No DLQ alarm** — messages silently pile up. Alert on `NumberOfMessagesSent` to DLQ ≥ 1.
-8. **Message body > 256 KB** — SQS hard limit. Store payload in S3 and send a pointer. Use the [Extended Client Library](https://github.com/awslabs/amazon-sqs-java-extended-client-lib) for transparent handling.
+7. **No DLQ depth alarm** — alert on `ApproximateNumberOfMessagesVisible` ≥1; sent count misses automatic redrive.
+8. **Message body > 1 MiB** — SQS hard limit (batch total has the same ceiling). Store payload in S3 and send a pointer. Use the [Extended Client Library](https://github.com/awslabs/amazon-sqs-java-extended-client-lib) for transparent handling.

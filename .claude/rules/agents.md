@@ -42,7 +42,7 @@ Per-dispatch model selection (override the agent's default `model:` frontmatter)
 
 Three skills cover plan/execution and can be confused. Use this order:
 
-1. **`writing-plans`** — produces the plan document. Invoke once, at the start of a full-workflow or orchestrator task, after brainstorming and before any Task dispatch. Outputs a written plan that downstream skills consume.
+1. **`writing-plans`** — produces the plan document. Create an initial coordination outline after scope clarification. Persist the implementation plan once Security and any required TechLead contracts exist, before implementation dispatches; advisory/strategic dispatches may precede that plan. Outputs a written plan that downstream skills consume.
 2. **`subagent-driven-development`** — executes the plan **within the current session** by dispatching leaf subagents for independent tasks. Use when the plan has parallelizable leaf work and the dispatcher is the main session (or orchestrator). Also use for single-session + checkpoints by pausing between tasks to confirm with the user.
 3. **`executing-plans`** — executes the plan **in a separate session with review checkpoints**. Use when the plan spans multiple review gates, or when the user wants human-in-the-loop checkpoints between phases that must survive a context reset.
 

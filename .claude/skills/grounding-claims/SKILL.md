@@ -11,7 +11,7 @@ Fabrication is a correctness bug. Inventing a function name, file path, flag, AP
 
 **Core principle:** If you cannot cite the source, you cannot make the claim. "I don't know" is a first-class answer.
 
-**Companion rule:** `rules/reduce-hallucinations.md` — same principle, applied to all agents.
+**Canonical rules:** `~/.claude/rules/reduce-hallucinations.md` and `~/.claude/rules/context7.md`. Reuse inspected evidence while its checked state/scope remains valid; recheck when changes, failures or uncertainty invalidate it. Ordinary code reading does not require a documentation lookup unless an uncertain API/detail matters.
 
 ## When to Use
 
@@ -20,7 +20,7 @@ Fabrication is a correctness bug. Inventing a function name, file path, flag, AP
 - A file exists, or a file contains X
 - A function does Y / has signature Z
 - A CLI flag, env var, or config key exists
-- A library has API X (especially if not verified via `context7`)
+- A library has API X (verify the relevant installed/required version)
 - A commit, PR, or branch did Z
 - A test / lint / build passes
 - A subagent's evidence path proves something
@@ -42,11 +42,11 @@ BEFORE asserting any verifiable fact:
 1. IDENTIFY: Is this a verifiable claim? (path, name, flag, behavior, version, history)
 2. LOCATE: Where is the source of truth?
    - Codebase fact → Read / Grep / Glob
-   - Library fact → context7
+   - Library fact → configured Context7 when available; current official docs, installed help or local source are valid alternatives
    - CLI fact → --help / man / code
    - History fact → git log / git show / gh
    - Runtime fact → run the command
-3. FETCH: Use the tool. Don't recall.
+3. CHECK EVIDENCE: Inspect a source or reuse prior inspected evidence for the same unchanged state/scope. Never substitute recollection for evidence.
 4. CITE: Quote with `path:line` or include tool output
 5. IF fetch is not possible now → say "I don't know" or "let me check"
 
@@ -60,7 +60,7 @@ Skip any step = fabrication, not shorthand.
 | File exists / contains X | `Read` or `Glob` | `path/to/file.ts:42` |
 | Function behavior | `Read` the function | `path:start-end` + quote |
 | Callers of X | `Grep` | `path:line` per hit |
-| Library API | `context7` | doc URL or library+version |
+| Library API | Configured Context7, official docs, installed help/local source | source + library/version |
 | CLI flag | `--help` / code | command output |
 | Env var | Code grep + docs | `path:line` |
 | Commit / PR | `git log` / `gh` | SHA + short title |
@@ -71,7 +71,7 @@ Skip any step = fabrication, not shorthand.
 
 | Pattern | Fix |
 |---------|-----|
-| "There's probably a `configure()` method…" | `context7` the library OR `Grep` the codebase |
+| "There's probably a `configure()` method…" | Inspect primary/version-matched documentation or `Grep` local source |
 | "The file should be at `src/config.ts`" | `Glob 'src/**/config.*'` first |
 | "This typically uses env var `API_URL`" | `Grep 'API_URL'` + read the config loader |
 | "The flag is `--dry-run`" | Run `cmd --help` and read the actual flags |
@@ -82,8 +82,8 @@ Skip any step = fabrication, not shorthand.
 ## Red Flags — STOP
 
 - You're about to write a function name, flag, or path you have NOT seen in this session's tool output.
-- You're answering "does library X do Y?" without a `context7` call in this session.
-- You're summarizing a file you have not `Read` in this session.
+- You are asserting a version-sensitive API detail without applicable primary documentation, installed help or local source evidence.
+- You are summarizing a file without inspected evidence for its relevant state.
 - You're accepting a subagent's evidence path without `Read`ing it.
 - You catch yourself saying "typically", "usually", "should be", "probably" about a verifiable fact.
 - You're about to cite a commit SHA, date, or author from recall.
@@ -95,7 +95,7 @@ Skip any step = fabrication, not shorthand.
 | Excuse | Reality |
 |--------|---------|
 | "I'm confident it's named that" | Confidence ≠ evidence. Grep. |
-| "Libraries usually have this API" | Usually ≠ this library, this version. Call context7. |
+| "Libraries usually have this API" | Usually ≠ this library, this version. Inspect a version-matched primary/local source. |
 | "The subagent is trustworthy" | Then `Read` its cited path — takes 2 seconds. |
 | "It's a minor detail" | Minor-looking details become load-bearing in the user's next step. |
 | "I can't tool-call for everything" | You can for anything you're about to assert. |
@@ -126,7 +126,7 @@ Skip any step = fabrication, not shorthand.
 ```
 ❌ "I think it's in src/config/"  [guessing]
 ✅ "I haven't searched for it — let me check." [then Glob]
-✅ "I don't see it in the files I've read. Want me to search?"
+✅ "I do not see it in the inspected files; I will search the relevant paths."
 ```
 
 **Subagent evidence:**
@@ -139,13 +139,13 @@ Skip any step = fabrication, not shorthand.
 
 ## Interaction with Other Skills
 
-- `verification-before-completion` — success claims must have fresh command output. This skill covers *all* factual claims, not just success claims.
+- `verification-before-completion` — success claims need applicable command evidence tied to the checked state and scope. This skill covers *all* factual claims, not just success claims.
 - `systematic-debugging` — forbids fix-by-guess; this skill forbids claim-by-guess.
-- `receiving-code-review` — "verify before implementing suggestions" overlaps: if a reviewer cites an API that doesn't exist in the current library version, `context7` it before changing code.
+- `receiving-code-review` — "verify before implementing suggestions" overlaps: if a reviewer cites an API that doesn't exist in the current library version, check applicable primary docs or installed source before changing code.
 - `rules/subagent-return-format.md` — dispatchers verify every cited evidence path by `Read`; fabricated = BLOCKED.
 
 ## The Bottom Line
 
-**No claim without a citation. No citation without a fresh verification.**
+**No load-bearing claim without inspected evidence. Recheck evidence when the state, scope or uncertainty warrants it.**
 
 If the cost of verifying is higher than the value of the claim, don't make the claim — say "I don't know" and move on.

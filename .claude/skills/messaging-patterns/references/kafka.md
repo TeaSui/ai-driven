@@ -27,17 +27,17 @@ Cross-broker selection guide: see parent `SKILL.md`.
 
 ## Producer patterns
 
-### Idempotent producer (at-least-once → exactly-once per partition)
+### Idempotent producer (deduplicates producer retries)
 
-```java
-// Spring Boot — application.yml
+```yaml
+# Spring Boot — application.yml
 spring:
   kafka:
     producer:
       acks: all                    # wait for all in-sync replicas
       retries: 2147483647          # retry until delivery.timeout.ms
-      enable-idempotence: true     # deduplicates retries at broker
       properties:
+        enable.idempotence: true   # native Kafka property; deduplicates producer retries
         max.in.flight.requests.per.connection: 5   # must be ≤5 with idempotence
         delivery.timeout.ms: 120000
 ```
@@ -53,15 +53,17 @@ public class OrderEventPublisher {
         kafka.send("orders.order.created", order.getId(), event)
             .whenComplete((result, ex) -> {
                 if (ex != null) {
-                    log.error("Publish failed for order {}", order.getId(), ex);
-                    // Persist to outbox for retry — do NOT swallow
+                    log.error("Kafka publish failed; category={}", ex.getClass().getSimpleName());
+                    // A noncritical direct send needs an explicit failure policy.
                 }
             });
     }
 }
 ```
 
-### Transactional producer (exactly-once across partitions)
+For business-state-triggered critical events, do not create an outbox only in this callback: a crash can occur before it runs. Persist the event in the originating database transaction and have a relay publish committed rows, confirming before marking published (parent `SKILL.md`). The direct-send sample above illustrates producer mechanics only.
+
+### Transactional producer (Kafka-scoped atomic read/process/write)
 
 ```java
 config.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "order-producer-1");
@@ -76,10 +78,11 @@ try {
     producer.commitTransaction();
 } catch (Exception e) {
     producer.abortTransaction();
+    throw e; // propagate failure; no claim of successful processing
 }
 ```
 
-Use transactions when you need atomic read-process-write (consume from topic A, produce to topic B atomically).
+Use transactions for Kafka-to-Kafka read/process/write. This does not include independent database or HTTP effects; use the inbox/outbox contract for those.
 
 ### Go producer (segmentio/kafka-go)
 
@@ -117,23 +120,14 @@ public void onOrderCreated(
         @Header(KafkaHeaders.OFFSET) long offset,
         Acknowledgment ack) {
 
-    if (idempotencyStore.isDuplicate(event.getEventId())) {
-        ack.acknowledge();
-        return;
-    }
-    try {
-        orderProjection.applyOrderCreated(event);
-        idempotencyStore.markProcessed(event.getEventId());
-        ack.acknowledge();
-    } catch (RetryableException e) {
-        throw e; // do not ack — broker redelivers
-    } catch (Exception e) {
-        log.error("Non-retryable error {}", event.getEventId(), e);
-        publishToDlt(event, e);
-        ack.acknowledge(); // advance past poison pill
-    }
+    // Separate transactional service: inbox insert + DB effects commit together.
+    // Failure propagates to the container; do not ack on an unsuccessful commit.
+    inboxHandler.applyOnce(event);
+    ack.acknowledge(); // committed duplicate is also safe to acknowledge
 }
 ```
+
+`inboxHandler` is application-owned and must implement the parent skill's storage contract. No direct external side effect belongs in that database transaction. Test rollback, concurrent duplicates and crash-after-commit/before-ack against the real store.
 
 ### Consumer container configuration
 
@@ -145,17 +139,20 @@ public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerCont
     factory.setConsumerFactory(cf);
     factory.getContainerProperties().setAckMode(AckMode.MANUAL);
     factory.setConcurrency(3);  // one thread per partition (≤ partition count)
+    var recoverer = new DeadLetterPublishingRecoverer(template);
+    recoverer.setFailIfSendResultIsError(true); // require confirmed DLT publish
     factory.setCommonErrorHandler(new DefaultErrorHandler(
-        new DeadLetterPublishingRecoverer(template),
-        new ExponentialBackOffWithMaxRetries(4)  // 4 retries, then DLT
+        recoverer, new ExponentialBackOffWithMaxRetries(4)
     ));
     return factory;
 }
 ```
 
+Use the installed Spring Kafka version's recovery/ack configuration and test that DLT publish failure leaves the offset retryable. The recoverer above must throw on a failed send; do not catch all listener errors, fire-and-forget to DLT and acknowledge. Keep DLT payloads in restricted storage and sanitize exception headers/logs. See [Spring Kafka error handling](https://docs.spring.io/spring-kafka/reference/kafka/annotation-error-handling.html).
+
 ### Rebalance listener (save offsets on revoke)
 
-Implement `ConsumerRebalanceListener.onPartitionsRevoked` to commit offsets before rebalance completes. With cooperative rebalancing (`CooperativeStickyAssignor`), only revoked partitions pause — preferred for large consumer groups.
+When implementing `ConsumerRebalanceListener.onPartitionsRevoked`, commit only the contiguous offsets whose effects have already committed; never advance past unfinished in-flight work. With cooperative rebalancing (`CooperativeStickyAssignor`), only revoked partitions pause — preferred for large consumer groups.
 
 ```yaml
 spring.kafka.consumer.properties:
@@ -168,7 +165,7 @@ spring.kafka.consumer.properties:
 |------|--------|-------|
 | At-most-once | `acks=0` or auto-commit before processing | Messages can be lost |
 | At-least-once | `acks=all` + manual commit after processing | Duplicates possible; require idempotent consumers |
-| Exactly-once | Idempotent producer + transactional API + `isolation.level=read_committed` | Highest overhead; use for financial/inventory critical paths |
+| Kafka-scoped exactly-once | Transactional consume/produce + offsets in the same Kafka transaction + `isolation.level=read_committed` | Does not make database, payment or HTTP effects exactly-once |
 
 ## Failure handling (DLQ/retry)
 
@@ -224,5 +221,5 @@ Schema evolution rules: see parent `SKILL.md`.
 2. **`acks=1` with idempotence** — idempotence requires `acks=all`. Spring Boot auto-sets this; verify when configuring manually.
 3. **Auto-commit with manual processing** — auto-commit commits before processing completes. Set `enable.auto.commit=false` and use `AckMode.MANUAL`.
 4. **Blocking in poll loop** — processing time > `max.poll.interval.ms` triggers consumer group rebalance. Keep handlers fast or increase `max.poll.interval.ms`.
-5. **Ignoring `onPartitionsRevoked`** — uncommitted offsets on revoke cause reprocessing. Always commit before returning from `onPartitionsRevoked`.
+5. **Ignoring `onPartitionsRevoked`** — uncommitted offsets on revoke cause reprocessing. Only commit completed contiguous work; replay unfinished work safely through the inbox.
 6. **`isolation.level` mismatch** — if using transactional producers, consumers must set `isolation.level=read_committed` to avoid reading uncommitted data.

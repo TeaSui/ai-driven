@@ -178,18 +178,45 @@ def apply_cdc_events(spark, events_df, target_path, key_cols):
 
 ## Data Quality
 
-### Great Expectations
+### Great Expectations — GX Core 1.x, Spark-native
+
+Read the project's exact `great_expectations` pin and Spark/Python compatibility first. This route follows the documented GX Core 1.x Data Source → Asset → Batch Definition API (checked against 1.24.1 docs); do not copy it into a pinned 0.18 project or assume all 1.x minors are identical. Use an already available Spark dataframe; no driver-wide `toPandas()` collection.
 
 ```python
-def validate_orders(df, context):
-    validator = context.sources.pandas_default.read_dataframe(df.toPandas())
-    validator.expect_column_values_to_not_be_null("order_id")
-    validator.expect_column_values_to_be_unique("order_id")
-    validator.expect_column_values_to_be_between("total_amount", min_value=0, max_value=1_000_000)
-    validator.expect_column_values_to_match_regex("email", r"^[^@]+@[^@]+\.[^@]+$")
-    result = validator.validate()
-    return {"success": result.success, "failures": [r for r in result.results if not r.success]}
+import great_expectations as gx
+
+# Example CI/disposable configuration; no project configuration is persisted.
+context = gx.get_context(mode="ephemeral")
+source = context.data_sources.add_spark(name="orders_spark")
+asset = source.add_dataframe_asset(name="orders")
+orders_batch_definition = asset.add_batch_definition_whole_dataframe("whole_orders")
+
+
+def validate_orders(dataframe, batch_definition=orders_batch_definition):
+    batch = batch_definition.get_batch(batch_parameters={"dataframe": dataframe})
+    checks = [
+        ("order_id_not_null", gx.expectations.ExpectColumnValuesToNotBeNull(column="order_id")),
+        ("order_id_unique", gx.expectations.ExpectColumnValuesToBeUnique(column="order_id")),
+        ("amount_range", gx.expectations.ExpectColumnValuesToBeBetween(
+            column="total_amount", min_value=0, max_value=1_000_000)),
+        ("email_format", gx.expectations.ExpectColumnValuesToMatchRegex(
+            column="email", regex=r"^[^@]+@[^@]+\.[^@]+$")),
+    ]
+    failed_checks = []
+    for name, expectation in checks:
+        result = batch.validate(expectation, result_format={"result_format": "BOOLEAN_ONLY"})
+        if not result.success:
+            failed_checks.append(name) # safe check identifiers, not rejected row values
+    if failed_checks:
+        raise ValueError("Order quality checks failed: " + ", ".join(failed_checks))
+    return {"success": True, "checks": len(checks)}
 ```
+
+Execution/configuration errors propagate; they must not become successful quality results. Unit/CI coverage in the project's installed environment should include valid data, null/duplicate IDs, invalid amounts/emails and an engine/config failure. Add explicit null checks for any other mandatory field: range/regex checks do not imply non-nullness. `BOOLEAN_ONLY` limits result details; do not print raw results, exception text or Data Docs containing PII. This example has Python syntax checks and vendor-source review only; GX/Spark execution is not claimed.
+
+For durable jobs reuse the project's configured source/asset/Batch Definition; repeated creation under the same names is not an update operation. Direct `Batch.validate` results are not persisted; use the project's Validation Definition/Checkpoint workflow when persisted evidence or actions are required. See [dataframe integration](https://docs.greatexpectations.io/docs/core/connect_to_data/dataframes/), [Batch API](https://docs.greatexpectations.io/docs/reference/api/datasource/fluent/interfaces/batch_class/), [result privacy/verbosity](https://docs.greatexpectations.io/docs/core/trigger_actions_based_on_results/choose_a_result_format/) and [ephemeral contexts](https://docs.greatexpectations.io/docs/core/set_up_a_gx_environment/create_a_data_context/).
+
+**Pinned pre-1.0 projects:** use the matching version's Validator/`context.sources` documentation and existing tests, with Spark-native data access. The old `pandas_default.read_dataframe(df.toPandas())` sketch is retired; a major-version gate alone does not make it a working Validator integration. No GX dependency upgrade or Spark session startup follows from this guidance.
 
 ### dbt Tests
 

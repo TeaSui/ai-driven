@@ -47,28 +47,45 @@ dd.trace.db.client.split-by-instance=true
 
 These power the Service Catalog, deployments tracking, and version comparison.
 
-### Go
+### Go — dd-trace-go v2
+
+Read `go.mod`/`go.sum` and the installed release's Go/toolchain requirements first. Core and integration packages have distinct v2 module paths. New instrumentation uses v2; v1 reached vendor EOL on 2025-12-31. Keep a v1 service pinned only as a documented migration exception, not a new-project default. See [support policy](https://docs.datadoghq.com/tracing/trace_collection/compatibility/go/) and [migration guide](https://docs.datadoghq.com/tracing/trace_collection/custom_instrumentation/go/migration/).
 
 ```go
+package main
+
 import (
-    "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
-    "gopkg.in/DataDog/dd-trace-go.v1/contrib/net/http"
+    "log/slog"
+    "net/http"
+    "time"
+
+    httptrace "github.com/DataDog/dd-trace-go/contrib/net/http/v2"
+    "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 )
 
 func main() {
-    tracer.Start(
+    if err := tracer.Start(
         tracer.WithService("order-service"),
         tracer.WithEnv("prod"),
         tracer.WithServiceVersion("1.2.3"),
-        tracer.WithAnalytics(true),
-    )
+    ); err != nil {
+        slog.Error("Tracer initialization failed", "category", "tracer_start")
+        return // choose an explicit startup policy for the application
+    }
     defer tracer.Stop()
 
-    mux := httptrace.NewServeMux() // auto-instruments all routes
-    mux.HandleFunc("/api/orders", handleOrders)
-    http.ListenAndServe(":8080", mux)
+    mux := httptrace.NewServeMux()
+    mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusNoContent)
+    })
+    server := &http.Server{Addr: ":8080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+    if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+        slog.Error("HTTP server stopped", "category", "http_serve")
+    }
 }
 ```
+
+Add the service's shutdown lifecycle and real handlers. This is a source-checked v2 integration example, not a compiled/deployed service; no dependency upgrade is implied. Verify the installed integration's [HTTP API](https://pkg.go.dev/github.com/DataDog/dd-trace-go/contrib/net/http/v2) and run repository tests with already installed modules before adoption.
 
 ### Custom Spans
 
@@ -104,7 +121,7 @@ func (s *PaymentService) Authorize(ctx context.Context, req PaymentRequest) (*Pa
     result, err := s.provider.Charge(ctx, req)
     if err != nil {
         span.SetTag("error", true)
-        span.SetTag("error.message", err.Error())
+        span.SetTag("error.type", "provider_failure") // sanitized category; no raw response/error text
         return nil, err
     }
     return result, nil
@@ -233,19 +250,28 @@ order_service.payment.authorize.duration # histogram
 ### Manual (Go)
 
 ```go
-import "gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
+import (
+    "context"
+    "log/slog"
+    "strconv"
+
+    "github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
+)
 
 func logWithTrace(ctx context.Context, logger *slog.Logger, msg string, attrs ...slog.Attr) {
     span, ok := tracer.SpanFromContext(ctx)
     if ok {
         attrs = append(attrs,
-            slog.Uint64("dd.trace_id", span.Context().TraceID()),
-            slog.Uint64("dd.span_id", span.Context().SpanID()),
+            // Decimal lower-64 trace ID for the existing correlation pipeline.
+            slog.String("dd.trace_id", strconv.FormatUint(span.Context().TraceIDLower(), 10)),
+            slog.String("dd.span_id", strconv.FormatUint(span.Context().SpanID(), 10)),
         )
     }
     logger.LogAttrs(ctx, slog.LevelInfo, msg, attrs...)
 }
 ```
+
+In v2 `TraceID()` is a full 128-bit hexadecimal **string**; `TraceIDLower()` is `uint64`. Do not wrap `TraceID()` in `slog.Uint64`. The example deliberately emits decimal lower-64 and span IDs as strings for a compatible correlation pipeline. If the project uses full 128-bit log correlation, use `slog.String("dd.trace_id", span.Context().TraceID())` and verify that its Datadog pipeline accepts the full-ID format; do not truncate implicitly. See [v2 context methods](https://pkg.go.dev/github.com/DataDog/dd-trace-go/v2/ddtrace/tracer#SpanContext) and [log correlation](https://docs.datadoghq.com/tracing/other_telemetry/connect_logs_and_traces/go/). `msg`/`attrs` must already be allowlisted; the helper does not sanitize arbitrary payloads.
 
 ### Log Pipeline (DataDog)
 

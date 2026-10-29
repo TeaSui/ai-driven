@@ -1,84 +1,77 @@
 # Security Review Checklist
 
-## OWASP Top 10
+Default edition: **OWASP Top 10:2025**, verified against the [official list](https://top10.owasp.org/2025/). Follow an explicitly project-required edition instead and label every category ID with that edition. Use [the mapping procedure](owasp-mapping.md), including its official 2021/2017 paths; never transfer category numbers between editions by position.
 
-### 1. Injection
-- [ ] SQL queries use parameterized statements
-- [ ] NoSQL queries sanitize inputs
-- [ ] OS commands avoid user input
-- [ ] LDAP queries escape special characters
+These controls are review prompts, not automatic findings or a complete compliance standard. Determine applicability from the system's assets, trust boundaries and threat model. Record evidence, gaps and justified non-applicability; preserve relevant mobile, infrastructure, AI and regulatory risks outside the web Top 10.
 
-### 2. Broken Authentication
-- [ ] Strong password requirements enforced
-- [ ] Multi-factor authentication available
-- [ ] Session tokens regenerated after login
-- [ ] Failed login attempts rate-limited
+## A01:2025 — Broken Access Control
 
-### 3. Sensitive Data Exposure
-- [ ] Data encrypted at rest (AES-256)
-- [ ] Data encrypted in transit (TLS 1.2+)
-- [ ] PII handling follows regulations
-- [ ] Sensitive data not logged
+- [ ] Authorization and resource ownership checked at every relevant boundary; default deny
+- [ ] Tenant separation and privilege changes tested with authorized test identities
+- [ ] CORS restricted to approved origins; cookie/ambient-credential flows retain applicable CSRF protection
+- [ ] Server-side URL fetches enforce destination/access restrictions (SSRF is included here in 2025)
 
-### 4. XML External Entities (XXE)
-- [ ] XML parsing disables external entities
-- [ ] DTD processing disabled
-- [ ] Use JSON over XML when possible
+## A02:2025 — Security Misconfiguration
 
-### 5. Broken Access Control
-- [ ] Authorization checked on every request
-- [ ] Default deny policy
-- [ ] Resource ownership validated
-- [ ] CORS configured properly
+- [ ] Production debug features and unnecessary services disabled; default credentials removed
+- [ ] Security headers and environment-specific settings verified
+- [ ] XML parsers disable external entities and unnecessary DTD processing; prefer simpler formats when appropriate
+- [ ] Storage, network and runtime permissions/configuration reviewed for unintended exposure
 
-### 6. Security Misconfiguration
-- [ ] Debug mode disabled in production
-- [ ] Default credentials changed
-- [ ] Unnecessary features disabled
-- [ ] Security headers configured
+## A03:2025 — Software Supply Chain Failures
 
-### 7. Cross-Site Scripting (XSS)
-- [ ] Output encoding applied
-- [ ] Content Security Policy set
-- [ ] HttpOnly cookies used
-- [ ] User input sanitized
+- [ ] Dependencies tracked; versions and advisories reviewed with the project's scanner/update policy
+- [ ] Build dependencies, sources and distribution artifacts come from approved origins
+- [ ] CI credentials and release/signing paths use scoped access; suspicious dependency/build changes investigated
 
-### 8. Insecure Deserialization
-- [ ] Untrusted data not deserialized
-- [ ] Digital signatures verified
-- [ ] Type checking enforced
+## A04:2025 — Cryptographic Failures
 
-### 9. Using Components with Known Vulnerabilities
-- [ ] Dependencies regularly updated
-- [ ] Security advisories monitored
-- [ ] Automated vulnerability scanning
+- [ ] Sensitive data and backups encrypted with project-approved algorithms and key management
+- [ ] TLS configured for supported endpoints and clients; applicable protocol/security requirements verified
+- [ ] Secret/key access restricted and audited; rotation and recovery procedures defined
+- [ ] Data classification, retention and deletion follow verified project/jurisdiction requirements
 
-### 10. Insufficient Logging & Monitoring
-- [ ] Security events logged
-- [ ] Logs protected from tampering
-- [ ] Alerting configured
-- [ ] Incident response plan exists
+## A05:2025 — Injection
 
-## Authentication Security
-- [ ] Passwords hashed with bcrypt/argon2
-- [ ] Salt unique per password
-- [ ] Password reset tokens expire
-- [ ] Account lockout implemented
+- [ ] SQL queries parameterized; NoSQL query structure and operators validated
+- [ ] OS commands avoid untrusted command text; LDAP inputs escaped with the appropriate API
+- [ ] Contextual output encoding prevents XSS; trusted sanitization used only where HTML is required
+- [ ] Content Security Policy supports defense in depth; it does not replace safe rendering
 
-## Data Protection
-- [ ] Encryption keys properly managed
-- [ ] Key rotation policy exists
-- [ ] Backups encrypted
-- [ ] Data retention policy enforced
+## A06:2025 — Insecure Design
 
-## Input Validation
-- [ ] Whitelist validation preferred
-- [ ] Input length limits set
-- [ ] File uploads validated
-- [ ] Content-Type headers checked
+- [ ] Threat model addresses trust boundaries, abuse cases and security-sensitive business invariants
+- [ ] Least privilege, resource limits and recovery behavior are designed before implementation
+- [ ] Retry, idempotency and transactional boundaries preserve business effects through failures
 
-## Secrets Management
-- [ ] No secrets in source code
-- [ ] Environment variables for config
-- [ ] Secrets rotated regularly
-- [ ] Access to secrets audited
+## A07:2025 — Authentication Failures
+
+- [ ] Passwords use an approved adaptive password-hashing scheme (for example Argon2id or an approved bcrypt configuration) with unique salts
+- [ ] Password policy, MFA and abuse controls match the project's risks; rate limiting/lockout cannot trivially deny service to victims
+- [ ] Session identifiers rotate after login/privilege changes; token expiry/revocation and logout are tested
+- [ ] Password-reset tokens are scoped, time-limited and single-use; cookies have appropriate Secure/HttpOnly/SameSite settings
+
+## A08:2025 — Software or Data Integrity Failures
+
+- [ ] Untrusted serialized input cannot instantiate arbitrary types or executable behavior
+- [ ] Types, signatures and integrity metadata verified where the trust model requires them
+- [ ] Updates, artifacts and state transitions cannot bypass the intended verification boundary
+
+## A09:2025 — Security Logging and Alerting Failures
+
+- [ ] Relevant security events logged with safe identifiers, timestamps and outcomes
+- [ ] Credentials, raw sensitive payloads and PII excluded/redacted; logs protected against tampering and unauthorized access
+- [ ] Actionable alerts tested with assigned responders; incident response procedures exist
+
+## A10:2025 — Mishandling of Exceptional Conditions
+
+- [ ] Unexpected errors fail securely; clients do not receive stack traces, secrets or internal details
+- [ ] Timeouts, exhausted resources, partial failures and cleanup paths preserve security/business invariants
+- [ ] Retry limits, fallback behavior and recovery are tested; unexplained 5xx responses are investigated with redacted reproduction evidence
+
+## Cross-cutting input and secret checks
+
+- [ ] Allowlist validation, input length/depth limits, upload checks and Content-Type validation applied at relevant boundaries
+- [ ] No secrets committed to source, images or diagnostic output; non-secret config kept separate from secret retrieval
+- [ ] Runtime secret retrieval uses the project-approved store and scoped access; identifiers are not confused with secret values
+- [ ] Every applicable control maps to a concrete finding/rule or evidence-backed result; a checked box alone is not a security verdict

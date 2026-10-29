@@ -25,95 +25,15 @@ description: |
 
 ## OpenAPI Spec Validation
 
-### Discovery
-```bash
-# Find OpenAPI/Swagger specs in project
-# Spring Boot: springdoc-openapi generates at runtime
-# Go: may have static openapi.yaml or generated via swag
+### Select the target and installed validator
 
-# Spring Boot — fetch live spec
-curl -s http://localhost:8080/v3/api-docs | jq . > openapi-spec.json
+The former inline OpenAPI loop is retired: checking a few required keys is not schema validation. Use the repository's installed contract runner, compatible with its OpenAPI version and JSON Schema dialect. Follow [the installed-validator workflow](references/installed-validator-workflow.md) for discovery, explicit target selection, negative fixtures, baseline comparison and result gates.
 
-# Go — check for static spec
-find . -name "openapi.yaml" -o -name "openapi.json" -o -name "swagger.yaml" 2>/dev/null
-```
-
-### Validation Script
-```bash
-#!/bin/bash
-# api-test-contract-openapi.sh — Validate API responses match OpenAPI spec
-
-SPEC_FILE="${1:-openapi-spec.json}"
-BASE_URL="${2:-http://localhost:8080}"
-PASS=0
-FAIL=0
-ERRORS=()
-
-# Extract endpoints from spec
-ENDPOINTS=$(jq -r '.paths | to_entries[] | .key' "$SPEC_FILE")
-
-for path in $ENDPOINTS; do
-  # Get methods for this path
-  METHODS=$(jq -r ".paths[\"$path\"] | keys[]" "$SPEC_FILE" | grep -v parameters)
-
-  for method in $METHODS; do
-    METHOD_UPPER=$(echo "$method" | tr '[:lower:]' '[:upper:]')
-
-    # Skip OPTIONS
-    [[ "$METHOD_UPPER" == "OPTIONS" ]] && continue
-
-    # Build URL (replace path params with test values)
-    URL="${BASE_URL}${path}"
-    URL=$(echo "$URL" | sed 's/{[^}]*}/test-id-123/g')
-
-    # Get expected success status code
-    EXPECTED_STATUS=$(jq -r ".paths[\"$path\"][\"$method\"].responses | keys[0]" "$SPEC_FILE")
-
-    # Make request
-    RESPONSE=$(curl --silent --write-out "\n%{http_code}" \
-      --request "$METHOD_UPPER" \
-      --header "Content-Type: application/json" \
-      --header "Authorization: Bearer ${AUTH_TOKEN}" \
-      --max-time 10 \
-      "$URL" 2>/dev/null)
-
-    ACTUAL_STATUS=$(echo "$RESPONSE" | tail -1)
-    BODY=$(echo "$RESPONSE" | sed '$d')
-
-    # Validate response structure against schema
-    RESPONSE_SCHEMA=$(jq ".paths[\"$path\"][\"$method\"].responses[\"$EXPECTED_STATUS\"].content[\"application/json\"].schema" "$SPEC_FILE")
-
-    if [[ "$RESPONSE_SCHEMA" != "null" ]]; then
-      # Check required fields exist
-      REQUIRED=$(echo "$RESPONSE_SCHEMA" | jq -r '.required[]?' 2>/dev/null)
-      for field in $REQUIRED; do
-        HAS_FIELD=$(echo "$BODY" | jq "has(\"$field\")" 2>/dev/null)
-        if [[ "$HAS_FIELD" != "true" ]]; then
-          FAIL=$((FAIL + 1))
-          ERRORS+=("$METHOD_UPPER $path: missing required field '$field'")
-          continue 2
-        fi
-      done
-    fi
-
-    PASS=$((PASS + 1))
-    echo "PASS: $METHOD_UPPER $path (status: $ACTUAL_STATUS)"
-  done
-done
-
-# Report
-echo ""
-echo "=== OpenAPI Contract Validation ==="
-echo "Pass: $PASS | Fail: $FAIL"
-if [[ ${#ERRORS[@]} -gt 0 ]]; then
-  echo ""
-  echo "Failures:"
-  for err in "${ERRORS[@]}"; do
-    echo "  - $err"
-  done
-fi
-[[ $FAIL -gt 0 ]] && exit 1 || exit 0
-```
+1. Identify the service/module, current working changes, spec path/hash and test environment from the task and project manifests. Use file discovery; do not fetch a guessed localhost endpoint or automatically execute operations found in a spec.
+2. Read the lockfile, existing contract tests and CI command. Inspect the installed validator's version/help and its matching documentation. Spec linting alone does not validate HTTP responses.
+3. Run the existing tests with deterministic request fixtures. Assert the scenario's **exact expected status**, content type and complete response schema through the real validator, including `$ref` and nested constraints. A declared 401 response is not success for a scenario expecting 200.
+4. Missing tool/test target, incompatible dialect, unresolved reference, parse error or no tests executed means **unsupported/failed**, never a contract PASS. Preserve the runner's nonzero failure status.
+5. No installations, service startup or mutating HTTP replay follows from discovery. Use in-process fixtures or an explicitly authorized disposable target; identify it in the report. Redact credentials and payload values from artifacts.
 
 ## Consumer-Driven Contracts (Pact)
 
@@ -263,151 +183,13 @@ describe('Account API', () => {
 
 ## Baseline Regression Testing
 
-### Capture Baseline
-```bash
-#!/bin/bash
-# api-test-baseline-capture.sh — Capture response baselines for regression testing
+### Repository-owned baseline comparison
 
-BASE_URL="${1:-http://localhost:8080}"
-BASELINE_DIR="api-baselines/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "$BASELINE_DIR"
+The inline capture/replay/comparison scripts are retired. Use the same deterministic project tests and schema validator as the contract gate, with sanitized version-controlled fixtures or the project's installed snapshot facility. See [the workflow](references/installed-validator-workflow.md#baseline-regression) for required request and comparison fields.
 
-# Discover endpoints (reuse from api-test-agent discovery phase)
-ENDPOINTS_FILE="api-test-endpoints.json"
+A baseline must retain the scenario's method, resolved path, query, headers excluding secrets, request body/encoding, fixture setup and expected status/content type. Replaying POST with no body is a different test. Compare nested values/arrays according to explicit stable-field rules, and run the complete schema validation again. Never silently replace malformed JSON with null or compare only top-level keys. Treat missing/empty baseline sets as an incomplete gate; update accepted snapshots only after reviewing the behavioral change.
 
-capture_baseline() {
-  local method="$1" path="$2" body="$3"
-  local safe_name=$(echo "${method}_${path}" | tr '/' '_' | tr -d '{}')
-  local outfile="${BASELINE_DIR}/${safe_name}.json"
-
-  local response
-  if [[ -n "$body" ]]; then
-    response=$(curl --silent --write-out '\n{"_status":%{http_code},"_time":%{time_total}}' \
-      --request "$method" \
-      --header "Content-Type: application/json" \
-      --header "Authorization: Bearer ${AUTH_TOKEN}" \
-      --data "$body" \
-      --max-time 10 \
-      "$BASE_URL$path")
-  else
-    response=$(curl --silent --write-out '\n{"_status":%{http_code},"_time":%{time_total}}' \
-      --request "$method" \
-      --header "Authorization: Bearer ${AUTH_TOKEN}" \
-      --max-time 10 \
-      "$BASE_URL$path")
-  fi
-
-  local body_response=$(echo "$response" | head -n -1)
-  local meta=$(echo "$response" | tail -1)
-  local status=$(echo "$meta" | jq -r '._status')
-  local time=$(echo "$meta" | jq -r '._time')
-
-  # Store baseline: status, response structure (not exact values), timing
-  jq -n \
-    --arg method "$method" \
-    --arg path "$path" \
-    --argjson status "$status" \
-    --argjson time "$time" \
-    --argjson body "$(echo "$body_response" | jq '.' 2>/dev/null || echo 'null')" \
-    '{
-      method: $method,
-      path: $path,
-      status: $status,
-      response_time_seconds: $time,
-      response_keys: ($body | keys? // []),
-      response_structure: ($body | [paths | join(".")] | unique | sort)
-    }' > "$outfile"
-
-  echo "Captured: $method $path -> $outfile (status: $status, time: ${time}s)"
-}
-
-# Capture baselines for each endpoint
-# ... iterate discovered endpoints ...
-
-echo "Baseline captured to: $BASELINE_DIR"
-```
-
-### Compare Against Baseline
-```bash
-#!/bin/bash
-# api-test-baseline-compare.sh — Compare current responses against baseline
-
-BASELINE_DIR="${1:?Usage: $0 <baseline_dir>}"
-BASE_URL="${2:-http://localhost:8080}"
-
-PASS=0
-FAIL=0
-WARNINGS=0
-RESULTS=()
-
-for baseline_file in "$BASELINE_DIR"/*.json; do
-  METHOD=$(jq -r '.method' "$baseline_file")
-  PATH_URL=$(jq -r '.path' "$baseline_file")
-  EXPECTED_STATUS=$(jq -r '.status' "$baseline_file")
-  EXPECTED_KEYS=$(jq -c '.response_keys' "$baseline_file")
-  EXPECTED_STRUCTURE=$(jq -c '.response_structure' "$baseline_file")
-  BASELINE_TIME=$(jq -r '.response_time_seconds' "$baseline_file")
-
-  # Make current request
-  RESPONSE=$(curl --silent --write-out '\n%{http_code} %{time_total}' \
-    --request "$METHOD" \
-    --header "Authorization: Bearer ${AUTH_TOKEN}" \
-    --max-time 10 \
-    "$BASE_URL$PATH_URL")
-
-  BODY=$(echo "$RESPONSE" | head -n -1)
-  META=$(echo "$RESPONSE" | tail -1)
-  ACTUAL_STATUS=$(echo "$META" | awk '{print $1}')
-  ACTUAL_TIME=$(echo "$META" | awk '{print $2}')
-
-  RESULT="PASS"
-  ISSUES=()
-
-  # Check 1: Status code unchanged
-  if [[ "$ACTUAL_STATUS" != "$EXPECTED_STATUS" ]]; then
-    RESULT="FAIL"
-    ISSUES+=("status changed: $EXPECTED_STATUS -> $ACTUAL_STATUS")
-  fi
-
-  # Check 2: Response structure unchanged (no removed fields)
-  ACTUAL_KEYS=$(echo "$BODY" | jq -c 'keys? // []' 2>/dev/null)
-  MISSING_KEYS=$(jq -n --argjson expected "$EXPECTED_KEYS" --argjson actual "$ACTUAL_KEYS" \
-    '$expected - $actual')
-  if [[ "$MISSING_KEYS" != "[]" ]]; then
-    RESULT="FAIL"
-    ISSUES+=("missing response keys: $MISSING_KEYS")
-  fi
-
-  # Check 3: Response time regression (>2x baseline = warning, >5x = fail)
-  TIME_RATIO=$(echo "$ACTUAL_TIME $BASELINE_TIME" | awk '{if($2>0) print $1/$2; else print 0}')
-  if (( $(echo "$TIME_RATIO > 5" | bc -l) )); then
-    RESULT="FAIL"
-    ISSUES+=("response time 5x+ slower: ${BASELINE_TIME}s -> ${ACTUAL_TIME}s")
-  elif (( $(echo "$TIME_RATIO > 2" | bc -l) )); then
-    [[ "$RESULT" == "PASS" ]] && RESULT="WARN"
-    ISSUES+=("response time 2x+ slower: ${BASELINE_TIME}s -> ${ACTUAL_TIME}s")
-    WARNINGS=$((WARNINGS + 1))
-  fi
-
-  case "$RESULT" in
-    PASS) PASS=$((PASS + 1)); echo "PASS: $METHOD $PATH_URL" ;;
-    WARN) echo "WARN: $METHOD $PATH_URL — ${ISSUES[*]}" ;;
-    FAIL) FAIL=$((FAIL + 1)); echo "FAIL: $METHOD $PATH_URL — ${ISSUES[*]}" ;;
-  esac
-
-  RESULTS+=("$(jq -n \
-    --arg method "$METHOD" \
-    --arg path "$PATH_URL" \
-    --arg result "$RESULT" \
-    --argjson issues "$(printf '%s\n' "${ISSUES[@]}" | jq -R . | jq -s .)" \
-    '{method: $method, path: $path, result: $result, issues: $issues}'
-  )")
-done
-
-echo ""
-echo "=== Baseline Regression Report ==="
-echo "Pass: $PASS | Fail: $FAIL | Warnings: $WARNINGS"
-```
+Timing is a separate measurement: use repeated samples and the project's latency budget under controlled load. A single baseline timing ratio is not proof of a functional regression.
 
 ## Structured Test Report Format
 
@@ -448,51 +230,15 @@ echo "Pass: $PASS | Fail: $FAIL | Warnings: $WARNINGS"
 }
 ```
 
-### Report Generation Script
-```bash
-#!/bin/bash
-# api-test-report.sh — Generate structured JSON report from test results
+### Report evidence
 
-generate_report() {
-  local smoke_results="$1"
-  local contract_results="$2"
-  local security_results="$3"
-  local baseline_results="$4"
-
-  jq -n \
-    --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg env "${ENVIRONMENT:-local}" \
-    --arg base_url "$BASE_URL" \
-    --argjson smoke "$(cat "$smoke_results" 2>/dev/null || echo '{"passed":0,"failed":0}')" \
-    --argjson contract "$(cat "$contract_results" 2>/dev/null || echo '{"passed":0,"failed":0}')" \
-    --argjson security "$(cat "$security_results" 2>/dev/null || echo '{"passed":0,"failed":0}')" \
-    --argjson baseline "$(cat "$baseline_results" 2>/dev/null || echo '{"passed":0,"failed":0}')" \
-    '{
-      report: {
-        timestamp: $timestamp,
-        environment: $env,
-        base_url: $base_url,
-        summary: {
-          total_tests: ([$smoke, $contract, $security, $baseline] | map(.passed + .failed) | add),
-          passed: ([$smoke, $contract, $security, $baseline] | map(.passed) | add),
-          failed: ([$smoke, $contract, $security, $baseline] | map(.failed) | add)
-        },
-        by_category: {
-          smoke: $smoke,
-          contract: $contract,
-          security: $security,
-          regression: $baseline
-        }
-      }
-    }'
-}
-```
+Prefer the installed runner's JUnit/JSON output and exit status. Do not synthesize empty successful categories when an input report is absent. Mark each category `executed`, `failed`, `skipped`, `unsupported` or `static-only`; include tool/version, spec hash, scenario selectors, target and actual test counts. Keep the illustrative JSON above as a report shape, not generated evidence. Missing results or zero executed contract scenarios cannot pass a required gate.
 
 ## Common Mistakes to Avoid
 
 1. **Testing exact values instead of structure** — contracts should validate shape (field exists, type correct), not exact values (which change per environment).
 2. **Missing state handlers** — Pact provider tests fail without proper state setup. Every `given()` needs a `@State` handler.
 3. **Not versioning contracts** — always publish with consumer version. Use `can-i-deploy` before releasing.
-4. **Ignoring response time regression** — a 5x slowdown is a functional regression in fintech (payment timeouts).
+4. **Conflating timing with schema compliance** — test latency against the project budget separately; one timing sample cannot certify either.
 5. **Contract tests replacing integration tests** — contracts verify the interface, not the business logic. Both are needed.
 6. **Hardcoded auth tokens in scripts** — use environment variables or token refresh scripts.

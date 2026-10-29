@@ -16,19 +16,19 @@ Claiming work is complete without verification is dishonesty, not efficiency.
 ## The Iron Law
 
 ```
-NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE
+NO COMPLETION CLAIMS WITHOUT APPLICABLE VERIFICATION EVIDENCE
 ```
 
-If you haven't run the verification command in this message, you cannot claim it passes.
+Tie evidence to the exact checked state and scope: commit/base or pending-file manifest, command, result and relevant environment/tool version. Reuse earlier inspected results when that state/scope is unchanged and no failure or uncertainty invalidates them, per `~/.claude/rules/reduce-hallucinations.md`. Rerun after relevant edits, dependency/config changes or new failures, or when the user explicitly asks for a fresh challenge such as `/prove-it`.
 
 ## The Gate Function
 
 ```
 BEFORE claiming any status or expressing satisfaction:
 
-1. IDENTIFY: What command proves this claim?
-2. RUN: Execute the FULL command (fresh, complete)
-3. READ: Full output, check exit code, count failures
+1. IDENTIFY: What applicable check proves this claim, for which target/scope?
+2. CHECK STATE: Reuse valid inspected evidence or run the required command if absent/invalidated
+3. READ: Inspect decisive output, check exit code, count failures; redact sensitive values
 4. VERIFY: Does output confirm the claim?
    - If NO: State actual status with evidence
    - If YES: State claim WITH evidence
@@ -41,12 +41,12 @@ Skip any step = lying, not verifying
 
 | Claim | Requires | Not Sufficient |
 |-------|----------|----------------|
-| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
+| Tests pass | Applicable test output: 0 failures for the checked state/scope | Invalidated run, "should pass" |
 | Linter clean | Linter output: 0 errors | Partial check, extrapolation |
 | Build succeeds | Build command: exit 0 | Linter passing, logs look good |
 | Bug fixed | Test original symptom: passes | Code changed, assumed fixed |
 | Regression test works | Red-green cycle verified | Test passes once |
-| Agent completed | VCS diff shows changes | Agent reports "success" |
+| Agent completed | Read changed files/diff, cited evidence and exit-criteria results | Agent reports "success" |
 | Requirements met | Line-by-line checklist | Tests passing |
 
 ## Red Flags - STOP
@@ -58,7 +58,7 @@ Skip any step = lying, not verifying
 - Relying on partial verification
 - Thinking "just this once"
 - Tired and wanting work over
-- **ANY wording implying success without having run verification**
+- **ANY wording implying success without applicable evidence for the actual reviewed state/scope**
 
 ## Rationalization Prevention
 
@@ -70,7 +70,7 @@ Skip any step = lying, not verifying
 | "Linter passed" | Linter ≠ compiler |
 | "Agent said success" | Verify independently |
 | "I'm tired" | Exhaustion ≠ excuse |
-| "Partial check is enough" | Partial proves nothing |
+| "Partial check is enough" | Scope the claim to what ran; partial checks do not establish full validation |
 | "Different words so rule doesn't apply" | Spirit over letter |
 
 ## Key Patterns
@@ -83,9 +83,11 @@ Skip any step = lying, not verifying
 
 **Regression tests (TDD Red-Green):**
 ```
-✅ Write → Run (pass) → Revert fix → Run (MUST FAIL) → Restore → Run (pass)
+✅ Write requirement-based test → Safely isolate pre-change behavior → Run (expected failure) → Apply owned fix → Run (pass)
 ❌ "I've written a regression test" (without red-green verification)
 ```
+
+Only reverse a known owned patch in isolation; preserve a recoverable copy and never reset/delete user or other-agent work. See `test-driven-development` for safe recovery.
 
 **Build:**
 ```
@@ -101,7 +103,7 @@ Skip any step = lying, not verifying
 
 **Agent delegation:**
 ```
-✅ Agent reports success → Check VCS diff → Verify changes → Report actual state
+✅ Agent reports success → Read actual changes and cited evidence → Confirm scope/state → Report actual state
 ❌ Trust agent report
 ```
 
@@ -118,11 +120,8 @@ From 24 failure memories:
 
 **ALWAYS before:**
 - ANY variation of success/completion claims
-- ANY expression of satisfaction
-- ANY positive statement about work state
-- Committing, PR creation, task completion
-- Moving to next task
-- Delegating to agents
+- Committing, PR creation and task completion where a claim depends on checks
+- Moving to a dependent task or reporting a delegated task complete
 
 **Rule applies to:**
 - Exact phrases
@@ -138,6 +137,6 @@ From 24 failure memories:
 
 **No shortcuts for verification.**
 
-Run the command. Read the output. THEN claim the result.
+Read applicable evidence for the checked state and scope, rerun when invalidated, then claim only what it proves. Distinguish PASS, FAIL, SKIPPED, UNSUPPORTED and static-only checks. A parser does not prove runtime behavior, and a missing service check cannot be reported as passing.
 
 This is non-negotiable.

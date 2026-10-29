@@ -40,11 +40,13 @@ WHEN receiving code review feedback:
 ## Handling Unclear Feedback
 
 ```
-IF any item is unclear:
-  STOP - do not implement anything yet
-  ASK for clarification on unclear items
+IF an item is unclear:
+  Identify which changes depend on resolving it
+  Pause those dependent changes and ask a focused clarification
+  Continue understood, authorized fixes that are demonstrably independent
 
-WHY: Items may be related. Partial understanding = wrong implementation.
+WHY: Dependencies determine what must wait; one unclear item does not block unrelated work.
+Reuse existing authorization per rules/session-scope.md and rules/workflow-routing.md.
 ```
 
 **Example:**
@@ -52,8 +54,8 @@ WHY: Items may be related. Partial understanding = wrong implementation.
 your human partner: "Fix 1-6"
 You understand 1,2,3,6. Unclear on 4,5.
 
-❌ WRONG: Implement 1,2,3,6 now, ask about 4,5 later
-✅ RIGHT: "I understand items 1,2,3,6. Need clarification on 4 and 5 before proceeding."
+❌ WRONG: Assume the meaning of 4,5, or block unrelated fixes without checking dependencies
+✅ RIGHT: "I will fix independent items 1,2,3,6. Items 4 and 5 need clarification; dependent changes will wait."
 ```
 
 ## Source-Specific Handling
@@ -77,7 +79,7 @@ IF suggestion seems wrong:
   Push back with technical reasoning
 
 IF can't easily verify:
-  Say so: "I can't verify this without [X]. Should I [investigate/ask/proceed]?"
+  State the missing evidence, investigate within the authorized scope, and clarify only the dependent decision if needed
 
 IF conflicts with your human partner's prior decisions:
   Stop and discuss with your human partner first
@@ -101,8 +103,8 @@ IF reviewer suggests "implementing properly":
 
 ```
 FOR multi-item feedback:
-  1. Clarify anything unclear FIRST
-  2. Then implement in this order:
+  1. Identify dependencies and clarify unclear items; pause only dependent work
+  2. Implement understood, authorized items in this order:
      - Blocking issues (breaks, security)
      - Simple fixes (typos, imports)
      - Complex fixes (refactoring, logic)
@@ -170,8 +172,8 @@ State the correction factually and move on.
 | Batch without testing | One at a time, test each |
 | Assuming reviewer is right | Check if breaks things |
 | Avoiding pushback | Technical correctness > comfort |
-| Partial implementation | Clarify all items first |
-| Can't verify, proceed anyway | State limitation, ask for direction |
+| Guessing through ambiguity | Clarify dependent items while continuing independent authorized fixes |
+| Can't verify a dependent change | State the gap, investigate within scope, and clarify before that change |
 
 ## Real Examples
 
@@ -197,7 +199,7 @@ Reviewer: "Implement proper metrics tracking with database, date filters, CSV ex
 ```
 your human partner: "Fix items 1-6"
 You understand 1,2,3,6. Unclear on 4,5.
-✅ "Understand 1,2,3,6. Need clarification on 4 and 5 before implementing."
+✅ "I will fix independent items 1,2,3,6. Clarification is needed for 4,5 before their dependent changes."
 ```
 
 ## GitHub Thread Replies
